@@ -43,3 +43,46 @@ is stored in an object, and a link to the root of the backup tree. These are
 stored in a separate directory in the object store, and aren't content 
 addressable. 
 
+### Objects
+
+There are three types of objects in the object store:
+* Tree, corresponding to a directory entry. It links to other trees and inodes
+* inode, corresponding to a file. Holds all the metadata of a file, and a links
+  to a list of blob objects
+* blob holds actual file data. Blobs are typically not complete files, but some
+  large chunk of a file.
+  
+The object format is an optionally encrypted and compressed stream of msgpack
+objects. The first object is a single byte 't', 'i', or 'b' describing the type
+of object.
+Each subsequent msgpack object is a tuple where the first item is a byte string
+describing the property, and subsequent items in the tuple are data.
+
+For example, a tree object looks like this (one line per msgpack object)
+```
+'t'
+('e', 'file1', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+('e', 'file2', 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb')
+```
+where the 'e' property corresponds to a directory entry. This leaves the format
+extensible for more metadata properties in the future.
+
+Tree properties:
+* 'e' a filesystem entry. Consists of a name and a hash to an inode or tree object.
+
+Inode properties:
+* 's' total file size in bytes
+* 'i' inode number on the source filesystem. This may be useful for reconstructing
+  hard links when restoring files.
+* 'u' user id
+* 'g' group id
+* 'm' file mode
+* 'ct' ctime
+* 'mt' mtime
+* 'at' atime
+* 'd' data chunks. Attributes are: offset, object hash to a blob. May contain many
+  data chunks to reconstruct the file.
+
+Blob properties:
+* 's' size of payload.
+* 'p' payload of data.
