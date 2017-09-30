@@ -10,7 +10,7 @@ Gbackup is a personal backup solution that has the following goals:
 backup set)
 
 No other backup programs quite met these criteria. Gbackup takes ideas from 
-Borg, Duplicati, and others, with a backing storage format inspired by Git 
+Borg, Duplicati, Bup, and others, with a backing storage format inspired by Git 
 (hence the G in Gbackup)
 
 ## Architecture
@@ -68,6 +68,9 @@ where the 'e' property corresponds to a directory entry. This leaves the format
 extensible for more metadata properties in the future.
 
 Tree properties:
+* 'u' user id
+* 'g' group id
+* 'm' directory mode
 * 'e' a filesystem entry. Consists of a name and a hash to an inode or tree object.
 
 Inode properties:
@@ -79,10 +82,8 @@ Inode properties:
 * 'm' file mode
 * 'ct' ctime
 * 'mt' mtime
-* 'at' atime
 * 'd' data chunks. Attributes are: offset, object hash to a blob. May contain many
   data chunks to reconstruct the file.
 
 Blob properties:
-* 's' size of payload.
-* 'p' payload of data.
+* 'd' the blob of data.

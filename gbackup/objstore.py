@@ -2,6 +2,9 @@
 The object store abstraction sits on top of the storage layer and handles
 encryption, compression, and hashing of objects in the object store.
 """
+import os.path
+
+from .objcache import ObjCache
 
 class ObjStore:
     """The object store is an interface to read and write objects in the
@@ -11,17 +14,21 @@ class ObjStore:
     backend's root.
 
     """
-    def __init__(self, storage, encryption, compression):
-        self._storage = storage
-        self._encryption = encryption
-        self._compression = compression
+    def __init__(self, metadatadir):
+        self.metadatadir = metadatadir
 
-    def get_object(self, objname, f):
-        """Gets an object. Streams the object contents into the file-like
-        object `f`
+        self._storage = ...
+        self._encryption = ...
+        self._compression = ...
 
-        :param f: A file-like object open for writing
-        :type f: io.IOBase
+        self.cache = ObjCache(
+            os.path.join(self.metadatadir, "cache.sqlite3")
+        )
+
+    def get_object(self, objname):
+        """Gets an object.
+
+        :rtype: gbackup.objects.Object
         """
         raise NotImplementedError()
 
