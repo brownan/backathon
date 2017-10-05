@@ -10,10 +10,9 @@ There are different types of objects. Some terminology
   same as the contents. The payload is what's uploaded to the remote object
   store.
 
-* An object ID is a hash or HMAC digest of the contents, and becomes the name
-  of the object in the object store
+* An object ID is a hash or HMAC digest of the contents, and becomes the key
+  for the object in the object store
 
-Note that each object has a similar interface but they are not compatible.
 """
 
 import io
@@ -30,17 +29,20 @@ class Tree:
     def __init__(self, directory):
         self.directory = directory
 
+    def update(self):
+        pass # TODO
+
     def scan(self):
-        pass
+        pass # TODO
 
     def backup(self):
-        pass
+        pass # TODO
 
     def restore(self):
-        pass
+        pass # TODO
 
     def verify(self):
-        pass
+        pass # TODO
 
 
 class Inode:
@@ -49,42 +51,84 @@ class Inode:
     It holds metadata about the file, and links to one or more blobs
     containing the contents for the file.
     """
-    def __init__(self, path=None, objid=None):
+    def __init__(self, path):
         """
 
-        :param path: is the absolute path to the file on the local filesystem
+        :param path: is the absolute path to the file on the local
+        filesystem.
         """
         self._path = path
-        self._objid = objid
 
-        self._stat = None
+        # This object's objid. It is cached in this instance variable so that
+        # subsequent backups are quick if nothing has changed. If we are
+        # updated, this is invalidated.
+        self._objid = None
 
-    def scan(self):
-        stat = self._stat = os.stat(self._path)
-        return 1, stat.st_size
+    def update(self):
+        """Called when an external event modifies this file.
 
-    def backup(self, cache):
+        This is used as a callback to let this object know the file has been
+        modified, and next backup it should be checked for changes.
+
+        """
+        self._objid = None
+
+    def scan(self, update=False):
+        """Return the size of this file.
+
+        Used to gather information on the size of a backup set, for progress
+        reporting.
+
+        If this file does not need updating, returns None.
+
+        :param update: if true, assumes this file needs updating. Otherwise,
+            only return the file size if this is the first call or if update()
+            was called since the last backup.
+        """
+        if update or self._objid is None:
+            stat = os.stat(self._path)
+            return stat.st_size
+        return None
+
+    def backup(self, cache, update=False):
         """Backs up the given file
 
-        This is a generator function. Yields object contents that need to be
-        hashed, and then if they don't exist in the remote object store,
-        they also need to be compressed, encrypted, and uploaded.
+        This is a generator function.
 
-        Expects the object id to be sent back to the iterator.
+        Yields binary strings that represent objects that need to be
+        saved to the data store. Expects the resulting object ID to be sent
+        back into the iterator.
 
         Returns the object ID of this object.
+
+        If update is True, does an os.stat() on the file and compares it
+        against the local file cache to determine whether the file needs
+        backing up.
+
+        If update is False, assumes the file hasn't changed unless this is
+        the first call or if update() has been called since the last backup.
+
+        If this object determines a backup is not necessary, it returns the
+        cached object id that was determined from the first backup.
 
         :param cache: The ObjCache used to determine if a file on the local
             filesystem has changed.
         :type cache: gbackup.objcache.ObjCache
-        """
-        assert self._path is not None, "backup called, but was not " \
-                                       "initialized with a path"
+        :param update: Check whether the file has changed
+        :type update: bool
 
-        if self._stat is not None:
-            stat = self._stat
-        else:
-            stat = self._stat = os.stat(self._path)
+        :returns: the object id for this inode object
+        """
+        if update:
+            self._objid = None
+
+        # Short circuit the entire method for quick incremental backups. If
+        # objid is already set, then we've already been backed up once.
+        # Assume the file hasn't changed.
+        if self._objid:
+            return self._objid
+
+        stat = os.stat(self._path)
 
         objid = cache.get_file_cache(
             self._path,
@@ -115,8 +159,8 @@ class Inode:
         msgpack.pack((b'd', chunks), buf)
 
         buf.seek(0)
-        myid = yield buf
-        return myid
+        self._objid = yield buf
+        return self._objid
 
     def restore(self):
         pass
@@ -136,6 +180,10 @@ class Blob:
         self.data = data
 
     def backup(self):
+        """Returns the msgpacked representation of this blob, as an in-memory
+        bytes buffer
+
+        """
         buf = io.BytesIO()
         msgpack.pack(b'b', buf)
         msgpack.pack((b'd', self.data), buf)
