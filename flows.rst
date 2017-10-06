@@ -10,6 +10,9 @@ Caches
   - Maps (sha1(path), inode, mtime, size) to obj id
   - if an entry exists, it is assumed not to have changed on the filesystem
   - Keeps most recent version of seen files in this cache
+  - a TTL keeps files that haven't been seen for a while. (would it be better
+   to just delete cache entries if a file isn't seen? maybe unless the file
+   cache is shared among multiple backup sets)
 
 * Object Relations
   - Many-to-many relation of objects
@@ -19,12 +22,28 @@ Caches
 
 Flow Summary
 ------------
+The flows are high level operations that can be activated on the graph of
+objects. The flows have different meanings for each object, but their high
+level concepts are described here.
+
+* Update - Used to re-scan the local filesystem for changes and incorporate
+  them into the in-memory object.
+
+  Goals:
+  - This operation makes explicit the action of re-reading the filesystem.
+  - Normal backup operations shouldn't touch the filesystem unless they have
+    a reason to believe they need to.
+  - Calling update() checks the filesystem (with a stat or listdir operation)
+    to see if re-reading and hashing data is necessary.
+
 * Backup - reads from local filesystem, creates objects, and pushes objects to
   remote object store.
 
   Goals:
   - Local data that has not changed should not be re-read from local storage
   - Local data that already exists in remote store should not transferred
+  - Local data is assumed not to have changed unless a call to update() was
+    made
 
 * Restore - Reads data from remote object store and writes to local files
 
@@ -89,17 +108,23 @@ Flows for tree objects
 Flows for Inode objects
 -----------------------
 
-* Backup (initialized with a file path)
+* Update (initialized with a file path)
   - perform stat on file and determine if we have a file cache entry for the
-    (path,inode,mtime,size) tuple
+    (path,inode,mtime,size) tuple.
+  - If so, caches the resulting object ID as an instance variable
 
-  - Inode obj IS in file cache
-    - implies all child object are uploaded, since they have been hashed and this object exists
+* Backup (initialized with a file path and optionally an object ID)
+  - This is a generator function. Yields object contents to upload. Returns
+    own object ID
+
+  - Local object ID is set: assume no changes
+    - implies all child object are uploaded, since they have been hashed and
+      this object exists
     - nothing to do
     - return obj key for this inode object
 
-  - Inode obj Not in file cache
-    - one or more file chunks need uploading
+  - Local object ID is NOT set
+    - The file may or may not need uploading, but it must be scanned and hashed
     - Need to chunk the file, and then run BACKUP on each blob object
     - Build inode object payload
     - hash inode payload to get obj key

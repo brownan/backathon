@@ -4,7 +4,7 @@ encryption, compression, and hashing of objects in the object store.
 """
 import os.path
 
-from .objcache import ObjCache
+from .cache import ObjCache
 
 class ObjStore:
     """The object store is an interface to read and write objects in the

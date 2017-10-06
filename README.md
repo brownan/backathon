@@ -9,39 +9,42 @@ Gbackup is a personal backup solution that has the following goals:
 * Continuous file monitoring with inotify (no expensive scanning of the entire 
 backup set)
 
-No other backup programs quite met these criteria. Gbackup takes ideas from 
-Borg, Duplicati, Bup, and others, with a backing storage format inspired by Git 
-(hence the G in Gbackup)
+No other backup programs I've found quite met these criteria. Gbackup takes 
+ideas from Borg, Duplicati, Bup, and others, with a backing storage format 
+inspired by Git (hence the G in Gbackup)
 
 ## Architecture
 
 These components make up Gbackup
 
 ### Object Store
-An abstraction on top of a content-addressable block store. It provides 
-encyption and compression, as well as several storage backends.
+A key-value store in which objects are keyed by a hash of their contents. All
+backup data is stored in the object store. Different types of objects provide
+file blob data, metadata, and directory information,
+
+The object store is built on top of a storage backend abstraction, which 
+allows saving to different storage services.
 
 ### Chunker
 Takes a file on the filesystem and breaks it into chunks suitable for 
 uploading to the object store.
 
-### Filesystem
+### Objects
 
-A set of filesystem objects represent objects on the filesystem and can 
-convert into objects for storing in the object store. Filesystem objects may 
-be cached on the local filesystem, and are backed by one or more objects in the 
-object store.
+The various object types represent aspects of the filesystem and handle 
+converting into objects for storing in the object store. Filesystem objects 
+representing metadata are cached in a local database.
 
-* tree - a directory of files
-* file - metadata about the file, and a list of blobs
+The object types are:
+* tree - a directory of files or other trees
+* file/inode - contains metadata about a file, and a list of blobs
 * blob - file contents
 
 ### Revision
 
 A revision is a single snapshot of a backup set. Metadata about the revision 
 is stored in an object, and a link to the root of the backup tree. These are 
-stored in a separate directory in the object store, and aren't content 
-addressable. 
+stored in a separate directory in the object store. 
 
 ### Objects
 

@@ -51,47 +51,57 @@ class Inode:
     It holds metadata about the file, and links to one or more blobs
     containing the contents for the file.
     """
-    def __init__(self, path):
+    def __init__(self, path, filecache, objid=None):
         """
 
         :param path: is the absolute path to the file on the local
         filesystem.
+        :type filecache: gbackup.cache.FileCache
+        :param objid: If given, this object is initialized with an object id.
         """
         self._path = path
+        self._cache = filecache
 
-        # This object's objid. It is cached in this instance variable so that
-        # subsequent backups are quick if nothing has changed. If we are
+        # This object's identifier. It is cached in this instance variable so
+        # that subsequent backups are quick if nothing has changed. If we are
         # updated, this is invalidated.
-        self._objid = None
+        self._objid = objid
 
     def update(self):
-        """Called when an external event modifies this file.
+        """Scans the local filesystem to see if the file has changed. If so,
+        this file will be backed up on the next call to backup().
 
-        This is used as a callback to let this object know the file has been
-        modified, and next backup it should be checked for changes.
+        This method always performs exactly one os.stat() call.
+
+        This method is designed to be called from some asynchronous
+        notification service such as Linux's inotify subsystem to inform this
+        object that it needs updating. If this strategy is taken, this method
+        should still be recursively called on every object once in a while in
+        case some changes were missed. In particular, it should be called on
+        every object when first instantiated.
+
+        :returns: Returns the size that needs to be updated (or at least
+            scanned for updates), else returns None. This lets callers
+            recursively get a feel for the size of the dataset.
 
         """
-        self._objid = None
+        # This turns out to be pretty simple. If the file's current stats
+        # match an entry in the file cache, then we assume the object
+        # representing that file is still fully uploaded
+        stat = os.stat(self._path)
+        objid = self._cache.get_file_cache(
+            self._path,
+            stat.st_ino,
+            stat.st_mtime_ns,
+            stat.st_size,
+        )
+        self._objid = objid
 
-    def scan(self, update=False):
-        """Return the size of this file.
-
-        Used to gather information on the size of a backup set, for progress
-        reporting.
-
-        If this file does not need updating, returns None.
-
-        :param update: if true, assumes this file needs updating. Otherwise,
-            only return the file size if this is the first call or if update()
-            was called since the last backup.
-        """
-        if update or self._objid is None:
-            stat = os.stat(self._path)
+        if objid is None:
             return stat.st_size
-        return None
 
-    def backup(self, cache, update=False):
-        """Backs up the given file
+    def backup(self):
+        """Backs up the given file, if it's been updated since the last backup
 
         This is a generator function.
 
@@ -101,43 +111,25 @@ class Inode:
 
         Returns the object ID of this object.
 
-        If update is True, does an os.stat() on the file and compares it
-        against the local file cache to determine whether the file needs
-        backing up.
-
-        If update is False, assumes the file hasn't changed unless this is
-        the first call or if update() has been called since the last backup.
-
-        If this object determines a backup is not necessary, it returns the
-        cached object id that was determined from the first backup.
-
-        :param cache: The ObjCache used to determine if a file on the local
-            filesystem has changed.
-        :type cache: gbackup.objcache.ObjCache
-        :param update: Check whether the file has changed
-        :type update: bool
+        This method does not scan the local filesystem for changes. Once the
+        file has been backed up once, calling this function again becomes
+        very cheap, as it just returns the cached object identifier. Call
+        update() to scan the local filesystem for changes.
 
         :returns: the object id for this inode object
         """
-        if update:
-            self._objid = None
 
         # Short circuit the entire method for quick incremental backups. If
         # objid is already set, then we've already been backed up once.
-        # Assume the file hasn't changed.
-        if self._objid:
+        # Assume the file hasn't changed. (Call update() to scan the local
+        # filesystem for changes to this file)
+        if self._objid is not None:
             return self._objid
 
-        stat = os.stat(self._path)
+        # Don't have an object ID cached? We need to compute this file's
+        # object ID by reading in the contents.
 
-        objid = cache.get_file_cache(
-            self._path,
-            stat.st_ino,
-            stat.st_mtime_ns,
-            stat.st_size,
-        )
-        if objid is not None:
-            return objid
+        stat = os.stat(self._path)
 
         buf = io.BytesIO()
         msgpack.pack(b'i', buf)
@@ -160,6 +152,17 @@ class Inode:
 
         buf.seek(0)
         self._objid = yield buf
+
+        # This object has been committed to the data store. Now add it to the
+        # file cache
+        self._cache.set_file_cache(
+            self._path,
+            stat.st_ino,
+            stat.st_mtime_ns,
+            stat.st_size,
+            self._objid,
+        )
+
         return self._objid
 
     def restore(self):

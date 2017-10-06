@@ -3,7 +3,7 @@ from unittest import TestCase
 from contextlib import ExitStack
 import tempfile
 
-from gbackup import objects, objcache
+from gbackup import objects, cache
 
 import msgpack
 
@@ -24,7 +24,7 @@ class TestInode(TestCase):
         self.tmpfile.write(b"This is a test")
         self.tmpfile.seek(0)
 
-        self.cache = objcache.ObjCache(":memory:")
+        self.cache = cache.ObjCache(":memory:")
 
     def tearDown(self):
         self.stack.close()
