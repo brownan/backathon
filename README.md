@@ -8,6 +8,8 @@ Gbackup is a personal backup solution that has the following goals:
 * Built in backup scheduler (no more cron)
 * Continuous file monitoring with inotify (no expensive scanning of the entire 
 backup set)
+* Backup and prune operations do not require the secret encryption key
+* Verify and restore operations require the encryption secret key
 
 No other backup programs I've found quite met these criteria. Gbackup takes 
 ideas from Borg, Duplicati, Bup, and others, with a backing storage format 
