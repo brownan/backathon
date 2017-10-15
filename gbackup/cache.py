@@ -8,6 +8,8 @@ def get_db_conn(cachefile):
 CREATE TABLE IF NOT EXISTS config (key UNIQUE ON CONFLICT REPLACE, value);
 """)
 
+    return conn
+
 class ObjectCache:
     CURRENT_SCHEMA_VERSION = 1
 
@@ -53,7 +55,7 @@ class FileCache:
     def __init__(self, conn):
         self.conn = conn
         version = conn.execute("""
-        SELECT value FROM conf WHERE key='filecachever';
+        SELECT value FROM config WHERE key='filecachever';
         """).fetchone()
         if version is None or version[0] != self.CURRENT_SCHEMA_VERSION:
             conn.execute("INSERT INTO config VALUES ('filecachever', ?)",

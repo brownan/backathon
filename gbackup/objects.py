@@ -77,7 +77,7 @@ class Tree:
         except FileNotFoundError:
             self._objid = None
             return None
-        if not S_ISDIR(stat):
+        if not S_ISDIR(stat.st_mode):
             self._objid = None
             return None
 
@@ -96,11 +96,11 @@ class Tree:
             assert entry not in self._children
             newpath = os.path.join(self._path, entry)
             stat = os.stat(newpath)
-            if S_ISDIR(stat):
+            if S_ISDIR(stat.st_mode):
                 newobj = Tree(newpath, self._cache, None)
                 newobj.update()
                 self._children[entry] = (None, newobj)
-            elif S_ISREG(stat):
+            elif S_ISREG(stat.st_mode):
                 newobj = Inode(newpath, self._cache, None)
                 newobj.update()
                 self._children[entry] = (None, newobj)
@@ -161,7 +161,7 @@ class Tree:
         except FileNotFoundError:
             # This directory was deleted
             return None
-        if not S_ISDIR(stat):
+        if not S_ISDIR(stat.st_mode):
             # This path is not a directory. It must have been replaced with a
             # file by the same name. Assume the directory was deleted. The
             # parent Tree object should fix this on its next update()
@@ -243,7 +243,7 @@ class Inode:
             #  entry in the Tree object.
             self._objid = None
             return None
-        if not S_ISREG(stat):
+        if not S_ISREG(stat.st_mode):
             # File is no longer a file. Consider it deleted.
             self._objid = None
             return None
@@ -292,7 +292,7 @@ class Inode:
             stat = os.stat(self._path)
         except FileNotFoundError:
             return None
-        if not S_ISREG(stat):
+        if not S_ISREG(stat.st_mode):
             # This path exists but isn't a file. The file may have been
             # replaced since the last backup with some non-file. The parent
             # Tree object should fix this on its next update()
@@ -309,9 +309,7 @@ class Inode:
         msgpack.pack((b'mt', stat.st_mtime_ns), buf)
         # Note that the file name or path is not part of this metadata. This
         # metadata mirrors the filesystem inode, and the name of the file are
-        # part of the directory listing, not part of the inode itself. This
-        # means that two hard links to the same file will share the same
-        # Inode object.
+        # part of the directory listing, not part of the inode itself.
 
         chunks = []
         with open(self._path, "rb") as f:

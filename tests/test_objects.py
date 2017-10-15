@@ -24,15 +24,16 @@ class TestInode(TestCase):
         self.tmpfile.write(b"This is a test")
         self.tmpfile.seek(0)
 
-        self.cache = cache.ObjCache(":memory:")
+        conn = cache.get_db_conn(":memory:")
+        self.cache = cache.FileCache(conn)
 
     def tearDown(self):
         self.stack.close()
 
     def test_backup(self):
-        inode = objects.Inode(path=self.tmpfile.name)
+        inode = objects.Inode(self.tmpfile.name, self.cache)
 
-        backup = inode.backup(self.cache)
+        backup = inode.backup()
 
         # First chunk should be a blob with the file contents
         chunk1 = next(backup)
@@ -47,7 +48,6 @@ class TestInode(TestCase):
         data = list(msgpack.Unpacker(chunk2, use_list=False))
         self.assertEqual(data[0], b'i')
         data = {k: v for k, v in data[1:]}
-        self.assertEqual(data[b'p'], os.fsencode(self.tmpfile.name))
         self.assertEqual(data[b's'], 14)
         self.assertEqual(len(data[b'd']), 1) # one chunk
         self.assertTupleEqual(
