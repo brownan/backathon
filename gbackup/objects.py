@@ -18,10 +18,13 @@ There are different types of objects. Some terminology
 import io
 import os
 from stat import S_ISDIR, S_ISREG
+import logging
 
 import msgpack
 
 from .chunker import FixedChunker
+
+logger = logging.getLogger("gbackup.objects")
 
 class Tree:
     """A tree object represents a directory and its entries
@@ -60,6 +63,39 @@ class Tree:
 
     def __repr__(self):
         return "<Tree {!r}>".format(self._path)
+
+    def update_all(self, update_status=None):
+        """Recursively scan the entire filesystem tree starting at this point
+
+        Calls update() on this object, and calls update_all() on all child Tree
+        objects and update() on all other child objects.
+
+        :param update_status: If given, this is a callable that will be called
+            each iteration with the current (numfiles, size) as parameters,
+            for the purposes of status updates.
+
+        :returns: the number of files, and the total size of the backup set
+        :rtype: tuple[int, int]
+        """
+        numfiles = 0
+        size = 0
+        for hash, child in self._children.values():
+            if isinstance(child, Tree):
+                res = child.update_all(update_status=update_status)
+                numfiles += res[0]
+                size += res[1]
+            elif isinstance(child, Inode):
+                res = child.update()
+                if res is not None:
+                    numfiles += 1
+                    size += res
+            else:
+                raise NotImplementedError(str(type(child)))
+
+        self.update()
+        if update_status is not None:
+            update_status(numfiles, size)
+        return numfiles, size
 
     def update(self):
         """Scan this directory tree for changes.

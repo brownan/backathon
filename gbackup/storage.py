@@ -37,13 +37,19 @@ class FileSystemStorage(Storage):
         return os.path.join(self.basedir, name)
 
     def put(self, name, buf):
+        """
+
+        :param name: The path to the object to store
+        :param buf: A bytes-like object
+        :return:
+        """
         path = self._getpath(name)
         os.makedirs(
             os.path.basename(path),
             exist_ok=True,
         )
         with open(path, 'wb') as dstfile:
-            shutil.copyfileobj(buf, dstfile)
+            dstfile.write(buf)
 
     def get(self, name, buf):
         with open(self._getpath(name), "rb") as srcfile:
