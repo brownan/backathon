@@ -58,6 +58,9 @@ class Tree:
         # TODO: initialize the files and children if objid was given
         if objid: raise NotImplementedError()
 
+    def __repr__(self):
+        return "<Tree {!r}>".format(self._path)
+
     def update(self):
         """Scan this directory tree for changes.
 
@@ -83,7 +86,12 @@ class Tree:
 
         # Has the directory changed?
         old_entries = set(self._children)
-        current_entries = set(os.listdir(self._path))
+        try:
+            current_entries = set(os.listdir(self._path))
+        except IOError:
+            # Race condition: dir was deleted after the stat
+            self._objid = None
+            return None
 
         # Deleted entries
         for entry in old_entries - current_entries:
@@ -95,7 +103,11 @@ class Tree:
             self._objid = None
             assert entry not in self._children
             newpath = os.path.join(self._path, entry)
-            stat = os.stat(newpath)
+            try:
+                stat = os.stat(newpath)
+            except IOError:
+                # Race condition, item was deleted after doing the listdir
+                continue
             if S_ISDIR(stat.st_mode):
                 newobj = Tree(newpath, self._cache, None)
                 newobj.update()
@@ -212,6 +224,9 @@ class Inode:
         # updated, this is invalidated.
         self._objid = objid
 
+    def __repr__(self):
+        return "<Inode {!r}>".format(self._path)
+
     def update(self):
         """Scans the local filesystem to see if the file has changed. If so,
         this file will be backed up on the next call to backup().
@@ -311,13 +326,11 @@ class Inode:
         # metadata mirrors the filesystem inode, and the name of the file are
         # part of the directory listing, not part of the inode itself.
 
-        chunks = []
         with open(self._path, "rb") as f:
             for offset, chunk in FixedChunker(f):
                 blob = Blob(chunk)
                 blobid = yield blob.backup()
-                chunks.append((offset, blobid))
-        msgpack.pack((b'd', chunks), buf)
+                msgpack.pack((b'd', offset, blobid), buf)
 
         buf.seek(0)
         self._objid = yield buf
