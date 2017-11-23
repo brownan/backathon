@@ -17,6 +17,7 @@ There are different types of objects. Some terminology
 
 import io
 import os
+from collections import OrderedDict
 from stat import S_ISDIR, S_ISREG
 import logging
 
@@ -56,7 +57,7 @@ class Tree:
         # This is a mapping of filename to (hash, object) where object is
         # either another Tree object or an Inode object. Hash may be None in
         # this tuple if the value is not yet known.
-        self._children = {}
+        self._children = OrderedDict()
 
         # TODO: initialize the files and children if objid was given
         if objid: raise NotImplementedError()
@@ -77,11 +78,21 @@ class Tree:
         :returns: the number of files, and the total size of the backup set
         :rtype: tuple[int, int]
         """
-        numfiles = 0
+        # Start the numfiles at 1 for this directory
+        numfiles = 1
         size = 0
+
+        # Update this directory's child list and create any new child objects
+        # as needed
+        self.update()
+
+        # Now recurse into each child and update them
         for hash, child in self._children.values():
             if isinstance(child, Tree):
-                res = child.update_all(update_status=update_status)
+                res = child.update_all(
+                    (lambda x,y: update_status(x+numfiles, y+size))
+                    if update_status is not None else None
+                )
                 numfiles += res[0]
                 size += res[1]
             elif isinstance(child, Inode):
@@ -92,9 +103,9 @@ class Tree:
             else:
                 raise NotImplementedError(str(type(child)))
 
-        self.update()
         if update_status is not None:
             update_status(numfiles, size)
+
         return numfiles, size
 
     def update(self):
@@ -103,16 +114,15 @@ class Tree:
         Performs a single stat and a single listdir on the directory to
         attempt to see if the cached info differs from the filesystem.
 
-        Creates and deletes child objects as needed. Calls update() on newly
-        created child objects. Does not recurse into child objects that have
-        not changed.
+        Creates and deletes child objects as needed. Does not recurse into
+        child objects
 
         :returns: None
 
         """
         # Mostly the same logic here as for Inode.update()
         try:
-            stat = os.stat(self._path)
+            stat = os.lstat(self._path)
         except FileNotFoundError:
             self._objid = None
             return None
@@ -123,35 +133,41 @@ class Tree:
         # Has the directory changed?
         old_entries = set(self._children)
         try:
-            current_entries = set(os.listdir(self._path))
+            current_entries = os.listdir(self._path)
         except IOError:
-            # Race condition: dir was deleted after the stat
+            # Race condition: directory was deleted after the stat
             self._objid = None
             return None
 
         # Deleted entries
-        for entry in old_entries - current_entries:
+        for entry in old_entries.difference(current_entries):
             self._objid = None
             del self._children[entry]
 
         # New entries
-        for entry in current_entries - old_entries:
+        for entry in current_entries:
+            if entry in old_entries:
+                # Nothing to create
+                continue
+
             self._objid = None
             assert entry not in self._children
             newpath = os.path.join(self._path, entry)
             try:
-                stat = os.stat(newpath)
+                stat = os.lstat(newpath)
             except IOError:
                 # Race condition, item was deleted after doing the listdir
                 continue
             if S_ISDIR(stat.st_mode):
                 newobj = Tree(newpath, self._cache, None)
-                newobj.update()
                 self._children[entry] = (None, newobj)
             elif S_ISREG(stat.st_mode):
                 newobj = Inode(newpath, self._cache, None)
-                newobj.update()
                 self._children[entry] = (None, newobj)
+            else:
+                logger.info("Not backing up {}, unknown file type {}".format(
+                    newpath, stat.st_mode
+                ))
 
     def backup(self):
         """Backs up the given directory tree if it's been updated since the
@@ -286,7 +302,7 @@ class Inode:
         # then we assume the object representing that file is still fully
         # uploaded
         try:
-            stat = os.stat(self._path)
+            stat = os.lstat(self._path)
         except FileNotFoundError:
             # If the file doesn't exist, return None. During the next backup,
             # we will check again and return None there, signaling to the
@@ -308,6 +324,7 @@ class Inode:
         self._objid = objid
 
         if objid is None:
+            # Needs updating, since this file wasn't found in the cache
             return stat.st_size
 
     def backup(self):
@@ -340,7 +357,7 @@ class Inode:
         # object ID by reading in the contents.
 
         try:
-            stat = os.stat(self._path)
+            stat = os.lstat(self._path)
         except FileNotFoundError:
             return None
         if not S_ISREG(stat.st_mode):
@@ -359,7 +376,7 @@ class Inode:
         msgpack.pack((b'ct', stat.st_ctime_ns), buf)
         msgpack.pack((b'mt', stat.st_mtime_ns), buf)
         # Note that the file name or path is not part of this metadata. This
-        # metadata mirrors the filesystem inode, and the name of the file are
+        # metadata mirrors the filesystem inode, and the name of the file is
         # part of the directory listing, not part of the inode itself.
 
         with open(self._path, "rb") as f:

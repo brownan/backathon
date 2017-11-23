@@ -1,8 +1,6 @@
-import mmap
-
 class FixedChunker:
-    """Really dumb chunker that breaks a bytes-like object into fixed size
-    chunks
+    """Chunker that iterates over a file object and yields fixed size
+    chunks.
 
     """
     def __init__(self, fileobj):

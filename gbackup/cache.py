@@ -77,10 +77,14 @@ class FileCache:
 
         If the file exists, returns its hash. Otherwise, returns None
         """
-        return self.conn.execute("""
+        row = self.conn.execute("""
             SELECT objid FROM filecache
             WHERE path=? AND inode=? AND mtime=? AND size=?
-            """, (path, inode, mtime, size)).fetchone()[0]
+            """, (path, inode, mtime, size)).fetchone()
+        if row is None:
+            return None
+        else:
+            return row[0]
 
     def set_file_cache(self, path, inode, mtime, size, objid):
         self.conn.execute("""
