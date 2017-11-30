@@ -1,5 +1,8 @@
 """Classes in this module represent objects in the object store
 
+THIS FILE IS OBSOLETE. I'm leaving it in the repo for now since it has some
+code related to serializing objects that I want to keep as reference
+
 There are different types of objects. Some terminology
 
 * An object's "contents" is the serialized representation of the data it
