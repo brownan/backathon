@@ -8,7 +8,8 @@ def setup():
     settings.configure(
         DATABASES={
             'default': {
-                'ENGINE': 'django.db.backends.sqlite3',
+                #'ENGINE': 'django.db.backends.sqlite3',
+                'ENGINE': 'gbackup.sqlite3_backend',
                 'NAME': "database.sqlite3",
             }
         },
