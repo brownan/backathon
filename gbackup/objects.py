@@ -69,7 +69,7 @@ class Tree:
         return "<Tree {!r}>".format(self._path)
 
     def update_all(self, update_status=None):
-        """Recursively scan the entire filesystem tree starting at this point
+        """Recursively update all objects starting at this point
 
         Calls update() on this object, and calls update_all() on all child Tree
         objects and update() on all other child objects.
@@ -90,7 +90,7 @@ class Tree:
         self.update()
 
         # Now recurse into each child and update them
-        for hash, child in self._children.values():
+        for _, child in self._children.values():
             if isinstance(child, Tree):
                 res = child.update_all(
                     (lambda x,y: update_status(x+numfiles, y+size))
