@@ -57,7 +57,7 @@ class FSEntry(models.Model):
     parent = models.ForeignKey(
         'self',
         related_name="children",
-        on_delete=models.CASCADE,
+        on_delete=models.DO_NOTHING,
         null=True, blank=True,
         help_text="The parent FSEntry. This relation defines the hierarchy of "
                   "the filesystem. It is null for the root entry of the "

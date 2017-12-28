@@ -1,7 +1,7 @@
 """
 This custom database backend inherits from the sqlite3 backend but adds
 cascading deletes to foreign key relations. Foreign key fields with on_delete
-set to NOTHING will efficiently delete all objects referencing the deleted
+set to DO_NOTHING will efficiently delete all objects referencing the deleted
 object without pulling them into memory. Signals and such aren't run, but for
 large tables, this is the only way to delete a large number of objects
 without blowing up memory usage and taking forever.
