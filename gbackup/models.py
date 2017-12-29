@@ -99,6 +99,7 @@ class FSEntry(models.Model):
             caller can collect stats
 
         """
+        scanlogger.debug("Entering scan for {}".format(self.path))
         try:
             stat_result = os.lstat(self.path)
         except FileNotFoundError:
@@ -127,6 +128,7 @@ class FSEntry(models.Model):
             self.st_size == stat_result.st_size
         ):
             # This entry has not changed
+            scanlogger.debug("No change to {}".format(self.path))
             return
 
         scanlogger.info("Marking as changed: {}".format(self.path))
@@ -169,5 +171,6 @@ class FSEntry(models.Model):
                         child.path))
                     child.delete()
 
+        scanlogger.debug("Updating entry {}".format(self.path))
         self.save()
         return self.st_size
