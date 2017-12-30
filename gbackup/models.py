@@ -39,6 +39,11 @@ class PathField(models.CharField):
     SQLite will raise an error, as Python's SQLite driver will be unable to
     encode it to UTF-8. With this field, the data type is actually a binary
     BLOB type.
+
+    Note that many of the common query lookups don't work on BLOB fields the
+    same as TEXT fields. For example, using the __startswith lookup will
+    never match because SQLite doesn't implement the LIKE operator for BLOB
+    types.
     """
     def __init__(self, **kwargs):
         kwargs.setdefault("max_length", 4096)
