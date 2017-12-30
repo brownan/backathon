@@ -1,4 +1,4 @@
-import collections
+import sys
 import os
 import os.path
 import stat
@@ -27,6 +27,38 @@ class Object(models.Model):
     def __repr__(self):
         return "<Object {}>".format(self.objid)
 
+class PathField(models.CharField):
+    """Stores path strings as their binary version
+
+    On Linux, filenames are binary strings, but are typically displayed using a
+    system encoding. Some filenames may not be valid encodings though, so this
+    field makes sure we store the binary form in the database, and does the
+    conversion to and from the string representation for use in the python code.
+
+    This is necessary because trying to store an invalid unicode string in
+    SQLite will raise an error, as Python's SQLite driver will be unable to
+    encode it to UTF-8. With this field, the data type is actually a binary
+    BLOB type.
+    """
+    def __init__(self, **kwargs):
+        kwargs.setdefault("max_length", 4096)
+        super().__init__(**kwargs)
+
+    def get_internal_type(self):
+        return "BinaryField"
+
+    def get_prep_value(self, value):
+        if isinstance(value, str):
+            return value.encode(sys.getfilesystemencoding(),
+                                errors=sys.getfilesystemencodeerrors())
+        return value
+
+    def from_db_value(self, value, expression, connection):
+        if isinstance(value, bytes):
+            return value.decode(sys.getfilesystemencoding(),
+                                errors=sys.getfilesystemencodeerrors())
+        return value
+
 class FSEntry(models.Model):
     """Keeps track of an entry in the local filesystem, either a directory,
     or a file.
@@ -45,14 +77,22 @@ class FSEntry(models.Model):
         on_delete=models.SET_NULL,
     )
 
-    path = models.CharField(
-        max_length=4096,
+    path = PathField(
         help_text="Absolute path on the local filesystem",
         unique=True,
     )
+
     @property
     def name(self):
         return os.path.basename(self.path)
+
+    @property
+    def printablepath(self):
+        """Used in printable representations"""
+        # Turn back to bytes, and re-encode as UTF-8
+        bytepath = self.path.encode(sys.getfilesystemencoding(),
+                                    errors=sys.getfilesystemencodeerrors())
+        return bytepath.decode("utf-8", errors="replace")
 
     parent = models.ForeignKey(
         'self',
@@ -67,8 +107,8 @@ class FSEntry(models.Model):
     new = models.BooleanField(
         default=True,
         db_index=True,
-        help_text="Indicates this is a new entry and should be scanned next "
-                  "scan iteration",
+        help_text="Indicates this is a new entry and needs scanning. "
+                  "It forces an update to the metadata next scan.",
     )
 
     # These fields are used to determine if an entry has changed
@@ -77,7 +117,10 @@ class FSEntry(models.Model):
     st_size = models.IntegerField(null=True)
 
     def __repr__(self):
-        return "<FSEntry {}>".format(self.path)
+        return "<FSEntry {}>".format(self.printablepath)
+
+    def __str__(self):
+        return self.printablepath
 
     @atomic()
     def scan(self):
@@ -99,12 +142,12 @@ class FSEntry(models.Model):
             caller can collect stats
 
         """
-        scanlogger.debug("Entering scan for {}".format(self.path))
+        scanlogger.debug("Entering scan for {}".format(self))
         try:
             stat_result = os.lstat(self.path)
         except FileNotFoundError:
             # This path no longer exists, so neither should this database entry
-            scanlogger.info("Not found, deleting: {}".format(self.path))
+            scanlogger.info("Not found, deleting: {}".format(self))
             self.delete()
             return
 
@@ -119,7 +162,7 @@ class FSEntry(models.Model):
             # delete their children. But if a file is recreated with the same
             # name before a scan runs, then there's no other mechanism to
             # delete the children.
-            scanlogger.info("No longer a directory: {}".format(self.path))
+            scanlogger.info("No longer a directory: {}".format(self))
             self.children.all().delete()
 
         if not self.new and (
@@ -128,10 +171,9 @@ class FSEntry(models.Model):
             self.st_size == stat_result.st_size
         ):
             # This entry has not changed
-            scanlogger.debug("No change to {}".format(self.path))
+            scanlogger.debug("No change to {}".format(self))
             return
 
-        scanlogger.info("Marking as changed: {}".format(self.path))
         self.objid = None
         self.new = False
 
@@ -151,26 +193,26 @@ class FSEntry(models.Model):
                 entries = set(os.listdir(self.path))
             except PermissionError:
                 scanlogger.warning("Permission denied: {}".format(
-                    self.path))
+                    self))
                 entries = set()
 
             # Create new entries
             for newname in entries.difference(c.name for c in children):
                 newpath = os.path.join(self.path, newname)
-                scanlogger.info("New path: {}".format(newpath))
-                FSEntry.objects.create(
+                newentry = FSEntry.objects.create(
                     path=newpath,
                     parent=self,
                     new=True,
                 )
+                scanlogger.info("New path: {}".format(newentry))
 
             # Delete old entries
             for child in children:
                 if child.name not in entries:
                     scanlogger.info("deleting from dir: {}".format(
-                        child.path))
+                        child))
                     child.delete()
 
-        scanlogger.debug("Updating entry {}".format(self.path))
+        scanlogger.info("Entry updated: {}".format(self))
         self.save()
         return self.st_size

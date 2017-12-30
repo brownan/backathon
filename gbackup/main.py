@@ -34,18 +34,34 @@ def setup():
                     "format": "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
                     "datefmt": "%Y-%m-%d %H:%M:%S",
                 },
+                "scanlog": {
+                    "format": "%(levelname)-8s %(message)s",
+                }
             },
             "handlers": {
                 "stderr": {
                     "class": "logging.StreamHandler",
                     "formatter": "color" if sys.stderr.isatty() else "nocolor",
                 },
+                "scanlog": {
+                    "class": "logging.FileHandler",
+                    "formatter": "scanlog",
+                    "filename": "scan.log",
+                    "mode": "w",
+                    "encoding": "UTF-8",
+                    "delay": True,
+                }
             },
             "loggers": {
                 "gbackup": {
                     "level": "INFO",
                 },
                 "gbackup.scan": {
+                    "level": "INFO",
+                    "handlers": ["scanlog"],
+                    "propagate": False,
+                },
+                "django.db": {
                     "level": "WARNING",
                 }
             },
