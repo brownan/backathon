@@ -2,6 +2,8 @@ class FixedChunker:
     """Chunker that iterates over a file object and yields fixed size
     chunks.
 
+    Yields (position, byteslike) for each chunk in a given file object
+
     """
     def __init__(self, fileobj):
         self.f = fileobj
@@ -17,3 +19,4 @@ class FixedChunker:
             raise StopIteration()
         yield pos, data
 
+DefaultChunker = FixedChunker

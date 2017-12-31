@@ -1,4 +1,4 @@
-msgpack-python
+u-msgpack-python
 PyNaCl
 pip-tools
 Django>=2.0rc1

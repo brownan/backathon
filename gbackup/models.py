@@ -1,11 +1,15 @@
-import sys
+import io
 import os
 import os.path
 import stat
 import logging
 
+import umsgpack
+
 from django.db import models
 from django.db.transaction import atomic
+
+from . import chunker
 
 scanlogger = logging.getLogger("gbackup.scan")
 
@@ -20,9 +24,13 @@ class Object(models.Model):
     objects locally.
     """
     objid = models.CharField(max_length=64, primary_key=True)
-    payload = models.TextField(blank=True, null=True)
+    payload = models.BinaryField(blank=True, null=True)
 
-    children = models.ManyToManyField("Object")
+    children = models.ManyToManyField(
+        "self",
+        symmetrical=False,
+        related_name="parents",
+    )
 
     def __repr__(self):
         return "<Object {}>".format(self.objid)
@@ -54,14 +62,12 @@ class PathField(models.CharField):
 
     def get_prep_value(self, value):
         if isinstance(value, str):
-            return value.encode(sys.getfilesystemencoding(),
-                                errors=sys.getfilesystemencodeerrors())
+            return os.fsencode(value)
         return value
 
     def from_db_value(self, value, expression, connection):
         if isinstance(value, bytes):
-            return value.decode(sys.getfilesystemencoding(),
-                                errors=sys.getfilesystemencodeerrors())
+            return os.fsdecode(value)
         return value
 
 class FSEntry(models.Model):
@@ -95,10 +101,12 @@ class FSEntry(models.Model):
     def printablepath(self):
         """Used in printable representations"""
         # Turn back to bytes, and re-encode as UTF-8
-        bytepath = self.path.encode(sys.getfilesystemencoding(),
-                                    errors=sys.getfilesystemencodeerrors())
+        bytepath = os.fsencode(self.path)
         return bytepath.decode("utf-8", errors="replace")
 
+    # Note about the DO_NOTHING delete action: the table should be created
+    # with SQLite ON DELETE CASCADE mode, so the database handles cascading
+    # deletes instead of Django. For memory efficiency.
     parent = models.ForeignKey(
         'self',
         related_name="children",
@@ -120,6 +128,18 @@ class FSEntry(models.Model):
     st_mode = models.IntegerField(null=True)
     st_mtime_ns = models.IntegerField(null=True)
     st_size = models.IntegerField(null=True)
+
+    def update_stat_info(self, stat_result: os.stat_result):
+        self.st_mode = stat_result.st_mode
+        self.st_mtime_ns = stat_result.st_mtime_ns
+        self.st_size = stat_result.st_size
+
+    def compare_stat_info(self, stat_result: os.stat_result):
+        return (
+            self.st_mode == stat_result.st_mode and
+            self.st_mtime_ns == stat_result.st_mtime_ns and
+            self.st_size == stat_result.st_mtime_ns
+        )
 
     def __repr__(self):
         return "<FSEntry {}>".format(self.printablepath)
@@ -170,11 +190,7 @@ class FSEntry(models.Model):
             scanlogger.info("No longer a directory: {}".format(self))
             self.children.all().delete()
 
-        if not self.new and (
-            self.st_mode == stat_result.st_mode and
-            self.st_mtime_ns == stat_result.st_mtime_ns and
-            self.st_size == stat_result.st_size
-        ):
+        if not self.new and self.compare_stat_info(stat_result):
             # This entry has not changed
             scanlogger.debug("No change to {}".format(self))
             return
@@ -182,10 +198,7 @@ class FSEntry(models.Model):
         self.objid = None
         self.new = False
 
-        self.st_mode = stat_result.st_mode
-        self.st_mtime_ns = stat_result.st_mtime_ns
-        self.st_size = stat_result.st_size
-
+        self.update_stat_info(stat_result)
 
         if stat.S_ISDIR(self.st_mode):
 
@@ -221,3 +234,103 @@ class FSEntry(models.Model):
         scanlogger.info("Entry updated: {}".format(self))
         self.save()
         return self.st_size
+
+    def backup(self):
+        """Back up this entry
+
+        Reads this entry in from the file system, creates one or more object
+        payloads, and yields them to the caller for uploading to the backing
+        store. The caller is expected to send the Object database object
+        back into this iterator function.
+
+        Note: this sequence of operations was chosen over having this
+        method upload the objects itself so that the caller may choose to
+        buffer and upload objects in batch. It's also more flexible in
+        several ways. E.g. while a recursive algorithm would
+        have to upload items in a post-order traversal of the tree, here
+        the caller is free to do a SQL query to get items ordered by any
+        criteria. Like, say, all small files first and pack them together into
+        a single upload.
+
+        For directories: yields a single payload for the directory entry.
+        Raises a DependencyError if one or more children do not have an
+        objid already. It's the caller's responsibility to call backup() on
+        entries in an order to avoid dependency issues.
+
+        For files: yields one or more payloads for the file's contents,
+        then finally a payload for the inode entry.
+        """
+        try:
+            stat_result = os.lstat(self.path)
+        except FileNotFoundError:
+            scanlogger.info("File disappeared: {}".format(self))
+            self.delete()
+            return
+
+        self.update_stat_info(stat_result)
+
+        if stat.S_ISREG(self.st_mode):
+            # File
+            chunks = []
+            childobjs = []
+
+            with open(self.path, "rb") as fobj:
+                for pos, chunk in chunker.DefaultChunker(fobj):
+                    buf = io.BytesIO()
+                    umsgpack.pack("blob", buf)
+                    umsgpack.pack(chunk, buf)
+                    chunk_obj = yield buf.getbuffer()
+                    childobjs.append(chunk_obj)
+                    chunks.append((pos, chunk_obj.objid))
+
+            # Now construct the payload for the inode
+            buf = io.BytesIO()
+            umsgpack.pack("inode", buf)
+            info = dict(
+                size=stat_result.st_size,
+                inode=stat_result.st_ino,
+                uid=stat_result.st_uid,
+                gid=stat_result.st_gid,
+                mode=stat_result.st_mode,
+                ctime=stat_result.st_ctime_ns,
+                mtime=stat_result.st_mtime_ns,
+            )
+            umsgpack.pack(info, buf)
+            umsgpack.pack(chunks, buf)
+
+            self.objid = yield buf.getbuffer()
+            self.objid.children.set(childobjs)
+
+        elif stat.S_ISDIR(self.st_mode):
+            # Directory
+            children = list(self.children.all().select_related("objid"))
+            if any(c.objid is None for c in children):
+                raise DependencyError(self.printablepath)
+
+            buf = io.BytesIO()
+            umsgpack.pack("tree", buf)
+            info = dict(
+                uid=stat_result.st_uid,
+                gid=stat_result.st_gid,
+                mode=stat_result.st_mode,
+                ctime=stat_result.st_ctime_ns,
+                mtime=stat_result.st_mtime_ns,
+            )
+            umsgpack.pack(info, buf)
+            umsgpack.pack(
+                [(c.name, c.objid.objid) for c in children],
+                buf
+            )
+            
+            self.objid = yield buf.getbuffer()
+            self.objid.children.set(c.objid for c in children)
+
+        else:
+            scanlogger.warning("Unknown file type, not backing up {}".format(
+                self))
+
+        self.save()
+        return
+
+class DependencyError(Exception):
+    pass

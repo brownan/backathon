@@ -20,16 +20,17 @@ class DatabaseWrapper(base.DatabaseWrapper):
     def get_new_connection(self, conn_params):
         """Enable a couple sqlite features that are disabled by default"""
         conn = super().get_new_connection(conn_params)
+
         # The write-ahead-log doesn't add much performance to our use case.
         # The main advantage is that it allows readers while another
         # connection is in a write transaction. Since there's typically just
-        # one process accessing the database, WAL doesn't help us.
-        #conn.execute("PRAGMA journal_mode=WAL")
+        # one process accessing the database, this is mainly useful for
+        # debugging: we can access the database while a scan or some other
+        # big operation is running
+        conn.execute("PRAGMA journal_mode=WAL")
 
-        # Memory-mapped IO can help performance on read-heavy loads. Our
-        # database load is actually fairly light compared to our other disk-IO.
-        # Stat calls to the OS dominate the scan time, and reading files
-        # dominates the backup time. So this doesn't really help performance
-        # any.
-        #conn.execute("PRAGMA mmap_size=1073741824;")
+        # Memory-mapped IO can help performance on read-heavy loads. It doesn't
+        # help performance according to some quick tests, but I doubt it will
+        # hurt.
+        conn.execute("PRAGMA mmap_size=1073741824;")
         return conn
