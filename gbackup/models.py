@@ -138,7 +138,7 @@ class FSEntry(models.Model):
         return (
             self.st_mode == stat_result.st_mode and
             self.st_mtime_ns == stat_result.st_mtime_ns and
-            self.st_size == stat_result.st_mtime_ns
+            self.st_size == stat_result.st_size
         )
 
     def __repr__(self):
@@ -163,15 +163,11 @@ class FSEntry(models.Model):
         If this entry used to be a directory but has changed file types,
         all children are deleted.
 
-        :returns: the size of this entry if the entry has changed, so the
-            caller can collect stats
-
         """
         scanlogger.debug("Entering scan for {}".format(self))
         try:
             stat_result = os.lstat(self.path)
         except FileNotFoundError:
-            # This path no longer exists, so neither should this database entry
             scanlogger.info("Not found, deleting: {}".format(self))
             self.delete()
             return
@@ -191,7 +187,6 @@ class FSEntry(models.Model):
             self.children.all().delete()
 
         if not self.new and self.compare_stat_info(stat_result):
-            # This entry has not changed
             scanlogger.debug("No change to {}".format(self))
             return
 
@@ -233,7 +228,7 @@ class FSEntry(models.Model):
 
         scanlogger.info("Entry updated: {}".format(self))
         self.save()
-        return self.st_size
+        return
 
     def backup(self):
         """Back up this entry
@@ -267,6 +262,16 @@ class FSEntry(models.Model):
             self.delete()
             return
 
+        # If this entry is significantly different from what it looked like
+        # when it was scanned, then we shouldn't try to back it up. The logic
+        # for managing child references and such lives in the scan() method,
+        # so delete this entry and let it get re-created next scan.
+        if stat.S_IFMT(self.st_mode) != stat.S_IFMT(stat_result.st_mode):
+            scanlogger.warning("File changed type since scan, deleting: "
+                               "{}".format(self))
+            self.delete()
+            return
+
         self.update_stat_info(stat_result)
 
         if stat.S_ISREG(self.st_mode):
@@ -274,14 +279,31 @@ class FSEntry(models.Model):
             chunks = []
             childobjs = []
 
-            with open(self.path, "rb") as fobj:
-                for pos, chunk in chunker.DefaultChunker(fobj):
-                    buf = io.BytesIO()
-                    umsgpack.pack("blob", buf)
-                    umsgpack.pack(chunk, buf)
-                    chunk_obj = yield buf.getbuffer()
-                    childobjs.append(chunk_obj)
-                    chunks.append((pos, chunk_obj.objid))
+            try:
+                with open(self.path, "rb") as fobj:
+                    for pos, chunk in chunker.DefaultChunker(fobj):
+                        buf = io.BytesIO()
+                        umsgpack.pack("blob", buf)
+                        umsgpack.pack(chunk, buf)
+                        chunk_obj = yield buf.getbuffer()
+                        childobjs.append(chunk_obj)
+                        chunks.append((pos, chunk_obj.objid))
+            except FileNotFoundError:
+                scanlogger.info("File disappeared: {}".format(self))
+                self.delete()
+                return
+            except OSError as e:
+                scanlogger.exception("Error in system call when reading file "
+                                     "{}".format(self))
+                # In order to not crash the entire backup, we must delete
+                # this entry so that the parent directory can still be backed
+                # up. This code path may leave one or more objects saved to
+                # the remote storage, but there's not much we can do about
+                # that here. (Basically, since every exit from this method
+                # must either acquire and save an objid or delete itself,
+                # we have no choice)
+                self.delete()
+                return
 
             # Now construct the payload for the inode
             buf = io.BytesIO()
@@ -300,9 +322,16 @@ class FSEntry(models.Model):
 
             self.objid = yield buf.getbuffer()
             self.objid.children.set(childobjs)
+            scanlogger.info("Backed up file into {} objects: {}".format(
+                len(chunks)+1,
+                self
+            ))
 
         elif stat.S_ISDIR(self.st_mode):
             # Directory
+            # Note: backing up a directory doesn't involve reading
+            # from the filesystem aside from the lstat() call from above. All
+            # the information we need is already in the database.
             children = list(self.children.all().select_related("objid"))
             if any(c.objid is None for c in children):
                 raise DependencyError(self.printablepath)
@@ -324,6 +353,10 @@ class FSEntry(models.Model):
             
             self.objid = yield buf.getbuffer()
             self.objid.children.set(c.objid for c in children)
+
+            scanlogger.info("Backed up dir: {}".format(
+                self
+            ))
 
         else:
             scanlogger.warning("Unknown file type, not backing up {}".format(
