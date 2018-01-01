@@ -347,8 +347,11 @@ class FSEntry(models.Model):
             )
             umsgpack.pack(info, buf)
             umsgpack.pack(
-                [(c.name, c.objid.objid) for c in children],
-                buf
+                # We have to store the original binary representation of
+                # the filename or msgpack will error at filenames with
+                # bad encodings
+                [(os.fsencode(c.name), c.objid.objid) for c in children],
+                buf,
             )
             
             self.objid = yield buf.getbuffer()
