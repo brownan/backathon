@@ -22,6 +22,11 @@ class Object(models.Model):
     The payload field is only filled in for tree and inode object types. Blob
     types are not stored locally. In other words, we only cache metadata type
     objects locally.
+
+    The children relation is used in the calculation of garbage objects. If
+    an object depends on another in any way, it is added as a "child". Then,
+    when a root object is deleted, a set of unreachable garbage objects can
+    be calculated.
     """
     objid = models.CharField(max_length=64, primary_key=True)
     payload = models.BinaryField(blank=True, null=True)
@@ -39,14 +44,16 @@ class PathField(models.CharField):
     """Stores path strings as their binary version
 
     On Linux, filenames are binary strings, but are typically displayed using a
-    system encoding. Some filenames may not be valid encodings though, so this
-    field makes sure we store the binary form in the database, and does the
-    conversion to and from the string representation for use in the python code.
+    system encoding. Some filenames may contain un-decodable byte sequences,
+    however, and Python will automatically embed un-decodable bytes as
+    unicode surrogates, as specified in PEP 383.
 
-    This is necessary because trying to store an invalid unicode string in
-    SQLite will raise an error, as Python's SQLite driver will be unable to
-    encode it to UTF-8. With this field, the data type is actually a binary
-    BLOB type.
+    This field stores file paths as binary sequences, and uses the
+    os.fsencode() and os.fsdecode() functions to translate to and from
+    strings when loading/saving from the database.
+
+    This avoids encoding problems, as passing a string with surrogates to
+    SQLite will raise an exception when trying to encode.
 
     Note that many of the common query lookups don't work on BLOB fields the
     same as TEXT fields. For example, using the __startswith lookup will
@@ -88,6 +95,11 @@ class FSEntry(models.Model):
         on_delete=models.SET_NULL,
     )
 
+    # Note: be careful about using self.path and self.name in anything but
+    # calls to os functions, since they may contain non-decodable bytes
+    # embedded as unicode surrogates as specified in PEP 383, which will
+    # crash most other attempts to encode or print them. Use the
+    # printablepath property instead, or explicitly encode with os.fsencode().
     path = PathField(
         help_text="Absolute path on the local filesystem",
         unique=True,
@@ -104,9 +116,10 @@ class FSEntry(models.Model):
         bytepath = os.fsencode(self.path)
         return bytepath.decode("utf-8", errors="replace")
 
-    # Note about the DO_NOTHING delete action: the table should be created
-    # with SQLite ON DELETE CASCADE mode, so the database handles cascading
-    # deletes instead of Django. For memory efficiency.
+    # Note about the DO_NOTHING delete action: we create the SQLite tables
+    # with ON DELETE CASCADE, so the database will perform cascading
+    # deletes instead of Django. For memory efficiency, we tell Django to do
+    # nothing.
     parent = models.ForeignKey(
         'self',
         related_name="children",
