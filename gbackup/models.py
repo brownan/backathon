@@ -82,8 +82,7 @@ class FSEntry(models.Model):
     or a file.
 
     This tracks the last known state of each filesystem entry, so that it can
-    be compared to the actual state of the filesystem to see if it needs
-    updating.
+    be compared to the actual state of the filesystem to see if it has changed.
 
     It also keeps track of the last known object ID that was uploaded for
     this object. If the objid is null, then this entry is considered "dirty"
@@ -112,14 +111,15 @@ class FSEntry(models.Model):
     @property
     def printablepath(self):
         """Used in printable representations"""
-        # Turn back to bytes, and re-encode as UTF-8
+        # Use the replacement error handler to turn any surrogate codepoints
+        # into something that won't crash attempts to encode them
         bytepath = os.fsencode(self.path)
         return bytepath.decode("utf-8", errors="replace")
 
     # Note about the DO_NOTHING delete action: we create the SQLite tables
     # with ON DELETE CASCADE, so the database will perform cascading
     # deletes instead of Django. For memory efficiency, we tell Django to do
-    # nothing.
+    # nothing and let SQLite take care of it.
     parent = models.ForeignKey(
         'self',
         related_name="children",
@@ -194,8 +194,8 @@ class FSEntry(models.Model):
             # Normally, directories when they are deleted will hit the
             # FileNotFound exception above, which will recursively cascade to
             # delete their children. But if a file is recreated with the same
-            # name before a scan runs, then there's no other mechanism to
-            # delete the children.
+            # name before a scan runs, it could leave orphaned children in
+            # the database.
             scanlogger.info("No longer a directory: {}".format(self))
             self.children.all().delete()
 
@@ -248,7 +248,7 @@ class FSEntry(models.Model):
 
         Reads this entry in from the file system, creates one or more object
         payloads, and yields them to the caller for uploading to the backing
-        store. The caller is expected to send the Object database object
+        store. The caller is expected to send the Object instance
         back into this iterator function.
 
         Note: this sequence of operations was chosen over having this
