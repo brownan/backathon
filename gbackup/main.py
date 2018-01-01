@@ -6,6 +6,8 @@ from django.core.management import execute_from_command_line, call_command
 
 def setup():
     settings.configure(
+        DEFAULT_FILE_STORAGE="django.core.files.storage.FileSystemStorage",
+        MEDIA_ROOT="/tmp/gbackup_storage",
         DATABASES={
             'default': {
                 #'ENGINE': 'django.db.backends.sqlite3',

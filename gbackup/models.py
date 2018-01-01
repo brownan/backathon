@@ -251,6 +251,12 @@ class FSEntry(models.Model):
         store. The caller is expected to send the Object instance
         back into this iterator function.
 
+        Yields: (payload_type, payload_buffer)
+        Caller sends: models.Object instance of the last yielded payload
+
+        The payload_buffer will be a file-like object ready for reading.
+        Usually a BytesIO instance.
+
         Note: this sequence of operations was chosen over having this
         method upload the objects itself so that the caller may choose to
         buffer and upload objects in batch. It's also more flexible in
@@ -267,6 +273,10 @@ class FSEntry(models.Model):
 
         For files: yields one or more payloads for the file's contents,
         then finally a payload for the inode entry.
+
+        IMPORTANT: every exit point from this function must either update
+        this entry's objid to a non-null value, OR delete the entry before
+        returning.
         """
         try:
             stat_result = os.lstat(self.path)
@@ -298,7 +308,8 @@ class FSEntry(models.Model):
                         buf = io.BytesIO()
                         umsgpack.pack("blob", buf)
                         umsgpack.pack(chunk, buf)
-                        chunk_obj = yield buf.getbuffer()
+                        buf.seek(0)
+                        chunk_obj = yield ("blob", buf)
                         childobjs.append(chunk_obj)
                         chunks.append((pos, chunk_obj.objid))
             except FileNotFoundError:
@@ -332,8 +343,9 @@ class FSEntry(models.Model):
             )
             umsgpack.pack(info, buf)
             umsgpack.pack(chunks, buf)
+            buf.seek(0)
 
-            self.objid = yield buf.getbuffer()
+            self.objid = yield ("inode", buf)
             self.objid.children.set(childobjs)
             scanlogger.info("Backed up file into {} objects: {}".format(
                 len(chunks)+1,
@@ -366,8 +378,9 @@ class FSEntry(models.Model):
                 [(os.fsencode(c.name), c.objid.objid) for c in children],
                 buf,
             )
+            buf.seek(0)
             
-            self.objid = yield buf.getbuffer()
+            self.objid = yield ("tree", buf)
             self.objid.children.set(c.objid for c in children)
 
             scanlogger.info("Backed up dir: {}".format(
@@ -377,6 +390,8 @@ class FSEntry(models.Model):
         else:
             scanlogger.warning("Unknown file type, not backing up {}".format(
                 self))
+            self.delete()
+            return
 
         self.save()
         return
