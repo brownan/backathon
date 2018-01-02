@@ -8,6 +8,7 @@ import umsgpack
 
 from django.db import models
 from django.db.transaction import atomic
+from django.db import connection
 
 from . import chunker
 
@@ -396,5 +397,42 @@ class FSEntry(models.Model):
         self.save()
         return
 
+    @classmethod
+    def invalidate_parents(cls):
+        """For each child that is invalidated, mark all parents up to the
+        root as invalid
+
+        An invalided node is one that doesn't have an objid. This recursive
+        query walks the tree and finds the set of all nodes that have an
+        invalid descendant, and invalidates them all.
+
+        """
+        cursor = connection.cursor()
+        cursor.execute("""
+        WITH RECURSIVE needs_update(id) AS (
+          SELECT id FROM gbackup_fsentry WHERE objid_id IS NULL 
+          UNION ALL
+          SELECT gbackup_fsentry.parent_id FROM gbackup_fsentry
+          INNER JOIN needs_update ON (gbackup_fsentry.id = needs_update.id)
+        ) UPDATE gbackup_fsentry SET objid_id=NULL
+          WHERE gbackup_fsentry.id IN needs_update
+        """)
+        # I'd like to return the cursor.rowcount indicating how many rows
+        # were updated, but SQLite doesn't implement that for recursive
+        # queries apparently
+
+
+
 class DependencyError(Exception):
     pass
+
+class Snapshot(models.Model):
+    """A snapshot of a filesystem at a particular time"""
+    path = PathField(
+        help_text="Root directory of this snapshot"
+    )
+    root = models.ForeignKey(
+        Object,
+        on_delete=models.PROTECT,
+    )
+    date = models.DateTimeField(db_index=True)

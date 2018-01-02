@@ -79,3 +79,7 @@ def scan():
 
         # Subsequent iterations get any new entries
         qs = models.FSEntry.objects.filter(new=True)
+
+    # The above only invalidates individual entries. This routine marks each
+    # parent of such entries as invalidated as well.
+    models.FSEntry.invalidate_parents()

@@ -9,7 +9,7 @@ from . import models
 
 def backup():
 
-    # TODO: mark all parents of invalidated entries as invalidated themselves
+    # mark all parents of invalidated entries as invalidated themselves
 
 
     to_backup = models.FSEntry.objects.filter(objid__isnull=True)
