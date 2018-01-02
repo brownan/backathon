@@ -6,7 +6,7 @@ import logging
 
 import umsgpack
 
-from django.db import models
+from django.db import models, IntegrityError
 from django.db.transaction import atomic
 from django.db import connection
 
@@ -226,12 +226,30 @@ class FSEntry(models.Model):
             # Create new entries
             for newname in entries.difference(c.name for c in children):
                 newpath = os.path.join(self.path, newname)
-                newentry = FSEntry.objects.create(
-                    path=newpath,
-                    parent=self,
-                    new=True,
-                )
-                scanlogger.info("New path: {}".format(newentry))
+                try:
+                    with atomic():
+                        newentry = FSEntry.objects.create(
+                            path=newpath,
+                            parent=self,
+                            new=True,
+                        )
+                except IntegrityError:
+                    # This can happen if a new root is added to the database
+                    # that is an ancestor of an existing root. Scaning from
+                    # the new root will re-discover the existing root. In
+                    # this case, just re-parent the old root, merging the two
+                    # trees.
+                    newentry = FSEntry.objects.get(path=newpath)
+                    scanlogger.warning("Trying to create path but already "
+                                       "exists. Reparenting: {}".format(
+                        newentry))
+                    # If this isn't a root, something is really wrong with
+                    # our tree!
+                    assert newentry.parent_id is None
+                    newentry.parent = self
+                    newentry.save(update_fields=['parent'])
+                else:
+                    scanlogger.info("New path: {}".format(newentry))
 
             # Delete old entries
             for child in children:
