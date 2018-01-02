@@ -15,13 +15,13 @@ class Command(BaseCommand):
         scan.scan()
         t2 = time.time()
 
-        self.stderr.write("Scanned {} entries in {:.2f}s seconds".format(
+        self.stderr.write("Scanned {} entries in {:.2f} seconds".format(
             models.FSEntry.objects.count(),
             t2-t1,
             ))
         self.stderr.write("Need to back up {} files and directories "
                           "totaling {}".format(
-            models.FSEntry.objects.filter(objid__isnull=True).count(),
+            models.FSEntry.objects.filter(obj__isnull=True).count(),
             filesizeformat(
                 models.FSEntry.objects.aggregate(size=Sum("st_size"))['size']
             )

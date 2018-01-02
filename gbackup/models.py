@@ -86,10 +86,10 @@ class FSEntry(models.Model):
     be compared to the actual state of the filesystem to see if it has changed.
 
     It also keeps track of the last known object ID that was uploaded for
-    this object. If the objid is null, then this entry is considered "dirty"
+    this object. If obj is null, then this entry is considered "dirty"
     and needs to be uploaded.
     """
-    objid = models.ForeignKey(
+    obj = models.ForeignKey(
         "Object",
         null=True, blank=True,
         on_delete=models.SET_NULL,
@@ -166,7 +166,7 @@ class FSEntry(models.Model):
         """Scans this entry for changes
 
         Performs an os.lstat() on this entry. If its metadata differs from
-        the database, it is invalidated: its objid is set to NULL and its
+        the database, it is invalidated: its obj is set to NULL and its
         metadata is updated. The new flag is cleared if it was set.
 
         If the entry is a directory entry and the metadata indicates it's
@@ -204,7 +204,7 @@ class FSEntry(models.Model):
             scanlogger.debug("No change to {}".format(self))
             return
 
-        self.objid = None
+        self.obj = None
         self.new = False
 
         self.update_stat_info(stat_result)
@@ -287,14 +287,14 @@ class FSEntry(models.Model):
 
         For directories: yields a single payload for the directory entry.
         Raises a DependencyError if one or more children do not have an
-        objid already. It's the caller's responsibility to call backup() on
+        obj already. It's the caller's responsibility to call backup() on
         entries in an order to avoid dependency issues.
 
         For files: yields one or more payloads for the file's contents,
         then finally a payload for the inode entry.
 
         IMPORTANT: every exit point from this function must either update
-        this entry's objid to a non-null value, OR delete the entry before
+        this entry's obj to a non-null value, OR delete the entry before
         returning.
         """
         try:
@@ -328,7 +328,7 @@ class FSEntry(models.Model):
                         umsgpack.pack("blob", buf)
                         umsgpack.pack(chunk, buf)
                         buf.seek(0)
-                        chunk_obj = yield ("blob", buf)
+                        chunk_obj = yield (buf, [])
                         childobjs.append(chunk_obj)
                         chunks.append((pos, chunk_obj.objid))
             except FileNotFoundError:
@@ -364,8 +364,7 @@ class FSEntry(models.Model):
             umsgpack.pack(chunks, buf)
             buf.seek(0)
 
-            self.objid = yield ("inode", buf)
-            self.objid.children.set(childobjs)
+            self.obj = yield (buf, childobjs)
             scanlogger.info("Backed up file into {} objects: {}".format(
                 len(chunks)+1,
                 self
@@ -376,8 +375,8 @@ class FSEntry(models.Model):
             # Note: backing up a directory doesn't involve reading
             # from the filesystem aside from the lstat() call from above. All
             # the information we need is already in the database.
-            children = list(self.children.all().select_related("objid"))
-            if any(c.objid is None for c in children):
+            children = list(self.children.all().select_related("obj"))
+            if any(c.obj is None for c in children):
                 raise DependencyError(self.printablepath)
 
             buf = io.BytesIO()
@@ -394,13 +393,12 @@ class FSEntry(models.Model):
                 # We have to store the original binary representation of
                 # the filename or msgpack will error at filenames with
                 # bad encodings
-                [(os.fsencode(c.name), c.objid.objid) for c in children],
+                [(os.fsencode(c.name), c.obj.objid) for c in children],
                 buf,
             )
             buf.seek(0)
             
-            self.objid = yield ("tree", buf)
-            self.objid.children.set(c.objid for c in children)
+            self.obj = yield (buf, (c.obj for c in children))
 
             scanlogger.info("Backed up dir: {}".format(
                 self
@@ -420,7 +418,7 @@ class FSEntry(models.Model):
         """For each child that is invalidated, mark all parents up to the
         root as invalid
 
-        An invalided node is one that doesn't have an objid. This recursive
+        An invalided node is one that doesn't have an obj. This recursive
         query walks the tree and finds the set of all nodes that have an
         invalid descendant, and invalidates them all.
 
@@ -428,11 +426,11 @@ class FSEntry(models.Model):
         cursor = connection.cursor()
         cursor.execute("""
         WITH RECURSIVE needs_update(id) AS (
-          SELECT id FROM gbackup_fsentry WHERE objid_id IS NULL 
+          SELECT id FROM gbackup_fsentry WHERE obj_id IS NULL 
           UNION ALL
           SELECT gbackup_fsentry.parent_id FROM gbackup_fsentry
           INNER JOIN needs_update ON (gbackup_fsentry.id = needs_update.id)
-        ) UPDATE gbackup_fsentry SET objid_id=NULL
+        ) UPDATE gbackup_fsentry SET obj_id=NULL
           WHERE gbackup_fsentry.id IN needs_update
         """)
         # I'd like to return the cursor.rowcount indicating how many rows

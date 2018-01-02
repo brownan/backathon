@@ -1,18 +1,11 @@
-import hashlib
-
 from tqdm import tqdm
 
-from django.db.transaction import atomic
-from django.core.files.storage import default_storage as storage
-
 from . import models
+from .backend import Backend
 
 def backup():
 
-    # mark all parents of invalidated entries as invalidated themselves
-
-
-    to_backup = models.FSEntry.objects.filter(objid__isnull=True)
+    to_backup = models.FSEntry.objects.filter(obj__isnull=True)
 
     # The ready_to_backup set is the set of all nodes whose children have all
     # already been backed up. In other words, these are the entries that we
@@ -23,6 +16,8 @@ def backup():
 
     progress = tqdm(total=to_backup.count(), unit="files")
     progress2 = tqdm(desc="pass", unit="")
+
+    backend = Backend()
 
     while to_backup.exists():
 
@@ -40,14 +35,14 @@ def backup():
             # the SQLite documentation on isolation isn't clear on this. If I
             # see this assert statement getting hit in practice, then the
             # thing to do is to ignore the entry and move on.
-            assert entry.objid_id is None
+            assert entry.obj_id is None
 
             iterator = entry.backup()
             try:
-                obj_type, obj_buf = next(iterator)
+                obj_buf, obj_children = next(iterator)
                 while True:
-                    obj_type, obj_buf = iterator.send(
-                        _backup_payload(obj_type, obj_buf)
+                    obj_buf, obj_children = iterator.send(
+                        backend.push_object(obj_buf, obj_children)
                     )
             except StopIteration:
                 pass
@@ -55,7 +50,7 @@ def backup():
             # Sanity check: If a bug in the entry.backup() method doesn't do
             # one of these, the entry will be selected next iteration,
             # causing an infinite loop
-            assert entry.objid_id is not None or entry.id is None
+            assert entry.obj_id is not None or entry.id is None
 
             progress.update(1)
 
@@ -67,38 +62,4 @@ def backup():
         # all their dependent children backed up.
         assert ct > 0
         progress2.update(1)
-
-@atomic()
-def _backup_payload(objtype, buf):
-    """Backs up the given payload, returning an Object instance
-
-    This method is decorated with atomic() because the order of operations is
-    to create the Object instance, and then upload it. If the upload fails,
-    the Object should be rolled back. Once an object is successfully saved to
-    the storage backend, the database should be committed.
-    """
-    view = buf.getbuffer()
-
-    # 1. Compute the object ID. Use the buffer memoryview into the BytesIO to
-    # avoid an extra copy
-    objid = hashlib.sha256(view).hexdigest()
-
-    # 2. Check if the object already exists in the data
-    # store. If not, construct a new object
-    obj_instance, isnew = models.Object.objects.get_or_create(
-        objid=objid,
-        defaults={
-            'payload':view if objtype in ('tree', 'inode') else None,
-        },
-    )
-
-    # 3. If not, upload it
-    if isnew:
-        name = "objects/{}/{}".format(
-            objid[:2],
-            objid,
-        )
-        storage.save(name, buf)
-
-    return obj_instance
 
