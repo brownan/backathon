@@ -1,7 +1,7 @@
 from tqdm import tqdm
 
 from . import models
-from .backend import Backend
+from .datastore import DataStore
 
 def backup():
 
@@ -17,7 +17,7 @@ def backup():
     progress = tqdm(total=to_backup.count(), unit="files")
     progress2 = tqdm(desc="pass", unit="")
 
-    backend = Backend()
+    datastore = DataStore()
 
     while to_backup.exists():
 
@@ -42,7 +42,7 @@ def backup():
                 obj_buf, obj_children = next(iterator)
                 while True:
                     obj_buf, obj_children = iterator.send(
-                        backend.push_object(obj_buf, obj_children)
+                        datastore.push_object(obj_buf, obj_children)
                     )
             except StopIteration:
                 pass

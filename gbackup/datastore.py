@@ -7,7 +7,7 @@ import umsgpack
 
 from gbackup import models
 
-class Backend:
+class DataStore:
     """This class acts as an interface to the storage backend
 
     It has logic to keep the local cache in sync with the objects stored on
