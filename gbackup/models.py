@@ -189,6 +189,7 @@ class FSEntry(models.Model):
           UNION ALL
           SELECT gbackup_fsentry.parent_id FROM gbackup_fsentry
           INNER JOIN ancestors ON (gbackup_fsentry.id=ancestors.id)
+          WHERE gbackup_fsentry.parent_id IS NOT NULL
         ) UPDATE gbackup_fsentry SET obj_id=NULL
           WHERE gbackup_fsentry.id IN ancestors
         """, (self.id,))
