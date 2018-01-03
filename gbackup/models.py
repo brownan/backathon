@@ -41,6 +41,20 @@ class Object(models.Model):
     def __repr__(self):
         return "<Object {}>".format(self.objid)
 
+    @classmethod
+    def empty_garbage(cls):
+        # untested: TODO test this
+        query = """
+        WITH RECURSIVE reachable(id) AS (
+            SELECT root_id FROM gbackup_snapshot
+            UNION ALL
+            SELECT to_object_id FROM gbackup_object_children
+            INNER JOIN reachable ON reachable.id=from_object_id
+        ) SELECT gbackup_object.* FROM gbackup_object
+          WHERE gbackup_object.objid NOT IN reachable
+        """
+        pass # TODO: execute
+
 class PathField(models.CharField):
     """Stores path strings as their binary version
 

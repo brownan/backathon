@@ -47,7 +47,7 @@ def backup():
             except StopIteration:
                 pass
 
-            # Sanity check: If a bug in the entry.backup() method doesn't do
+            # Sanity check: If a bug in the entry.backup() method doesn't set
             # one of these, the entry will be selected next iteration,
             # causing an infinite loop
             assert entry.obj_id is not None or entry.id is None

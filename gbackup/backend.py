@@ -46,7 +46,7 @@ class Backend:
             obj_instance, isnew = models.Object.objects.get_or_create(
                 objid=objid,
                 defaults={
-                    'payload':view if objtype in ('tree', 'inode') else None,
+                    'payload':view if objtype != "blob" else None,
                 },
             )
 
@@ -84,7 +84,7 @@ class Backend:
         """
         pass # TODO
 
-    def check_cache(self):
+    def verify_cache(self):
         """Walks the local tree of objects and makes sure we have everything
         we should. This performs a sanity check on the local database
         consistency and integrity. If anything comes up wrong here, it could
