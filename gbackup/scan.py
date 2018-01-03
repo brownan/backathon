@@ -1,3 +1,5 @@
+import sys
+
 from tqdm import tqdm
 
 from django.db.transaction import atomic
@@ -77,9 +79,22 @@ def scan():
         ):
             entry.scan()
 
+            # Guard against bugs in scan() causing an infinite loop
+            assert entry.new is False
+
         # Subsequent iterations get any new entries
         qs = models.FSEntry.objects.filter(new=True)
 
-    # The above only invalidates individual entries. This routine marks each
-    # parent of such entries as invalidated as well.
-    models.FSEntry.invalidate_parents()
+    # Validation. Remove once I get the bugs worked out of the scan() routine.
+    qs = models.FSEntry.objects.select_related("parent").filter(
+        obj__isnull=True,
+        parent__isnull=False
+    )
+    for entry in tqdm(
+        qs.iterator(),
+        desc="Validating",
+        total=qs.count(),
+        unit='entries',
+    ):
+        # Make sure all invalidated entries also have their parents invalidated
+        assert entry.parent.obj_id is None

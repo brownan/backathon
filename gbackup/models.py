@@ -14,6 +14,46 @@ from . import chunker
 
 scanlogger = logging.getLogger("gbackup.scan")
 
+class DependencyError(Exception):
+    pass
+
+class PathField(models.CharField):
+    """Stores path strings as their binary version
+
+    On Linux, filenames are binary strings, but are typically displayed using a
+    system encoding. Some filenames may contain un-decodable byte sequences,
+    however, and Python will automatically embed un-decodable bytes as
+    unicode surrogates, as specified in PEP 383.
+
+    This field stores file paths as binary sequences, and uses the
+    os.fsencode() and os.fsdecode() functions to translate to and from
+    strings when loading/saving from the database.
+
+    This avoids encoding problems, as passing a string with surrogates to
+    SQLite will raise an exception when trying to encode.
+
+    Note that many of the common query lookups don't work on BLOB fields the
+    same as TEXT fields. For example, using the __startswith lookup will
+    never match because SQLite doesn't implement the LIKE operator for BLOB
+    types.
+    """
+    def __init__(self, **kwargs):
+        kwargs.setdefault("max_length", 4096)
+        super().__init__(**kwargs)
+
+    def get_internal_type(self):
+        return "BinaryField"
+
+    def get_prep_value(self, value):
+        if isinstance(value, str):
+            return os.fsencode(value)
+        return value
+
+    def from_db_value(self, value, expression, connection):
+        if isinstance(value, bytes):
+            return os.fsdecode(value)
+        return value
+
 class Object(models.Model):
     """This table keeps track of what objects exist in the remote data store
 
@@ -54,43 +94,6 @@ class Object(models.Model):
           WHERE gbackup_object.objid NOT IN reachable
         """
         pass # TODO: execute
-
-class PathField(models.CharField):
-    """Stores path strings as their binary version
-
-    On Linux, filenames are binary strings, but are typically displayed using a
-    system encoding. Some filenames may contain un-decodable byte sequences,
-    however, and Python will automatically embed un-decodable bytes as
-    unicode surrogates, as specified in PEP 383.
-
-    This field stores file paths as binary sequences, and uses the
-    os.fsencode() and os.fsdecode() functions to translate to and from
-    strings when loading/saving from the database.
-
-    This avoids encoding problems, as passing a string with surrogates to
-    SQLite will raise an exception when trying to encode.
-
-    Note that many of the common query lookups don't work on BLOB fields the
-    same as TEXT fields. For example, using the __startswith lookup will
-    never match because SQLite doesn't implement the LIKE operator for BLOB
-    types.
-    """
-    def __init__(self, **kwargs):
-        kwargs.setdefault("max_length", 4096)
-        super().__init__(**kwargs)
-
-    def get_internal_type(self):
-        return "BinaryField"
-
-    def get_prep_value(self, value):
-        if isinstance(value, str):
-            return os.fsencode(value)
-        return value
-
-    def from_db_value(self, value, expression, connection):
-        if isinstance(value, bytes):
-            return os.fsdecode(value)
-        return value
 
 class FSEntry(models.Model):
     """Keeps track of an entry in the local filesystem, either a directory,
@@ -174,6 +177,21 @@ class FSEntry(models.Model):
 
     def __str__(self):
         return self.printablepath
+
+    def invalidate(self):
+        """Runs a query to invalidate this node and all parents up to the root
+
+        """
+        cursor = connection.cursor()
+        cursor.execute("""
+        WITH RECURSIVE ancestors(id) AS (
+          SELECT id FROM gbackup_fsentry WHERE id=?
+          UNION ALL
+          SELECT gbackup_fsentry.parent_id FROM gbackup_fsentry
+          INNER JOIN ancestors ON (gbackup_fsentry.id=ancestors.id)
+        ) UPDATE gbackup_fsentry SET obj_id=NULL
+          WHERE gbackup_fsentry.id IN ancestors
+        """, (self.id,))
 
     @atomic()
     def scan(self):
@@ -274,6 +292,7 @@ class FSEntry(models.Model):
 
         scanlogger.info("Entry updated: {}".format(self))
         self.save()
+        self.invalidate()
         return
 
     def backup(self):
@@ -426,35 +445,6 @@ class FSEntry(models.Model):
 
         self.save()
         return
-
-    @classmethod
-    def invalidate_parents(cls):
-        """For each child that is invalidated, mark all parents up to the
-        root as invalid
-
-        An invalided node is one that doesn't have an obj. This recursive
-        query walks the tree and finds the set of all nodes that have an
-        invalid descendant, and invalidates them all.
-
-        """
-        cursor = connection.cursor()
-        cursor.execute("""
-        WITH RECURSIVE needs_update(id) AS (
-          SELECT id FROM gbackup_fsentry WHERE obj_id IS NULL 
-          UNION ALL
-          SELECT gbackup_fsentry.parent_id FROM gbackup_fsentry
-          INNER JOIN needs_update ON (gbackup_fsentry.id = needs_update.id)
-        ) UPDATE gbackup_fsentry SET obj_id=NULL
-          WHERE gbackup_fsentry.id IN needs_update
-        """)
-        # I'd like to return the cursor.rowcount indicating how many rows
-        # were updated, but SQLite doesn't implement that for recursive
-        # queries apparently
-
-
-
-class DependencyError(Exception):
-    pass
 
 class Snapshot(models.Model):
     """A snapshot of a filesystem at a particular time"""

@@ -29,8 +29,12 @@ class DatabaseWrapper(base.DatabaseWrapper):
         # big operation is running
         conn.execute("PRAGMA journal_mode=WAL")
 
-        # Memory-mapped IO can help performance on read-heavy loads. It doesn't
-        # help performance according to some quick tests, but I doubt it will
-        # hurt.
-        conn.execute("PRAGMA mmap_size=1073741824;")
+        # Memory-mapped IO can help performance on read-heavy loads by
+        # avoiding a lot of read() system calls, but according to some quick
+        # tests it doesn't help our workload  much. It doesn't hurt, except
+        # that Linux reports shared memory as memory used by the process,
+        # making this process look like it's using more memory than it
+        # actually is. So I keep this off for development so it's easy to
+        # verify if a routine or query uses a lot of memory.
+        #conn.execute("PRAGMA mmap_size=1073741824;")
         return conn
