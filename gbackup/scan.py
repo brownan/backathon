@@ -84,17 +84,3 @@ def scan():
 
         # Subsequent iterations get any new entries
         qs = models.FSEntry.objects.filter(new=True)
-
-    # Validation. Remove once I get the bugs worked out of the scan() routine.
-    qs = models.FSEntry.objects.select_related("parent").filter(
-        obj__isnull=True,
-        parent__isnull=False
-    )
-    for entry in tqdm(
-        qs.iterator(),
-        desc="Validating",
-        total=qs.count(),
-        unit='entries',
-    ):
-        # Make sure all invalidated entries also have their parents invalidated
-        assert entry.parent.obj_id is None
