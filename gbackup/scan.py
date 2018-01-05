@@ -80,7 +80,7 @@ def scan():
             entry.scan()
 
             # Guard against bugs in scan() causing an infinite loop
-            assert entry.new is False
+            assert entry.new is False or entry.id is None
 
         # Subsequent iterations get any new entries
         qs = models.FSEntry.objects.filter(new=True)
