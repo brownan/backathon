@@ -304,7 +304,7 @@ class FSEntry(models.Model):
         store. The caller is expected to send the Object instance
         back into this iterator function.
 
-        Yields: (payload_type, payload_buffer)
+        Yields: (payload_buffer, list_of_child_FSEntry_objects)
         Caller sends: models.Object instance of the last yielded payload
 
         The payload_buffer will be a file-like object ready for reading.
@@ -355,6 +355,7 @@ class FSEntry(models.Model):
             chunks = []
             childobjs = []
 
+            # TODO: handle permission denied errors
             try:
                 with open(self.path, "rb") as fobj:
                     for pos, chunk in chunker.DefaultChunker(fobj):
