@@ -1,3 +1,4 @@
+from django.utils import timezone
 from tqdm import tqdm
 
 from . import models
@@ -63,3 +64,14 @@ def backup():
         assert ct > 0
         progress2.update(1)
 
+    now = timezone.now()
+
+    for root in models.FSEntry.objects.filter(
+        parent__isnull=True
+    ):
+        assert root.obj_id is not None
+        models.Snapshot.objects.create(
+            path=root.path,
+            root_id=root.obj_id,
+            date=now,
+        )
