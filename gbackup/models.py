@@ -3,6 +3,8 @@ import os
 import os.path
 import stat
 import logging
+import math
+import random
 
 import umsgpack
 
@@ -83,17 +85,58 @@ class Object(models.Model):
 
     @classmethod
     def empty_garbage(cls):
-        # untested: TODO test this
+        """Uses a bloom filter to collect most of the garbage.
+
+        This takes two passes over the database table and uses only the memory
+        for the bloom filter array
+
+        """
+        num_objects = cls.objects.all().count()
+
+        # Construct a simple bloom filter such that we collect about 95% of
+        # all garbage objects. For a million objects, this requires about 6.2
+        # million bit array (760k) and 4 hash functions.
+        # m - number of bits in the filter
+        # k - number of hash functions needed
+        p = 0.05
+        m = int(math.ceil((num_objects * math.log(p)) / math.log(1 / math.pow(
+            2, math.log(2)))))
+        k = int(round(math.log(2) * m / num_objects))
+
+        arr_size = int(math.ceil(m/8))
+        bloom = bytearray(arr_size)
+
+        # The "hash" functions will just be a random number that will be
+        # xor'd with the object IDs. Using a different random int each time
+        # also guards against false positives from collisions happening from
+        # the same two objects each run.
+        r = random.SystemRandom()
+        hashes = [r.getrandbits(256) for _ in range(k)]
+
+        # This query iterates over all the reachable objects
         query = """
         WITH RECURSIVE reachable(id) AS (
             SELECT root_id FROM gbackup_snapshot
             UNION ALL
             SELECT to_object_id FROM gbackup_object_children
             INNER JOIN reachable ON reachable.id=from_object_id
-        ) SELECT gbackup_object.* FROM gbackup_object
-          WHERE gbackup_object.objid NOT IN reachable
+        ) SELECT id FROM reachable
         """
-        pass # TODO: execute
+        c = connection.cursor()
+        c.execute(query)
+        for row in c:
+            root_id_hex = row[0]
+            root_id = int(root_id_hex, 16)
+
+            for h in hashes:
+                h ^= root_id
+                h %= m
+                bytepos, bitpos = divmod(h, 8)
+                bloom[bytepos] |= 1 << bitpos
+
+        # Now we can iterate over all objects. If an object does not appear
+        # in the bloom filter, we can guarantee it's not reachable.
+        pass # TODO
 
 class FSEntry(models.Model):
     """Keeps track of an entry in the local filesystem, either a directory,
