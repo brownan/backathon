@@ -71,6 +71,9 @@ class DataStore:
     def exists(self, objname):
         pass # TODO
 
+    def delete_object(self, objname):
+        pass # TODO
+
     def rebuild_obj_cache(self):
         """Rebuilds the entire local object cache from the remote data store
 

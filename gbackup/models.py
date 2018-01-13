@@ -134,9 +134,19 @@ class Object(models.Model):
                 bytepos, bitpos = divmod(h, 8)
                 bloom[bytepos] |= 1 << bitpos
 
+        def hash_match(h, objid):
+            h ^= objid
+            h %= m
+            bytepos, bitpos = divmod(h, 8)
+            return bloom[bytepos] & (1 << bitpos)
+
         # Now we can iterate over all objects. If an object does not appear
         # in the bloom filter, we can guarantee it's not reachable.
-        pass # TODO
+        for obj in cls.objects.all().iterator():
+            objid = int(obj.id, 16)
+
+            if not all(hash_match(h, objid) for h in hashes):
+                pass # TODO: delete from DB before or after datastore?
 
 class FSEntry(models.Model):
     """Keeps track of an entry in the local filesystem, either a directory,
