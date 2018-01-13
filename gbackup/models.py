@@ -85,10 +85,9 @@ class Object(models.Model):
 
     @classmethod
     def empty_garbage(cls):
-        """Uses a bloom filter to collect most of the garbage.
+        """Yields garbage objects from the Object table
 
-        This takes two passes over the database table and uses only the memory
-        for the bloom filter array
+        Note: to avoid race conditions with detecting garbage and then
 
         """
         num_objects = cls.objects.all().count()
@@ -123,16 +122,25 @@ class Object(models.Model):
         ) SELECT id FROM reachable
         """
         c = connection.cursor()
-        c.execute(query)
-        for row in c:
-            root_id_hex = row[0]
-            root_id = int(root_id_hex, 16)
+        try:
+            c.execute(query)
+            for row in c:
+                root_id_hex = row[0]
+                root_id = int(root_id_hex, 16)
 
-            for h in hashes:
-                h ^= root_id
-                h %= m
-                bytepos, bitpos = divmod(h, 8)
-                bloom[bytepos] |= 1 << bitpos
+                for h in hashes:
+                    h ^= root_id
+                    h %= m
+                    bytepos, bitpos = divmod(h, 8)
+                    bloom[bytepos] |= 1 << bitpos
+        finally:
+            # Leaving a query open with sqlite may cause it to leave some
+            # locks held or to leave autocommit mode off. This is a
+            # theoretical problem that is probably solved by Python garbage
+            # collecting the cursor, but just to be safe, explicitly close the
+            # cursor.
+            # https://www.sqlite.org/lockingv3.html
+            c.close()
 
         def hash_match(h, objid):
             h ^= objid
