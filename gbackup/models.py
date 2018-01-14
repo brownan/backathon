@@ -84,17 +84,35 @@ class Object(models.Model):
         return "<Object {}>".format(self.objid)
 
     @classmethod
-    def empty_garbage(cls):
-        """Yields garbage objects from the Object table
+    def collect_garbage(cls):
+        """Yields garbage objects from the Object table.
 
-        Note: to avoid race conditions with detecting garbage and then
+        Callers should take care to atomically delete objects in the remote
+        storage backend along with rows in the Object table. It's more
+        important to delete the rows, however, because if a row exists
+        without a backing object, that can corrupt future backups that may
+        try to reference that object. Leaving an un-referenced object on the
+        backing store doesn't hurt anything except by taking up space.
 
         """
+        # The approach implemented below is to construct a simple bloom filter
+        # such that we collect about 95% of all garbage objects. For a
+        # million objects, this requires about 6.2 million bit array (760k)
+        # and 4 hash functions.
+
+        # This approach was chosen because it should be quick (2 passes over
+        # the database, where the first pass is read-only) compared to a
+        # mark-and-sweep approach that would involve writing each row on the
+        # first pass. The problem with this approach is the race condition
+        # between when we build the filter and when we delete the garbage
+        # objects. It shouldn't be a problem if we assume there won't be
+        # another process simultaneously running a backup operation when
+        # we're doing garbage collection. If this situation turns out to be
+        # likely, then we'll have to implement some sort of locking
+        # mechanism, or change the garbage collection strategy.
+
         num_objects = cls.objects.all().count()
 
-        # Construct a simple bloom filter such that we collect about 95% of
-        # all garbage objects. For a million objects, this requires about 6.2
-        # million bit array (760k) and 4 hash functions.
         # m - number of bits in the filter
         # k - number of hash functions needed
         p = 0.05
@@ -112,7 +130,9 @@ class Object(models.Model):
         r = random.SystemRandom()
         hashes = [r.getrandbits(256) for _ in range(k)]
 
-        # This query iterates over all the reachable objects
+        # This query iterates over all the reachable objects by walking the
+        # hierarchy formed using the Snapshot table as the roots and
+        # traversing the links in the ManyToMany relation.
         query = """
         WITH RECURSIVE reachable(id) AS (
             SELECT root_id FROM gbackup_snapshot
@@ -154,7 +174,7 @@ class Object(models.Model):
             objid = int(obj.id, 16)
 
             if not all(hash_match(h, objid) for h in hashes):
-                pass # TODO: delete from DB before or after datastore?
+                yield obj
 
 class FSEntry(models.Model):
     """Keeps track of an entry in the local filesystem, either a directory,
