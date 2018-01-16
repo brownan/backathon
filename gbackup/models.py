@@ -385,10 +385,10 @@ class FSEntry(models.Model):
         store. The caller is expected to send the Object instance
         back into this iterator function.
 
-        Yields: (payload_buffer, list_of_child_FSEntry_objects)
+        Yields: (payload_buffer, list_of_child_Object_instances)
         Caller sends: models.Object instance of the last yielded payload
 
-        The payload_buffer will be a file-like object ready for reading.
+        The payload_buffer is a file-like object ready for reading.
         Usually a BytesIO instance.
 
         Note: this sequence of operations was chosen over having this
