@@ -51,7 +51,7 @@ def scan():
     # SQLite will return an error. SQLite doesn't allow binding parameters to a
     # statement that's stepped through results without resetting it first [6].
 
-    # So this code is only compatibly with Python 3.5.3 and above unless
+    # So this code is only compatible with Python 3.5.3 and above unless
     # someone finds another workaround.
 
     # This took me a good 2-3 days to figure out. Phew!
