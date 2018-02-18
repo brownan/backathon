@@ -27,7 +27,12 @@ class DataStore:
             buf.seek(pos)
 
     def push_object(self, payload, children):
-        """Pushes the given payload as a new object into the object store
+        """Pushes the given payload as a new object into the object store.
+
+        Returns the newly created models.Object instance.
+
+        If the payload already exists in the remote data store, then it is
+        not uploaded, and the existing object is returned instead.
 
         :param payload: The file-like object to push to the remote data store
         :type payload: io.BytesIO
@@ -37,20 +42,23 @@ class DataStore:
 
         :returns: The new or existing Object
         :rtype: models.Object
+
+        Note that since this routine is called during backup, we expect all
+        dependent objects to be in the database already.
         """
-        objtype = self._get_obj_type(payload)
         view = payload.getbuffer()
         objid = self.hasher(view).hexdigest()
 
         with atomic():
-            obj_instance, isnew = models.Object.objects.get_or_create(
-                objid=objid,
-                defaults={
-                    'payload':view if objtype != "blob" else None,
-                },
-            )
+            try:
+                obj_instance = models.Object.objects.get(
+                    objid=objid
+                )
+            except models.Object.DoesNotExist:
+                # Object wasn't in the database. Create it.
+                obj_instance = models.Object(objid=objid)
+                obj_instance.load_payload(view)
 
-            if isnew:
                 obj_instance.children.set(children)
                 name = "objects/{}/{}".format(
                     objid[:2],
@@ -58,8 +66,19 @@ class DataStore:
                 )
                 self.storage.save(name, payload)
             else:
-                # At the cost of another database query, we do a sanity check
-                # here
+                # It was already in the database
+                # Do a sanity check to make sure the object's payload is the
+                # same as the one we found in the database. They should be
+                # since the objects are addressed by the hash of their
+                # payload, so this would only happen if there's a bug or
+                # someone mucked with the database manually (by changing the
+                # payload).
+                assert view == obj_instance.payload
+                # At the cost of another database query, also check the
+                # children match. The set of children passed in comes from
+                # FSEntry.backup(), as the FSEntry's children's objects. The
+                # the Object keeps its own list of children which should be the
+                # same.
                 assert set(children) == set(obj_instance.children.all())
 
         return obj_instance

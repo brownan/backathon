@@ -83,6 +83,36 @@ class Object(models.Model):
     def __repr__(self):
         return "<Object {}>".format(self.objid)
 
+    def load_payload(self, payload):
+        """Loads a payload of data into this Object entry
+
+        When an object is created or an object is being downloaded from a
+        remote data store, the blob contents get stored locally. This method
+        takes the blob and stores it, but also does any deeper processing
+        needed to build indices to make searching the backups easier and faster.
+
+        :type payload: bytes
+
+        Which indices are populated is configurable, and not all indices may
+        be used depending on the settings. For example, caching filenames of
+        tree and inode objects enables file searching, but it takes up quite
+        a bit of disk space for those fields and indices on those fields.
+
+        This method is idempotent.
+
+        If settings related to the indices change, then you'll need to
+        iterate through all Objects and call obj.load_payload(obj.payload) to
+        recompute fields that may not have been populated.
+        """
+        buf = io.BytesIO(payload)
+        objtype = umsgpack.unpack(buf)
+
+        if objtype != "blob":
+            self.payload = payload
+
+        # TODO: further processing and indexing of the contents of the payload.
+        # (no other indices are currently implemented)
+
     @classmethod
     def collect_garbage(cls):
         """Yields garbage objects from the Object table.
@@ -295,7 +325,9 @@ class FSEntry(models.Model):
         scanlogger.debug("Entering scan for {}".format(self))
         try:
             stat_result = os.lstat(self.path)
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):
+            # NotADirectoryError can happen if we're trying to scan a file,
+            # but one of its parent directories is no longer a directory.
             scanlogger.info("Not found, deleting: {}".format(self))
             self.delete()
             return
