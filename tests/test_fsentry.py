@@ -423,3 +423,15 @@ class FSEntryBackup(TestBase):
         self.assert_objects({
             self.backupdir: {'dir': {}}
         })
+
+    def test_invalid_utf8_filename(self):
+        """Tests that a file with invalid utf-8 in the name can be backed up"""
+        name = os.fsdecode(b"\xff\xffhello\xff\xff")
+        self.create_file(name, "file contents")
+        scan.scan()
+        backup.backup()
+
+        self.assert_objects({
+            self.backupdir: {name: "file contents"}
+        })
+
