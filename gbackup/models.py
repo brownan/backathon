@@ -12,6 +12,7 @@ from django.db import models, IntegrityError
 from django.db.transaction import atomic
 from django.db import connection
 
+from gbackup.datastore import get_datastore
 from . import chunker
 from . import util
 
@@ -113,6 +114,19 @@ class Object(models.Model):
 
         # TODO: further processing and indexing of the contents of the payload.
         # (no other indices are currently implemented)
+
+    def unpack_payload(self):
+        """Returns an iterator over this object's payload msgpack objects"""
+        if self.payload:
+            buf = util.BytesReader(self.payload)
+        else:
+            datastore = get_datastore()
+            buf = datastore.get_object(self.objid)
+        while True:
+            try:
+                yield umsgpack.unpack(buf)
+            except umsgpack.InsufficientDataException:
+                return
 
     @classmethod
     def collect_garbage(cls):

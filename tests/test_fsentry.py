@@ -1,5 +1,6 @@
 import stat
 from unittest import mock
+import os
 
 from django.test import TestCase
 
@@ -170,10 +171,93 @@ class FSEntryScan(TestBase):
 
 class FSEntryBackup(TestBase):
 
+    def setUp(self):
+        super().setUp()
+        models.FSEntry.objects.create(path=self.backupdir)
+
+    def _assert_file_obj(self, obj, contents):
+        """Asserts that the given object is a file object with the given
+        contents"""
+        payload = obj.unpack_payload()
+        self.assertEqual("inode", next(payload))
+
+        info = next(payload)
+        chunks = next(payload)
+        self.assertRaises(StopIteration, next,payload)
+
+        buf = bytearray(info['size'])
+        for pos, chunkid in chunks:
+            chunk = models.Object.objects.get(objid=chunkid)
+            chunkpayload = chunk.unpack_payload()
+            self.assertEqual("blob", next(chunkpayload))
+            chunkcontents = next(chunkpayload)
+            self.assertRaises(StopIteration, next,chunkpayload)
+            buf[pos:pos+len(chunkcontents)] = chunkcontents
+
+        self.assertEqual(buf.decode("UTF-8"), contents)
+
+    def _assert_dir(self, obj, contents):
+        """Asserts that the given object is a dir object with the given
+        contents"""
+        payload = obj.unpack_payload()
+        self.assertEqual("tree", next(payload))
+
+        info = next(payload)
+        children = next(payload)
+        self.assertRaises(StopIteration, next,payload)
+
+        children_objs = {
+            name: models.Object.objects.get(objid=objid)
+            for name, objid in children
+        }
+        self.assert_objects(contents, children_objs)
+
+    def assert_objects(self, structure, objects=None):
+        """Asserts that a hierarchy of objects described by `structure`
+        exists in the database
+
+        :param structure: A mapping of names to structure|string describing
+            the layout of the objects
+        :param objects: A mapping of name to Object instances. Used on
+        recursive calls back into this method.
+
+        Each structure or string in the structure dict will be checked
+        against its corresponding Object
+        """
+        if objects is None:
+            objects = {
+                os.fsencode(s.path): s.root
+                for s in models.Snapshot.objects.all()
+            }
+        structure = {
+            os.fsencode(name): contents
+            for name, contents in structure.items()
+        }
+
+        for name, contents in structure.items():
+            self.assertIn(
+                name,
+                objects,
+                "Object {} not found".format(name)
+            )
+            obj = objects.pop(name)
+            if isinstance(contents, str):
+                self._assert_file_obj(obj, contents)
+            elif isinstance(contents, dict):
+                self._assert_dir(obj, contents)
+            else:
+                raise TypeError("Unknown contents type")
+
+        self.assertEqual(
+            0,
+            len(objects),
+            "Extra objects not expected: {}".format(objects),
+        )
+
+
     def test_backup(self):
         self.create_file("dir/file1", "file contents")
         self.create_file("dir/file2", "file contents 2")
-        models.FSEntry.objects.create(path=self.backupdir)
         scan.scan()
         self.assertEqual(
             4,
@@ -189,9 +273,54 @@ class FSEntryBackup(TestBase):
             models.Object.objects.count()
         )
 
+        self.assert_objects({
+            self.backupdir: {
+                'dir': {
+                    'file1': 'file contents',
+                    'file2': 'file contents 2',
+                }
+            }
+        })
+
+    def test_backup_identical_files(self):
+        self.create_file("file1", "file contents")
+        self.create_file("file2", "file contents")
+        scan.scan()
+        backup.backup()
+        self.assert_objects({
+            self.backupdir: {
+                'file1': 'file contents',
+                'file2': 'file contents',
+            }
+        })
+        # Inode objects differ, so 4 total objects uploaded
+        self.assertEqual(
+            4,
+            models.Object.objects.count()
+        )
+
+    def test_backup_hardlinked_files(self):
+        file = self.create_file("file1", "file contents")
+        os.link(
+            file,
+            file.parent / "file2"
+        )
+        scan.scan()
+        backup.backup()
+        self.assert_objects({
+            self.backupdir: {
+                'file1': 'file contents',
+                'file2': 'file contents',
+            }
+        })
+        # The inode objects should be identical, so 3 total objects uploaded
+        self.assertEqual(
+            3,
+            models.Object.objects.count()
+        )
+
     def test_file_disappeared(self):
         file = self.create_file("dir/file1", "file contents")
-        models.FSEntry.objects.create(path=self.backupdir)
         scan.scan()
         self.assertEqual(
             3,
@@ -210,7 +339,6 @@ class FSEntryBackup(TestBase):
 
     def test_file_type_change(self):
         file = self.create_file("dir/file1", "file contents")
-        models.FSEntry.objects.create(path=self.backupdir)
         scan.scan()
         self.assertEqual(
             3,
@@ -234,7 +362,6 @@ class FSEntryBackup(TestBase):
         # race condition. So we patch os.lstat to delete the file right after
         # the lstat call.
         file = self.create_file("dir/file1", "file contents")
-        models.FSEntry.objects.create(path=self.backupdir)
         scan.scan()
         self.assertEqual(
             3,
@@ -267,7 +394,6 @@ class FSEntryBackup(TestBase):
 
     def test_permission_denied_file(self):
         file = self.create_file("dir/file1", "file contents")
-        models.FSEntry.objects.create(path=self.backupdir)
         scan.scan()
         self.assertEqual(
             3,

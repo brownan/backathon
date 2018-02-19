@@ -2,7 +2,7 @@ from django.utils import timezone
 from tqdm import tqdm
 
 from . import models
-from .datastore import DataStore
+from .datastore import get_datastore
 
 def backup():
 
@@ -18,7 +18,7 @@ def backup():
     progress = tqdm(total=to_backup.count(), unit="files")
     progress2 = tqdm(desc="pass", unit="")
 
-    datastore = DataStore()
+    datastore = get_datastore()
 
     while to_backup.exists():
 

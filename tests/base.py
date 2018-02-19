@@ -34,7 +34,7 @@ class TestBase(TestCase):
         pathobj = pathlib.Path(self.path(path))
         if not pathobj.parent.exists():
             pathobj.parent.mkdir(parents=True)
-        pathobj.write_text(contents)
+        pathobj.write_text(contents, encoding="UTF-8")
         return pathobj
 
     def tearDown(self):

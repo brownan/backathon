@@ -7,6 +7,9 @@ import umsgpack
 
 from gbackup import models
 
+class CorruptedRepositoryException(Exception):
+    pass
+
 class DataStore:
     """This class acts as an interface to the storage backend
 
@@ -61,10 +64,7 @@ class DataStore:
                 obj_instance.save()
 
                 obj_instance.children.set(children)
-                name = "objects/{}/{}".format(
-                    objid[:2],
-                    objid,
-                )
+                name = self._get_path(objid)
                 self.storage.save(name, payload)
             else:
                 # It was already in the database
@@ -74,7 +74,8 @@ class DataStore:
                 # payload, so this would only happen if there's a bug or
                 # someone mucked with the database manually (by changing the
                 # payload).
-                assert view == obj_instance.payload
+                assert view == obj_instance.payload \
+                       or obj_instance.payload is None
                 # At the cost of another database query, also check the
                 # children match. The set of children passed in comes from
                 # FSEntry.backup(), as the FSEntry's children's objects. The
@@ -84,9 +85,30 @@ class DataStore:
 
         return obj_instance
 
-    def get_object(self, name):
-        """Retrieves the object. Checks the cache first."""
-        pass # TODO
+    def _get_path(self, objid):
+        """Returns the path for the given objid"""
+        return "objects/{}/{}".format(
+            objid[:2],
+            objid,
+        )
+
+    def get_object(self, objid):
+        """Retrieves the object from the remote datastore.
+
+        Returns an open file-like object with the Object's payload, decrypted
+        and verified if applicable.
+        """
+        file = self.storage.open(self._get_path(objid))
+        hasher = self.hasher()
+        for chunk in file.chunks():
+            hasher.update(chunk)
+        digest = hasher.hexdigest()
+        if digest != objid:
+            raise CorruptedRepositoryException("Object payload does not "
+                                               "match its hash for objid "
+                                               "{}".format(objid))
+        file.seek(0)
+        return file
 
     def exists(self, objname):
         pass # TODO
@@ -126,3 +148,6 @@ class DataStore:
 
     def get_snapshot_list(self):
         """Gets a list of snapshots"""
+
+def get_datastore():
+    return DataStore()
