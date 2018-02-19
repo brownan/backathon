@@ -58,6 +58,7 @@ class DataStore:
                 # Object wasn't in the database. Create it.
                 obj_instance = models.Object(objid=objid)
                 obj_instance.load_payload(view)
+                obj_instance.save()
 
                 obj_instance.children.set(children)
                 name = "objects/{}/{}".format(

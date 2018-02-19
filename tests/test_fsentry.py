@@ -2,7 +2,7 @@ import stat
 
 from django.test import TestCase
 
-from gbackup import models, scan
+from gbackup import models, scan, backup
 from .base import TestBase
 
 class FSEntryTest(TestCase):
@@ -167,3 +167,23 @@ class FSEntryScan(TestBase):
             models.FSEntry.objects.filter(parent__isnull=True).count()
         )
 
+class FSEntryBackup(TestBase):
+
+    def test_backup(self):
+        self.create_file("dir/file1", "file contents")
+        self.create_file("dir/file2", "file contents 2")
+        models.FSEntry.objects.create(path=self.backupdir)
+        scan.scan()
+        self.assertEqual(
+            4,
+            models.FSEntry.objects.count()
+        )
+        backup.backup()
+        self.assertTrue(
+            all(entry.obj is not None for entry in
+                models.FSEntry.objects.all())
+        )
+        self.assertEqual(
+            6,
+            models.Object.objects.count()
+        )

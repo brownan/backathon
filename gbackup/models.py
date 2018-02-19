@@ -525,7 +525,15 @@ class FSEntry(models.Model):
             # the information we need is already in the database.
             children = list(self.children.all().select_related("obj"))
             if any(c.obj is None for c in children):
-                raise DependencyError(self.printablepath)
+                raise DependencyError(
+                    "{} depends on these paths, but they haven't been "
+                    "backed up yet. This is a bug. {}"
+                    "".format(
+                        self.printablepath,
+                        ", ".join(c.printablepath
+                                  for c in children if c.obj is None),
+                    )
+                )
 
             buf = io.BytesIO()
             umsgpack.pack("tree", buf)

@@ -32,7 +32,8 @@ class TestBase(TestCase):
     def create_file(self, path, contents):
         assert not path.startswith("/")
         pathobj = pathlib.Path(self.path(path))
-        pathobj.parent.mkdir(parents=True)
+        if not pathobj.parent.exists():
+            pathobj.parent.mkdir(parents=True)
         pathobj.write_text(contents)
         return pathobj
 
