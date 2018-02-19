@@ -13,6 +13,7 @@ from django.db.transaction import atomic
 from django.db import connection
 
 from . import chunker
+from . import util
 
 scanlogger = logging.getLogger("gbackup.scan")
 
@@ -104,7 +105,7 @@ class Object(models.Model):
         iterate through all Objects and call obj.load_payload(obj.payload) to
         recompute fields that may not have been populated.
         """
-        buf = io.BytesIO(payload)
+        buf = util.BytesReader(payload)
         objtype = umsgpack.unpack(buf)
 
         if objtype != "blob":
@@ -491,7 +492,7 @@ class FSEntry(models.Model):
                 # up. This code path may leave one or more objects saved to
                 # the remote storage, but there's not much we can do about
                 # that here. (Basically, since every exit from this method
-                # must either acquire and save an objid or delete itself,
+                # must either acquire and save an obj or delete itself,
                 # we have no choice)
                 self.delete()
                 return
