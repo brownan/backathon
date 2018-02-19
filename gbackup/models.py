@@ -468,7 +468,6 @@ class FSEntry(models.Model):
             chunks = []
             childobjs = []
 
-            # TODO: handle permission denied errors
             try:
                 with open(self.path, "rb") as fobj:
                     for pos, chunk in chunker.DefaultChunker(fobj):
@@ -484,6 +483,7 @@ class FSEntry(models.Model):
                 self.delete()
                 return
             except OSError as e:
+                # This happens with permission denied errors
                 scanlogger.exception("Error in system call when reading file "
                                      "{}".format(self))
                 # In order to not crash the entire backup, we must delete
@@ -524,6 +524,9 @@ class FSEntry(models.Model):
             # from the filesystem aside from the lstat() call from above. All
             # the information we need is already in the database.
             children = list(self.children.all().select_related("obj"))
+
+            # This block asserts all children have been backed up. If they
+            # haven't, then the caller is in error. This method isn't recursive.
             if any(c.obj is None for c in children):
                 raise DependencyError(
                     "{} depends on these paths, but they haven't been "

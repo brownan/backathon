@@ -1,4 +1,5 @@
 import stat
+from unittest import mock
 
 from django.test import TestCase
 
@@ -186,4 +187,101 @@ class FSEntryBackup(TestBase):
         self.assertEqual(
             6,
             models.Object.objects.count()
+        )
+
+    def test_file_disappeared(self):
+        file = self.create_file("dir/file1", "file contents")
+        models.FSEntry.objects.create(path=self.backupdir)
+        scan.scan()
+        self.assertEqual(
+            3,
+            models.FSEntry.objects.count()
+        )
+        file.unlink()
+        backup.backup()
+        self.assertEqual(
+            2,
+            models.FSEntry.objects.count()
+        )
+        self.assertEqual(
+            2,
+            models.Object.objects.count(),
+        )
+
+    def test_file_type_change(self):
+        file = self.create_file("dir/file1", "file contents")
+        models.FSEntry.objects.create(path=self.backupdir)
+        scan.scan()
+        self.assertEqual(
+            3,
+            models.FSEntry.objects.count()
+        )
+        file.unlink()
+        file.mkdir()
+        backup.backup()
+        self.assertEqual(
+            2,
+            models.FSEntry.objects.count()
+        )
+        self.assertEqual(
+            2,
+            models.Object.objects.count(),
+        )
+
+    def test_file_disappeared_2(self):
+        # We want to delete the file after the initial lstat() call,
+        # but before the file is opened for reading later on, to test this
+        # race condition. So we patch os.lstat to delete the file right after
+        # the lstat call.
+        file = self.create_file("dir/file1", "file contents")
+        models.FSEntry.objects.create(path=self.backupdir)
+        scan.scan()
+        self.assertEqual(
+            3,
+            models.FSEntry.objects.count()
+        )
+
+        import os
+        real_lstat = os.lstat
+        def lstat(path):
+            stat_result = real_lstat(path)
+            if path == str(file):
+                file.unlink()
+            return stat_result
+        self.stack.enter_context(
+            mock.patch(
+                "os.lstat",
+                lstat,
+            )
+        )
+
+        backup.backup()
+        self.assertEqual(
+            2,
+            models.FSEntry.objects.count()
+        )
+        self.assertEqual(
+            2,
+            models.Object.objects.count(),
+        )
+
+    def test_permission_denied_file(self):
+        file = self.create_file("dir/file1", "file contents")
+        models.FSEntry.objects.create(path=self.backupdir)
+        scan.scan()
+        self.assertEqual(
+            3,
+            models.FSEntry.objects.count()
+        )
+
+        file.chmod(0o000)
+
+        backup.backup()
+        self.assertEqual(
+            2,
+            models.FSEntry.objects.count()
+        )
+        self.assertEqual(
+            2,
+            models.Object.objects.count(),
         )
