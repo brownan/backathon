@@ -74,12 +74,12 @@ class FSEntryScan(TestBase):
         models.FSEntry.objects.create(path=self.backupdir)
         scan.scan()
         self.assertTrue(
-            models.FSEntry.objects.filter(path=file.as_posix()).exists()
+            models.FSEntry.objects.filter(path=os.fspath(file)).exists()
         )
         file.unlink()
         scan.scan()
         self.assertFalse(
-            models.FSEntry.objects.filter(path=file.as_posix()).exists()
+            models.FSEntry.objects.filter(path=os.fspath(file)).exists()
         )
 
     def test_deleted_dir(self):
@@ -90,10 +90,10 @@ class FSEntryScan(TestBase):
         file.parent.rmdir()
         scan.scan()
         self.assertFalse(
-            models.FSEntry.objects.filter(path=file.parent.as_posix()).exists()
+            models.FSEntry.objects.filter(path=os.fspath(file.parent)).exists()
         )
         self.assertFalse(
-            models.FSEntry.objects.filter(path=file.as_posix()).exists()
+            models.FSEntry.objects.filter(path=os.fspath(file)).exists()
         )
 
     def test_replace_dir_with_file(self):
@@ -104,19 +104,19 @@ class FSEntryScan(TestBase):
         file.parent.rmdir()
         file.parent.write_text("another  file contents")
         # Scan the parent first
-        models.FSEntry.objects.get(path=file.parent.as_posix()).scan()
+        models.FSEntry.objects.get(path=os.fspath(file.parent)).scan()
         scan.scan()
         self._replace_dir_with_file_asserts(file)
 
     def _replace_dir_with_file_asserts(self, file):
         self.assertTrue(
-            models.FSEntry.objects.filter(path=file.parent.as_posix()).exists()
+            models.FSEntry.objects.filter(path=os.fspath(file.parent)).exists()
         )
         self.assertFalse(
-            models.FSEntry.objects.filter(path=file.as_posix()).exists()
+            models.FSEntry.objects.filter(path=os.fspath(file)).exists()
         )
         entry = models.FSEntry.objects.get(
-            path=file.parent.as_posix()
+            path=os.fspath(file.parent)
         )
         self.assertEqual(
             entry.children.count(),
@@ -134,7 +134,7 @@ class FSEntryScan(TestBase):
         file.parent.rmdir()
         file.parent.write_text("another  file contents")
         # Scan the file first
-        models.FSEntry.objects.get(path=file.as_posix()).scan()
+        models.FSEntry.objects.get(path=os.fspath(file)).scan()
         scan.scan()
         self._replace_dir_with_file_asserts(file)
 
@@ -146,10 +146,10 @@ class FSEntryScan(TestBase):
         scan.scan()
 
         self.assertTrue(
-            models.FSEntry.objects.filter(path=file.parent.as_posix()).exists()
+            models.FSEntry.objects.filter(path=os.fspath(file.parent)).exists()
         )
         self.assertFalse(
-            models.FSEntry.objects.filter(path=file.as_posix()).exists()
+            models.FSEntry.objects.filter(path=os.fspath(file)).exists()
         )
 
         # Set permission back so the tests can be cleaned up
@@ -158,7 +158,7 @@ class FSEntryScan(TestBase):
     def test_root_merge(self):
         file = self.create_file("dir1/dir2/file", "file contents")
         models.FSEntry.objects.create(path=self.backupdir)
-        models.FSEntry.objects.create(path=file.parent.as_posix())
+        models.FSEntry.objects.create(path=os.fspath(file.parent))
         self.assertEqual(
             2,
             models.FSEntry.objects.filter(parent__isnull=True).count()
@@ -336,6 +336,9 @@ class FSEntryBackup(TestBase):
             2,
             models.Object.objects.count(),
         )
+        self.assert_objects({
+            self.backupdir: {'dir': {}}
+        })
 
     def test_file_type_change(self):
         file = self.create_file("dir/file1", "file contents")
@@ -355,6 +358,9 @@ class FSEntryBackup(TestBase):
             2,
             models.Object.objects.count(),
         )
+        self.assert_objects({
+            self.backupdir: {'dir': {}}
+        })
 
     def test_file_disappeared_2(self):
         # We want to delete the file after the initial lstat() call,
@@ -391,6 +397,9 @@ class FSEntryBackup(TestBase):
             2,
             models.Object.objects.count(),
         )
+        self.assert_objects({
+            self.backupdir: {'dir': {}}
+        })
 
     def test_permission_denied_file(self):
         file = self.create_file("dir/file1", "file contents")
@@ -411,3 +420,6 @@ class FSEntryBackup(TestBase):
             2,
             models.Object.objects.count(),
         )
+        self.assert_objects({
+            self.backupdir: {'dir': {}}
+        })
