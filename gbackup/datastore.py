@@ -21,14 +21,6 @@ class DataStore:
         self.storage = django.core.files.storage.default_storage
         self.hasher = hashlib.sha256
 
-    @staticmethod
-    def _get_obj_type(buf):
-        pos = buf.tell()
-        try:
-            return umsgpack.unpack(buf)
-        finally:
-            buf.seek(pos)
-
     def push_object(self, payload, children):
         """Pushes the given payload as a new object into the object store.
 
