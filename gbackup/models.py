@@ -168,6 +168,14 @@ class Object(models.Model):
         # likely, then we'll have to implement some sort of locking
         # mechanism, or change the garbage collection strategy.
 
+        # TODO: it's theoretically possible to recursively iterate over
+        # the entire set of unreachable objects. Each recursive call you
+        # iterate over objects that are unreachable when excluding the
+        # current garbage set. This may be more memory expensive if the
+        # garbage set is very large, however. An iterative approach may work:
+        #  where Python selects all unreachable objects, deletes them,
+        # then repeats until no more unreachable objects are found.
+
         num_objects = cls.objects.all().count()
 
         # m - number of bits in the filter

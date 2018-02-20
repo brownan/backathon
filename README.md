@@ -31,7 +31,25 @@ ideas from Borg, Duplicati, Bup, and others.
 GBackup runs on Linux using Python 3.5.3 or newer. At the moment, 
 compatability with any other platforms is coincidental.
 
+These features are not a priority at the moment
+
+* Multi-client support (multiple machines backing up to the same repository, 
+with deduplication across all files. This would require repository locking 
+and synchronizing of metadata, which isn't a problem I want to tackle right 
+now)
+
 ## Architecture
+
+### Terminology
+
+Repository - The remote storage service where backup data is stored, 
+    typically encrypted.
+    
+Backup set - The set of files on a local filesystem to be backed up. This is 
+    defined by a single path to a root directory.
+    
+Snapshot - When a backup set is backed up, that forms a snapshot of all the 
+    files in the backup set.
 
 ### Scan process
 
@@ -97,6 +115,100 @@ The backup process thus consists of iterating over all entries in the
 database that are flagged as needing backup, and backing them up.
 
 ### Storage Format
+
+The storage repository is loosely based on Git's object store. With this, 
+everything uploaded into the repository is an object, and objects are named 
+after a hash of their contents. This has the advantage of inherent 
+deduplication, as two objects with the same contents will only be stored once.
+
+In this system, there are three kinds of objects: Tree objects, Inode 
+objects, and Blob objects. They roughly correspond to their respective 
+filesystem counterparts.
+
+Tree objects store stat info about a directory, as well as a list of 
+directory entries and the name of the objects for each entry. Directory 
+entries can be other tree objects or inode objects.
+
+Inode objects store stat info about a file, and a list of blob objects that 
+make up the content of that file.
+
+Blob objects store a blob of data.
+
+Since each object is named with a hash of its contents, and objects reference
+other objects by name, this forms a merkle tree. A root object's hash 
+cryptographicall verifies the entire object tree for a snapshot (much like Git).
+If another snapshot is taken and only one file changed deep in the filesystem, 
+then pushed to the repository are objects for the new file, as well as new 
+objects for all parent directories up to the root.
+
+Note that in this heirarchy of objects, objects may be referenced more than 
+once—they may have more than one parent. A blob may be referenced by more 
+than one inode (or several times in the same file), but also inode and tree 
+objects may be referenced by more than one snapshot.
+
+### Chunking
+
+When backing up a file, the file's contents is split into chunks and each 
+chunk is uploaded individually as its own blob. The algorithm for how to 
+chunk the file will determine how good the deduplication is. Larger chunks 
+mean it's less likely to match content elsewhere, while smaller chunks mean 
+more uploads and more network overhead and slower uploads.
+
+Some backup systems (such as Borg) use variable sized chunks and a rolling 
+hash to determine where to split the chunk boundaries. This has the advantage
+of synchronizing chunk boundaries to the content. Consider a fixed size chunk
+of 4MB. A large file that doesn't change will use the same set of objects 
+every time. But what if a single byte is inserted at the beginning of the 
+file, pushing all the rest down one byte. Now suddenly the chunks don't match
+previously uploaded ones, so the entire file is re-uploaded.
+
+With Borg, a rolling hash over the last 4095 bytes means the decision to 
+split a file is only based on the last 4095 bytes before the split. If two 
+files have the same 4095 byte sequence before a chunk, they will both have a 
+chunk split in the same place, no matter where those 4095 bytes fall in the 
+file.
+
+This self-synchronization helps a lot to deduplicate large files whose 
+contents is moving around. However, I believe this is rather rare. Consider 
+most files in an average home directory of a personal computer fall into 
+these categories:
+
+* Text files
+* Compressed binary documents (images, docx, xlsx)
+
+Text files are typically small such that re-uploading the entire file on 
+change won't be much overhead.
+ 
+For large binary files, typically the format is such that the application 
+does its own management of data, and won't involve shifting large amounts of 
+data due to inserts or deletes in the file. A notable exception may be
+video files for video editing work.
+
+Finding similarities between two large files may be nice but I feel it's 
+probably not very common. An exception to this may be virtual machine images.
+
+Anyays, for now I don't believe using a rolling hash provides much practical
+benefit, although it should be easy to substitute the chunking algorithm at a
+later point.
+
+### Object Cache
+
+In the local database, a cache of objects is kept in a table. This table 
+helps keep track of objects that have been uploaded to the remote repository,
+saving network requests. This also lets us avoid uploading a file even if the
+scanning process thinks a file changed when it hasn't. The file will be split
+into chunks, the chunks hashed, and then the hash looked up in the database.
+If the object already exists in the database, then it's assumed to have been 
+uploaded to the repository already.
+
+The Object cache also keeps track of relationships between objects. This is 
+used when removing an old snapshot. When a snapshot is removed, the 
+objects aren't immediately deleted, since they may be referenced by other 
+snapshots. Instead, a garbage collection routine is used to traverse the 
+object tree starting at each root, and calculate a set of unreachable objects.
+Those objects are then deleted from the local cache and the remote repository.
+
+### Pack files
 
 ### Backup process
 
