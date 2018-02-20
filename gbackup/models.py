@@ -120,13 +120,17 @@ class Object(models.Model):
         if self.payload:
             buf = util.BytesReader(self.payload)
         else:
-            datastore = get_datastore()
-            buf = datastore.get_object(self.objid)
+            buf = self.open_remote()
         while True:
             try:
                 yield umsgpack.unpack(buf)
             except umsgpack.InsufficientDataException:
                 return
+
+    def open_remote(self):
+        """Opens the payload object from the remote datastore"""
+        datastore = get_datastore()
+        return datastore.get_object(self.objid)
 
     @classmethod
     def collect_garbage(cls):

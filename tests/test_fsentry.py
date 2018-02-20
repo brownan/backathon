@@ -2,9 +2,10 @@ import stat
 from unittest import mock
 import os
 
+import umsgpack
 from django.test import TestCase
 
-from gbackup import models, scan, backup
+from gbackup import models, scan, backup, util
 from .base import TestBase
 
 class FSEntryTest(TestCase):
@@ -291,7 +292,24 @@ class FSEntryBackup(TestBase):
     def test_objects_comitted(self):
         """Do a backup and then assert the objects actually get comitted to
         the backing store"""
-        pass # TODO
+        self.create_file("dir/file1", "file contents")
+        scan.scan()
+        backup.backup()
+
+        for obj in models.Object.objects.all():
+            cached_payload = obj.payload
+            remote_payload = obj.open_remote().read()
+            if cached_payload is None:
+                self.assertEqual(
+                    "blob",
+                    umsgpack.unpack(util.BytesReader(remote_payload))
+                )
+            else:
+                self.assertEqual(
+                    cached_payload,
+                    remote_payload,
+                )
+
 
     def test_backup(self):
         self.create_file("dir/file1", "file contents")
