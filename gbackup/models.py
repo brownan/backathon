@@ -116,16 +116,24 @@ class Object(models.Model):
         # (no other indices are currently implemented)
 
     def unpack_payload(self):
-        """Returns an iterator over this object's payload msgpack objects"""
+        """Returns an iterator over this object's payload, iterating over the
+        msgpacked objects
+
+        If the object's payload is not cached locally, it is fetched from the
+        remote store.
+        """
         if self.payload:
             buf = util.BytesReader(self.payload)
         else:
             buf = self.open_remote()
-        while True:
-            try:
-                yield umsgpack.unpack(buf)
-            except umsgpack.InsufficientDataException:
-                return
+        try:
+            while True:
+                try:
+                    yield umsgpack.unpack(buf)
+                except umsgpack.InsufficientDataException:
+                    return
+        finally:
+            buf.close()
 
     def open_remote(self):
         """Opens the payload object from the remote datastore"""

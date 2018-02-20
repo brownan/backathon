@@ -310,7 +310,6 @@ class FSEntryBackup(TestBase):
                     remote_payload,
                 )
 
-
     def test_backup(self):
         self.create_file("dir/file1", "file contents")
         self.create_file("dir/file2", "file contents 2")
