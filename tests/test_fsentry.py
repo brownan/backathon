@@ -210,25 +210,25 @@ class FSEntryBackup(TestBase):
             name: models.Object.objects.get(objid=objid)
             for name, objid in children
         }
-        self.assert_objects(contents, children_objs)
+        self._assert_objects(contents, children_objs)
 
-    def assert_objects(self, structure, objects=None):
+    def _assert_objects(self, structure, objects):
         """Asserts that a hierarchy of objects described by `structure`
-        exists in the database
+        is the same as the hierarchy of objects given by `objects`
 
         :param structure: A mapping of names to structure|string describing
-            the layout of the objects
-        :param objects: A mapping of name to Object instances. Used on
-        recursive calls back into this method.
+            the layout of the objects. Another structure indicates the name
+            is a directory, and a string indicates it's a file where the
+            string is the file's contents.
+        :param objects: A mapping of names to Object instances.
 
-        Each structure or string in the structure dict will be checked
-        against its corresponding Object
+        Corresponding names in the structure and objects dictionaries are
+        checked for equivalence.
         """
-        if objects is None:
-            objects = {
-                os.fsencode(s.path): s.root
-                for s in models.Snapshot.objects.all()
-            }
+
+        # Encode all file names and we do byte comparisons throughout this
+        # method and the helper methods. It's easier than decoding the object
+        # file names everywhere they appear.
         structure = {
             os.fsencode(name): contents
             for name, contents in structure.items()
@@ -254,6 +254,44 @@ class FSEntryBackup(TestBase):
             "Extra objects not expected: {}".format(objects),
         )
 
+    def assert_backupsets(self, *structures):
+        """Asserts that the given structures exist in the database as objects
+
+        The given structures describe what files we've backed up, and should
+        exist as a set of object files in the local database.
+
+        Each structure is a dictionary mapping names to values. Each value is
+        either another structure (indicating the name is a directory) or a
+        string (indicating the name is a file with the string as its contents)
+
+        The names in the top level structures are the backup roots, which for
+        these tests, should always be just self.backupdir unless the specific
+        test adds more backup roots.
+
+        Each structure in the structures list is a separate backup. So if a
+        test does one backup, then there should be one structure given. If a
+        test does two backups, then it should provide two structures
+        describing the contents of each backup.
+        """
+        backup_dates = models.Snapshot.objects.distinct().order_by(
+            "date").values_list("date", flat=True)
+
+        self.assertEqual(
+            len(structures),
+            len(backup_dates),
+        )
+
+        for structure, date in zip(structures, backup_dates):
+            roots = {
+                os.fsencode(s.path): s.root
+                for s in models.Snapshot.objects.filter(date=date)
+            }
+            self._assert_objects(structure, roots)
+
+    def test_objects_comitted(self):
+        """Do a backup and then assert the objects actually get comitted to
+        the backing store"""
+        pass # TODO
 
     def test_backup(self):
         self.create_file("dir/file1", "file contents")
@@ -273,7 +311,7 @@ class FSEntryBackup(TestBase):
             models.Object.objects.count()
         )
 
-        self.assert_objects({
+        self.assert_backupsets({
             self.backupdir: {
                 'dir': {
                     'file1': 'file contents',
@@ -287,7 +325,7 @@ class FSEntryBackup(TestBase):
         self.create_file("file2", "file contents")
         scan.scan()
         backup.backup()
-        self.assert_objects({
+        self.assert_backupsets({
             self.backupdir: {
                 'file1': 'file contents',
                 'file2': 'file contents',
@@ -307,7 +345,7 @@ class FSEntryBackup(TestBase):
         )
         scan.scan()
         backup.backup()
-        self.assert_objects({
+        self.assert_backupsets({
             self.backupdir: {
                 'file1': 'file contents',
                 'file2': 'file contents',
@@ -336,7 +374,7 @@ class FSEntryBackup(TestBase):
             2,
             models.Object.objects.count(),
         )
-        self.assert_objects({
+        self.assert_backupsets({
             self.backupdir: {'dir': {}}
         })
 
@@ -358,7 +396,7 @@ class FSEntryBackup(TestBase):
             2,
             models.Object.objects.count(),
         )
-        self.assert_objects({
+        self.assert_backupsets({
             self.backupdir: {'dir': {}}
         })
 
@@ -397,7 +435,7 @@ class FSEntryBackup(TestBase):
             2,
             models.Object.objects.count(),
         )
-        self.assert_objects({
+        self.assert_backupsets({
             self.backupdir: {'dir': {}}
         })
 
@@ -420,7 +458,7 @@ class FSEntryBackup(TestBase):
             2,
             models.Object.objects.count(),
         )
-        self.assert_objects({
+        self.assert_backupsets({
             self.backupdir: {'dir': {}}
         })
 
@@ -431,7 +469,7 @@ class FSEntryBackup(TestBase):
         scan.scan()
         backup.backup()
 
-        self.assert_objects({
+        self.assert_backupsets({
             self.backupdir: {name: "file contents"}
         })
 
