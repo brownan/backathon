@@ -1,101 +1,104 @@
 # Gbackup
 
-Gbackup is a personal backup solution that has the following goals:
+***Note: This project is currently in the experiment phase. I'm trying out 
+some ideas and maybe it'll turn into something useful, maybe not. But for 
+now, this is not a working backup solution.***
 
-* Client side encryption
-* Content-addressable storage system
-* Runs as a daemon (no cobbling together of wrapper scripts)
-* Built in backup scheduler (no more cron)
-* Continuous file monitoring with inotify (no expensive scanning of the entire 
-backup set)
-* Backup and prune operations do not require the secret encryption key
-* Verify and restore operations require the encryption secret key
+Gbackup is a personal file backup solution that has the following main goals:
+
+* Low runtime memory usage
+* Fast and efficient filesystem scans to discover changed files
+* Content-addressable storage backend (loosely based on Git's object format, 
+hence Gbackup)
+
+Other goals that are a priority for me:
+
+* No special software needed on remote storage server (plan to target 
+Backblaze B2)
+* Client side encryption (plan to incorporate libsodium)
+* Runs as a daemon with built-in scheduler (no cobbling together wrapper 
+scripts and cron)
+* Continuous file monitoring with inotify (this goal was originally intended to 
+avoid having to do expensive filesystem scans, but I've since made the scanning 
+quite efficient, so this may not be necessary)
+* Use asymmetric key encryption to allow backup and prune operations 
+without the secret key. Restore operations will require the secret key. (See 
+below about encryption)
 
 No other backup programs I've found quite met these criteria. Gbackup takes 
-ideas from Borg, Duplicati, Bup, and others, with a backing storage format 
-inspired by Git (hence the G in Gbackup)
+ideas from Borg, Duplicati, Bup, and others.
+
+GBackup runs on Linux using Python 3.5.3 or newer. At the moment, 
+compatability with any other platforms is coincidental.
 
 ## Architecture
 
-The backup procedure consists of 3 processes, described here.
+### Scan process
 
-### 1. Scan process
+One of the fundamental aspects of any backup software is deciding which files
+to back up and which files haven't changed since last backup. Some software, 
+e.g. rsync, don't keep any local state and check which files have changed by 
+comparing file attributes against a remote copy of the file. Some software 
+keep a local database either in memory or on disk of file attributes and
+compared the database values with the file. This is all to avoid transferring
+more data across a perhaps slow network connection than is necessary, but 
+with very large filesystems to back up, it's a necessary optimization.
+ 
+GBackup can't read remote data, since that data may be encrypted with a 
+private key that the backup process won't have access to. So our only option 
+is to keep a local cache of file attributes of every file in the backup set. 
+Early experiments used hierarchy of Python objects in memory. When the 
+process started, the filesystem was traversed and the hierarchy of objects 
+created, each object storing file attributes. Periodically, a simple 
+recursive algorithm could traverse this tree in a post-order to iterate over 
+all filesystem entries to either see if they've changed, or iterate over only
+changed objects to back them up. Additionally, this architecture has a nice 
+Python implementation using recursive generator functions and Python's `yield 
+from` expressions. Each object's backup() function would yield objects to 
+back up, and recurse using `yield from` into its child objects before backing
+itself up.
 
-We effectively perform a breadth-first-search on the tree, but iteratively, 
-not recursively.
+This approach wasn't very fast and required quite a lot of memory to run. So 
+I decided to experiment with the other extreme: store nothing in memory and
+put all state into a local SQLite database. This turns out to have a lot of 
+other advantages, in that I can do SQL queries to select and sort entries 
+however I want, and gives more flexability in how I traverse the filesystem. 
+But more importantly, it turns out to be very fast, with low memory usage. 
+Scans are bounded mostly by the time to perform the lstat system call on 
+every file on the filesytem.
 
-First iteration: The root is the only object in the table, and it is selected 
-and updated. Root's entry is updated with its os.lstat() information, and its 
-children are enumerated and inserted into the FSEntry table with no other 
-metadata. 
+The current scan process is a multi-pass scan. On the first pass, it 
+iterates over all objects in the local database (in arbitrary order) and 
+performs an lstat to see if the entry has changed from what's in the database.
+If it has changed, it's flagged as needing backup. For directories needing 
+backup, a listdir call lists the children and any new entries are created for
+new children. 
 
-Second iteration: The children are selected (all objects that have no 
-metadata are selected. TODO: what is the selection criteria?). Those objects 
-are updated, which runs os.lstat() and gets their information and updates 
-those database entries. *If the object's metadata changes, its objid is set 
-to NULL indicating the cache is invalid and it needs updating next backup.* Any 
-new directory entries have listdir() called and their children are inserted 
-into the database with no metadata.
+Subsequent passes perform the same operation on all newly created entries for
+new files. Passes continue until there are no new files to scan.
 
-Iterations continue until there are no new entries with no metadata selected 
-from the database. At this point, the database's cached representation of the
-filesystem is complete.
+This approach to scanning turns out to be very fast, especially for 
+subsequent scans but even the inital scan. Memory usage remains low and if 
+database writes are performed in a single SQLite transaction, IO is also kept
+to a minimum. The reason scans are quick is it avoids problems with recursive 
+tree traversals: each visit to a node would require a separate database query
+or listdir call to get the list of children, which is more IO to perform. By 
+scanning files in no particular order, every entry is streamed from the 
+database in large batches and IO is kept to a minimum. The limiting factor is
+having to perform all the lstat calls for every filesystem entry.
 
-Note: The first-ever scan initially selects only the root node, but 
-subsequent scans will select *every* node for the first iteration. Further 
-iterations will catch new files and directories.
+Note that a directory's mtime is updated by the creation or deletion of files
+in the directory, so we can avoid listdir on unchanging directories. Also, if
+the scan turns out to be CPU bound, it is easily parallelizable. However, 
+raw speed is not the top priority, as consuming all of the CPU is not 
+desirable for a program that runs in the background.
 
-### 2. Invalidation process
+The backup process thus consists of iterating over all entries in the 
+database that are flagged as needing backup, and backing them up.
 
-Any objects in the FSEntry table that don't have an object ID indicate they 
-have no backing object in the remote store. This could be because they are 
-new objects or because they have changed (as determined by the scan process).
+### Storage Format
 
-Problem is, changed objects don't automatically invalidate their parent 
-objects. This process scans the table and invalidates parent entries whose 
-children have no object ID.
+### Backup process
 
-### 3. Backup process
+### Encryption
 
-Once the scan is complete, the tree is recursively traversed in a 
-depth-first-search post-order traversal (so leaves are enumerated first). This
-lets us upload objects that need uploading, and return object IDs to the 
-parents for their use. It also lets us avoid traversing down branches that 
-already have an object ID, and thus don't need updating (as determined by the
-scan process)
-
-### About the processes
-
-Because there may be quite some time between a scan and the backup, FSEntry 
-nodes are updated again with the latest metadata when an entry is backed up. 
-The scan process may thus seem redundant, but it is still necessary to 
-discover nodes deep in the tree that need updating, which we wouldn't find 
-with a simple tree traversal unless we traversed the *entire* tree.
-
-While the scan process effectively *is* traversing the entire tree (just not 
-in any particular order), this is easier to do efficiently than a recursive 
-tree traversal. Traversing the *entire* tree recursively is a heavy database 
-load since each recursive call has to do a database query to discover the 
-children. With this architecture, it's much quicker because the first 
-iteration is a single query and updates the vast majority of entries.
-
-I experimented with using a raw, recursive SQLite query to get all the 
-nodes in a post-order traversal, but that has some gotchas with integrating 
-with Django, as Django doesn't stream results from RawQuerySet querysets from
-SQLite [1]. There are also gotchas with updating a table while reading from the 
-same table in SQLite [2], which is probably why Django doesn't stream entries
-from sqlite cursors.
-
-[1] https://github.com/django/django/blob/master/django/db/backends/sqlite3/features.py#L7
-
-[2] https://www.sqlite.org/isolation.html
-
-Also note that while the Django documentation says SQLite doesn't 
-support streaming results at all [3], it does actually efficiently execute 
-querysets when you use the .iterator() method. I'm not clear if this is a 
-mistake in the Django implementation or docs, but according to my tests, we can 
-efficiently execute large queries with regular (non-Raw) querysets with 
-Django on SQLite. We still need to be aware of the isolation limitations 
-noted in [2] though.
-
-[3] https://docs.djangoproject.com/en/2.0/ref/models/querysets/#without-server-side-cursors
