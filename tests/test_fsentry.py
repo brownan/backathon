@@ -12,7 +12,7 @@ class FSEntryTest(TestCase):
 
     def test_invalidate(self):
         """Tests that the FSEntry.invalidate() method works"""
-        o = models.Object.objects.create(objid="a")
+        o = models.Object.objects.create(objid=b"a")
 
         root = models.FSEntry.objects.create(
             path="/1",

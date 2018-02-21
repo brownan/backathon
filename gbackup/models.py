@@ -73,7 +73,11 @@ class Object(models.Model):
     when a root object is deleted, a set of unreachable garbage objects can
     be calculated.
     """
-    objid = models.CharField(max_length=64, primary_key=True)
+    # This is the binary representation of the hash of the payload.
+    # To get the int representation, you can use int.from_bytes(objid, 'big')
+    # To get the hex representation, use objid.hex() (Python 3.5 bytes.hex()
+    # method)
+    objid = models.BinaryField(primary_key=True)
     payload = models.BinaryField(blank=True, null=True)
 
     children = models.ManyToManyField(
@@ -210,11 +214,11 @@ class Object(models.Model):
         try:
             c.execute(query)
             for row in c:
-                root_id_hex = row[0]
-                root_id = int(root_id_hex, 16)
+                root_id = row[0]
+                root_id_int = int.from_bytes(root_id, 'big')
 
                 for h in hashes:
-                    h ^= root_id
+                    h ^= root_id_int
                     h %= m
                     bytepos, bitpos = divmod(h, 8)
                     bloom[bytepos] |= 1 << bitpos
@@ -236,7 +240,7 @@ class Object(models.Model):
         # Now we can iterate over all objects. If an object does not appear
         # in the bloom filter, we can guarantee it's not reachable.
         for obj in cls.objects.all().iterator():
-            objid = int(obj.id, 16)
+            objid = int.from_bytes(obj.objid, 'big')
 
             if not all(hash_match(h, objid) for h in hashes):
                 yield obj

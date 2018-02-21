@@ -42,7 +42,7 @@ class DataStore:
         dependent objects to be in the database already.
         """
         view = payload.getbuffer()
-        objid = self.hasher(view).hexdigest()
+        objid = self.hasher(view).digest()
 
         with atomic():
             try:
@@ -94,7 +94,7 @@ class DataStore:
         hasher = self.hasher()
         for chunk in file.chunks():
             hasher.update(chunk)
-        digest = hasher.hexdigest()
+        digest = hasher.digest()
         if digest != objid:
             raise CorruptedRepositoryException("Object payload does not "
                                                "match its hash for objid "

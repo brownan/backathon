@@ -4,7 +4,7 @@ from tqdm import tqdm
 from . import models
 from .datastore import get_datastore
 
-def backup():
+def backup(progress_enable=False):
 
     to_backup = models.FSEntry.objects.filter(obj__isnull=True)
 
@@ -15,8 +15,12 @@ def backup():
         id__in=to_backup.exclude(parent__isnull=True).values("parent_id")
     )
 
-    progress = tqdm(total=to_backup.count(), unit="files")
-    progress2 = tqdm(desc="pass", unit="")
+    if progress_enable:
+        progress = tqdm(total=to_backup.count(), unit="files")
+        progress2 = tqdm(desc="pass", unit="")
+    else:
+        progress = None
+        progress2 = None
 
     datastore = get_datastore()
 
@@ -53,7 +57,8 @@ def backup():
             # causing an infinite loop
             assert entry.obj_id is not None or entry.id is None
 
-            progress.update(1)
+            if progress:
+                progress.update(1)
 
         # Sanity check: if we entered the outer loop but the inner loop's
         # query didn't select anything, then we're not making progress and
@@ -62,7 +67,8 @@ def backup():
         # There would be entries needing backing up, but none of them have
         # all their dependent children backed up.
         assert ct > 0
-        progress2.update(1)
+        if progress2:
+            progress2.update(1)
 
     now = timezone.now()
 

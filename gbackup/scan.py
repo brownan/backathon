@@ -7,7 +7,7 @@ from django.db.transaction import atomic
 from . import models
 
 @atomic()
-def scan():
+def scan(progress=False):
     """Scans all FSEntry objects for changes
 
     The scan works in multiple passes. The first pass calls scan() on each
@@ -69,14 +69,18 @@ def scan():
         pass_ += 1
         count = qs.count()
 
+        iterator = qs.iterator()
+        if progress:
+            iterator = tqdm(
+                iterator,
+                desc="Pass {}".format(pass_),
+                total=count,
+                unit='entries',
+            )
+
         # This loop will sometimes iterate more than count times due to the
         # above noted SQLite undefined behavior.
-        for entry in tqdm(
-            qs.iterator(),
-            desc="Pass {}".format(pass_),
-            total=count,
-            unit='entries',
-        ):
+        for entry in iterator:
             entry.scan()
 
             # Guard against bugs in scan() causing an infinite loop
