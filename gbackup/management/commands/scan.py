@@ -12,7 +12,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **kwargs):
         t1 = time.time()
-        scan.scan()
+        scan.scan(progress=True)
         t2 = time.time()
 
         self.stderr.write("Scanned {} entries in {:.2f} seconds".format(

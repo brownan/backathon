@@ -57,7 +57,7 @@ def backup(progress_enable=False):
             # causing an infinite loop
             assert entry.obj_id is not None or entry.id is None
 
-            if progress:
+            if progress is not None:
                 progress.update(1)
 
         # Sanity check: if we entered the outer loop but the inner loop's
@@ -67,7 +67,7 @@ def backup(progress_enable=False):
         # There would be entries needing backing up, but none of them have
         # all their dependent children backed up.
         assert ct > 0
-        if progress2:
+        if progress2 is not None:
             progress2.update(1)
 
     now = timezone.now()

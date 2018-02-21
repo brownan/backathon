@@ -31,7 +31,7 @@ class TestObject(TransactionTestCase):
                     for c in children
                 ])
 
-    def assert_objects(self, objs, roots=None):
+    def assert_objects(self, objs, roots=None, no_extras=True):
         """Asserts that the given hierarchy exists in the database and that
         no other objects exist in the database
 
@@ -48,11 +48,13 @@ class TestObject(TransactionTestCase):
                 children,
                 obj.children.all(),
             )
-        self.assertDictEqual(
-            rootmap,
-            {},
-            "Unexpected object found"
-        )
+
+        if no_extras:
+            self.assertDictEqual(
+                rootmap,
+                {},
+                "Unexpected object found"
+            )
 
     def test_foreign_key_constraints(self):
         """Tests that the foreign key constraints are enforced by sqlite
@@ -125,9 +127,12 @@ class TestObject(TransactionTestCase):
         models.Snapshot.objects.filter(root_id=b"A").delete()
 
         garbage = list(models.Object.collect_garbage())
-        self.assertSetEqual(
-            {g.objid for g in garbage},
-            {b'A', b'C'}
+        # Garbage collection is stochastic, but should never collect
+        # non-garbage
+        self.assertTrue(
+            {g.objid for g in garbage}.issubset(
+                {b'A', b'C'}
+            ),
         )
 
         with atomic():
@@ -145,11 +150,6 @@ class TestObject(TransactionTestCase):
                     "J": {},
                 }
             }
-        })
-        self.assertEqual(
-            8,
-            models.Object.objects.count()
-        )
-
+        }, no_extras=False)
 
 

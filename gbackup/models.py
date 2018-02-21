@@ -88,7 +88,7 @@ class Object(models.Model):
     )
 
     def __repr__(self):
-        return "<Object {}>".format(self.objid)
+        return "<Object {}>".format(self.objid.hex())
 
     def load_payload(self, payload):
         """Loads a payload of data into this Object entry
@@ -158,34 +158,29 @@ class Object(models.Model):
 
         """
         # The approach implemented below is to construct a simple bloom filter
-        # such that we collect about 95% of all garbage objects. For a
-        # million objects, this requires about 6.2 million bit array (760k)
-        # and 4 hash functions.
+        # such that we collect about 95% of all garbage objects.
 
         # This approach was chosen because it should be quick (2 passes over
-        # the database, where the first pass is read-only) compared to a
-        # mark-and-sweep approach that would involve writing each row on the
-        # first pass. The problem with this approach is the race condition
-        # between when we build the filter and when we delete the garbage
-        # objects. It shouldn't be a problem if we assume there won't be
-        # another process simultaneously running a backup operation when
-        # we're doing garbage collection. If this situation turns out to be
-        # likely, then we'll have to implement some sort of locking
-        # mechanism, or change the garbage collection strategy.
+        # the database, where the first pass is read-only) and memory
+        # efficient (uses about 760k for a million objects in the table)
 
-        # TODO: it's theoretically possible to recursively iterate over
-        # the entire set of unreachable objects. Each recursive call you
-        # iterate over objects that are unreachable when excluding the
-        # current garbage set. This may be more memory expensive if the
-        # garbage set is very large, however. An iterative approach may work:
-        #  where Python selects all unreachable objects, deletes them,
-        # then repeats until no more unreachable objects are found.
+        # One alternative is to perform a query for objects with no
+        # references, which is quick due to indices on the
+        # gbackup_object_children table, but requires many queries in a loop
+        # to collect all garbage. It's theoretically possible to do this with
+        # a single recursive query, but that requires holding the entire
+        # garbage set in memory, which could get big.
+
+        # Another approach is a traditional garbage collection strategy such as
+        # mark-and-sweep. Problem with that is it would involve writing each
+        # row on the first pass, which is a lot more IO and would probably be
+        # slower.
 
         num_objects = cls.objects.all().count()
 
-        # m - number of bits in the filter
-        # k - number of hash functions needed
-        p = 0.05
+        # m - number of bits in the filter. Depends on num_objects
+        # k - number of hash functions needed. Should be 4 for p=0.05
+        p = 0.95
         m = int(math.ceil((num_objects * math.log(p)) / math.log(1 / math.pow(
             2, math.log(2)))))
         k = int(round(math.log(2) * m / num_objects))

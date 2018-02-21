@@ -20,7 +20,7 @@ class Command(BaseCommand):
         ))
 
         t1 = time.time()
-        backup.backup()
+        backup.backup(progress_enable=True)
         t2 = time.time()
 
         self.stderr.write("Backup took {:.2f} seconds".format(
