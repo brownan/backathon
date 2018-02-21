@@ -75,8 +75,9 @@ class Object(models.Model):
     """
     # This is the binary representation of the hash of the payload.
     # To get the int representation, you can use int.from_bytes(objid, 'big')
-    # To get the hex representation, use objid.hex() (Python 3.5 bytes.hex()
-    # method)
+    # To get the hex representation, use objid.hex()
+    # To create a bytes representation from a hex representation,
+    # use bytes.fromhex(hex_representation)
     objid = models.BinaryField(primary_key=True)
     payload = models.BinaryField(blank=True, null=True)
 
