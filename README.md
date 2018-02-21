@@ -83,7 +83,7 @@ other advantages, in that I can do SQL queries to select and sort entries
 however I want, and gives more flexability in how I traverse the filesystem. 
 But more importantly, it turns out to be very fast, with low memory usage. 
 Scans are bounded mostly by the time to perform the lstat system call on 
-every file on the filesytem.
+every file in the backup set.
 
 The current scan process is a multi-pass scan. On the first pass, it 
 iterates over all objects in the local database (in arbitrary order) and 
@@ -136,7 +136,7 @@ Blob objects store a blob of data.
 
 Since each object is named with a hash of its contents, and objects reference
 other objects by name, this forms a merkle tree. A root object's hash 
-cryptographicall verifies the entire object tree for a snapshot (much like Git).
+cryptographicaly verifies the entire object tree for a snapshot (much like Git).
 If another snapshot is taken and only one file changed deep in the filesystem, 
 then pushed to the repository are objects for the new file, as well as new 
 objects for all parent directories up to the root.
@@ -157,16 +157,16 @@ more uploads and more network overhead and slower uploads.
 Some backup systems (such as Borg) use variable sized chunks and a rolling 
 hash to determine where to split the chunk boundaries. This has the advantage
 of synchronizing chunk boundaries to the content. Consider a fixed size chunk
-of 4MB. A large file that doesn't change will use the same set of objects 
+of 4MB. A large file that doesn't change will use the same set of blob objects 
 every time. But what if a single byte is inserted at the beginning of the 
 file, pushing all the rest down one byte. Now suddenly the chunks don't match
 previously uploaded ones, so the entire file is re-uploaded.
 
-With Borg, a rolling hash over the last 4095 bytes means the decision to 
-split a file is only based on the last 4095 bytes before the split. If two 
-files have the same 4095 byte sequence before a chunk, they will both have a 
-chunk split in the same place, no matter where those 4095 bytes fall in the 
-file.
+With a rolling hash over the last 4095 bytes like Borg uses, as files are 
+scanned, the decision to split a file is based on the last 4095 bytes seen.
+If one file is split at a particular location, and another file has the same 
+4095 byte sequence somewhere in it, then there will be a chunk split there,
+no matter where those 4095 bytes fall in the file.
 
 This self-synchronization helps a lot to deduplicate large files whose 
 contents is moving around. However, I believe this is rather rare. Consider 
@@ -181,15 +181,23 @@ change won't be much overhead.
  
 For large binary files, typically the format is such that the application 
 does its own management of data, and won't involve shifting large amounts of 
-data due to inserts or deletes in the file. A notable exception may be
-video files for video editing work.
+data due to inserts or deletes in the file. The logic being that an 
+application managing a large binary format won't want to do a lot of data 
+moving or copying for efficiency reasons. So changes to the file aren't 
+likely to produce similarities at different positions in the file.
+ 
+Notable exceptions may include video files for video editing work, and virtual 
+machine images.
 
-Finding similarities between two large files may be nice but I feel it's 
-probably not very common. An exception to this may be virtual machine images.
-
-Anyays, for now I don't believe using a rolling hash provides much practical
+My conclusion is that below about 30MB [1] it's probably not worth splitting 
+files into more than one chunk. Further, a vast majority of files in my own home 
+directory are less than 1 MB: about 97% out of about a million files. So
+for now I don't believe using a rolling hash provides much practical
 benefit, although it should be easy to substitute the chunking algorithm at a
 later point.
+
+[1] 30MB is the threshold Backblaze uses, below which files aren't chunked.
+https://help.backblaze.com/hc/en-us/articles/217666728-How-does-Backblaze-handle-large-files-
 
 ### Object Cache
 
