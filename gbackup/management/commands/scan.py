@@ -28,3 +28,11 @@ class Command(BaseCommand):
                 to_backup.aggregate(size=Sum("st_size"))['size']
             )
         ))
+
+        clean = models.FSEntry.objects.filter(obj__isnull=False)
+        self.stderr.write("{} files ({}) clean".format(
+            clean.count(),
+            filesizeformat(
+                clean.aggregate(size=Sum("st_size"))['size']
+            )
+        ))

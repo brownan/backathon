@@ -31,10 +31,12 @@ class DatabaseWrapper(base.DatabaseWrapper):
 
         # Memory-mapped IO can help performance on read-heavy loads by
         # avoiding a lot of read() system calls, but according to some quick
-        # tests it doesn't help our workload  much. It doesn't hurt, except
-        # that Linux reports shared memory as memory used by the process,
-        # making this process look like it's using more memory than it
-        # actually is. So I keep this off for development so it's easy to
-        # verify if a routine or query uses a lot of memory.
+        # tests it doesn't speed up the code much, despite almost cutting the
+        # number of system calls in half during a scan.
+        # The only problem with leaving this on is that Linux counts shared
+        # memory toward's a process's RSS usage, making this process look
+        # like it's using more memory than it actually is. So I keep this off
+        # for development so it's easy to see if a routine or query uses
+        # more memory than I expect.
         #conn.execute("PRAGMA mmap_size=1073741824;")
         return conn
