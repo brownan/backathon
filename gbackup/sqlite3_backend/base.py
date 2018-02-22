@@ -27,7 +27,10 @@ class DatabaseWrapper(base.DatabaseWrapper):
         # one process accessing the database, this is mainly useful for
         # debugging: we can access the database while a scan or some other
         # big operation is running
-        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA journal_mode=WAL").close()
+
+        # The .close() fixes the cursor being left open causing SQLITE_BUSY
+        # on later commits. This is only a problem on PyPy.
 
         # Memory-mapped IO can help performance on read-heavy loads by
         # avoiding a lot of read() system calls, but according to some quick
@@ -38,5 +41,5 @@ class DatabaseWrapper(base.DatabaseWrapper):
         # like it's using more memory than it actually is. So I keep this off
         # for development so it's easy to see if a routine or query uses
         # more memory than I expect.
-        #conn.execute("PRAGMA mmap_size=1073741824;")
+        #conn.execute("PRAGMA mmap_size=1073741824;").close()
         return conn
