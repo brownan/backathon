@@ -1,5 +1,6 @@
 import sys
 import uuid
+import os
 
 DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
 MEDIA_ROOT = "/tmp/gbackup_storage"
@@ -8,7 +9,7 @@ DATABASES = {
     'default': {
         # 'ENGINE': 'django.db.backends.sqlite3',
         'ENGINE': 'gbackup.sqlite3_backend',
-        'NAME': "database.sqlite3",
+        'NAME': os.environ['GBACKUP_CONFIG'],
     }
 }
 INSTALLED_APPS = [
@@ -20,8 +21,7 @@ LOGGING = {
     "formatters": {
         "color": {
             "()": "colorlog.ColoredFormatter",
-            "format": "%(log_color)s%(levelname)-8s%(reset)s [%("
-                      "name)s] "
+            "format": "%(log_color)s%(levelname)-8s%(reset)s "
                       "%(message)s",
             "log_colors": {"DEBUG": "cyan", "INFO": "white",
                            "WARNING": "yellow", "ERROR": "red",
