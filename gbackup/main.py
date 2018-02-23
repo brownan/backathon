@@ -21,6 +21,17 @@ def main():
     commands = parser.add_subparsers(dest='command')
     init = commands.add_parser("init", help="Initialize a new local database "
                                             "cache")
+    init.add_argument(
+        "--storage-type",
+        dest="storage_type",
+        required=True,
+        choices=["local"],
+    )
+    init.add_argument(
+        "--storage-location",
+        dest="storage_location",
+        required=True,
+    )
 
     options = parser.parse_args()
 
@@ -37,7 +48,11 @@ def main():
     ))
 
     if options.command == "init":
+        logger.info("Creating/updating database...")
         call_command("migrate")
+        from gbackup.models import Setting
+        Setting.set("REPO_BACKEND", options.storage_type)
+        Setting.set("REPO_PATH", options.storage_location)
 
 if __name__ == "__main__":
     main()

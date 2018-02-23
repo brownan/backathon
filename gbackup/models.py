@@ -7,6 +7,7 @@ import math
 import random
 
 import umsgpack
+from django.core.exceptions import ImproperlyConfigured
 
 from django.db import models, IntegrityError
 from django.db.transaction import atomic
@@ -588,11 +589,14 @@ class Setting(models.Model):
     key = models.TextField(primary_key=True)
     value = models.TextField()
 
+    _empty = object()
     @classmethod
-    def get(cls, key, default):
+    def get(cls, key, default=_empty):
         try:
             return cls.objects.get(key=key).value
         except cls.DoesNotExist:
+            if default is cls._empty:
+                raise KeyError("No such setting: {}".format(key))
             return default
 
     @classmethod

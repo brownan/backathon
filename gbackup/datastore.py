@@ -1,9 +1,8 @@
 import hashlib
 
 import django.core.files.storage
+from django.core.exceptions import ImproperlyConfigured
 from django.db.transaction import atomic
-
-import umsgpack
 
 from gbackup import models
 
@@ -17,8 +16,15 @@ class DataStore:
     the backend.
     """
     def __init__(self):
-        # TODO: pull settings for these from the config or database
-        self.storage = django.core.files.storage.default_storage
+        backend = models.Setting.get("REPO_BACKEND")
+        if backend == "local":
+            self.storage = django.core.files.storage.FileSystemStorage(
+                location=models.Setting.get("REPO_PATH")
+            )
+        else:
+            raise ImproperlyConfigured("Invalid repository backend defined in "
+                                       "settings: {}".format(backend))
+
         self.hasher = hashlib.sha256
 
     def push_object(self, payload, children):
