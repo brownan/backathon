@@ -582,3 +582,20 @@ class Snapshot(models.Model):
         on_delete=models.PROTECT,
     )
     date = models.DateTimeField(db_index=True)
+
+class Setting(models.Model):
+    """Configuration table for settings set at runtime"""
+    key = models.TextField(primary_key=True)
+    value = models.TextField()
+
+    @classmethod
+    def get(cls, key, default):
+        try:
+            return cls.objects.get(key=key).value
+        except cls.DoesNotExist:
+            return default
+
+    @classmethod
+    def set(cls, key, value):
+        s = cls(key=key, value=value)
+        s.save()
