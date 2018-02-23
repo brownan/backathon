@@ -2,6 +2,8 @@
 
 from django.db import migrations, models
 import django.db.models.deletion
+
+import gbackup.fields
 import gbackup.models
 
 
@@ -17,7 +19,7 @@ class Migration(migrations.Migration):
             name='FSEntry',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('path', gbackup.models.PathField(help_text='Absolute path on the local filesystem', max_length=4096, unique=True)),
+                ('path', gbackup.fields.PathField(help_text='Absolute path on the local filesystem', max_length=4096, unique=True)),
                 ('new', models.BooleanField(db_index=True, default=True, help_text='Indicates this is a new entry and needs scanning. It forces an update to the metadata next scan.')),
                 ('st_mode', models.IntegerField(null=True)),
                 ('st_mtime_ns', models.IntegerField(null=True)),
@@ -36,7 +38,7 @@ class Migration(migrations.Migration):
             name='Snapshot',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('path', gbackup.models.PathField(help_text='Root directory of this snapshot', max_length=4096)),
+                ('path', gbackup.fields.PathField(help_text='Root directory of this snapshot', max_length=4096)),
                 ('date', models.DateTimeField(db_index=True)),
                 ('root', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='gbackup.Object')),
             ],
