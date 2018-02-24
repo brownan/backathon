@@ -526,8 +526,16 @@ class FSEntry(models.Model):
             # the information we need is already in the database.
             children = list(self.children.all().select_related("obj"))
 
-            # This block asserts all children have been backed up. If they
-            # haven't, then the caller is in error. This method isn't recursive.
+            # This block asserts all children have been backed up before
+            # entering this method. If they haven't, then the caller is in
+            # error. The current backup strategy involves the caller
+            # traversing nodes to back them up in an order that avoids
+            # dependency issues.
+            # A simplified backup strategy would be to make this method
+            # recursive (using `yield from`) and then just call backup on the
+            # root nodes. There's no reason I can think of that that wouldn't
+            # work. Enforcing this here is just a sanity check for the current
+            # backup strategy.
             if any(c.obj is None for c in children):
                 raise DependencyError(
                     "{} depends on these paths, but they haven't been "
