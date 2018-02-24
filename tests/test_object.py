@@ -152,4 +152,51 @@ class TestObject(TransactionTestCase):
             }
         }, no_extras=False)
 
+    def test_collect_garbage_2(self):
+        N = 1000
+        for root in ["A", "B"]:
+            obj = models.Object.objects.create(
+                objid="root_{}".format(root).encode("ASCII")
+            )
+            for i in range(N):
+                obj2 = models.Object.objects.create(
+                    objid="obj_{}_{}".format(root,i).encode("ASCII")
+                )
+                obj.children.set([obj2])
+                obj = obj2
 
+
+        models.Snapshot.objects.create(root_id=b"root_A",
+                                       date=datetime.date(2018, 1,1))
+        models.Snapshot.objects.create(root_id=b"root_B",
+                                       date=datetime.date(2018, 1,1))
+
+        self.assertEqual(
+            N*2 + 2,
+            models.Object.objects.count(),
+        )
+        garbage = list(models.Object.collect_garbage())
+        self.assertListEqual(
+            [],
+            garbage
+        )
+
+        models.Snapshot.objects.get(root_id=b"root_B").delete()
+        garbage = list(models.Object.collect_garbage())
+        self.assertLessEqual(
+            len(garbage),
+            N+1,
+        )
+        # Collect at least 90% of the garbage. At the time of writing,
+        # the garbage collector uses a bloom filter that is tuned to collect
+        # 95%, so this test could theoretically fail randomly, but it's
+        # unlikely.
+        self.assertGreater(
+            len(garbage),
+            0.9 * (N+1)
+        )
+        for obj in garbage:
+            objid = obj.objid.decode("ASCII")
+            self.assertTrue(
+                objid.startswith("obj_B") or objid == "root_B"
+            )

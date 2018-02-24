@@ -139,7 +139,7 @@ class Object(models.Model):
 
         # m - number of bits in the filter. Depends on num_objects
         # k - number of hash functions needed. Should be 4 for p=0.05
-        p = 0.95
+        p = 0.05
         m = int(math.ceil((num_objects * math.log(p)) / math.log(1 / math.pow(
             2, math.log(2)))))
         k = int(round(math.log(2) * m / num_objects))
