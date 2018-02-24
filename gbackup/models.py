@@ -86,17 +86,15 @@ class Object(models.Model):
         # TODO: further processing and indexing of the contents of the payload.
         # (no other indices are currently implemented)
 
-    def unpack_payload(self):
-        """Returns an iterator over this object's payload, iterating over the
-        msgpacked objects
+    @staticmethod
+    def unpack_payload(payload):
+        """Returns an iterator over a payload, iterating over the msgpacked
+        objects within
 
-        If the object's payload is not cached locally, it is fetched from the
-        remote store.
+        This exists as a static method since callers may need to call it
+        without wanting to load in into an Object instance
         """
-        if self.payload:
-            buf = util.BytesReader(self.payload)
-        else:
-            buf = self.open_remote()
+        buf = util.BytesReader(payload)
         try:
             while True:
                 try:
@@ -105,11 +103,6 @@ class Object(models.Model):
                     return
         finally:
             buf.close()
-
-    def open_remote(self):
-        """Opens the payload object from the remote datastore"""
-        datastore = get_datastore()
-        return datastore.get_object(self.objid)
 
     @classmethod
     def collect_garbage(cls):

@@ -5,7 +5,7 @@ import os
 import umsgpack
 from django.test import TestCase
 
-from gbackup import models, scan, backup, util
+from gbackup import models, scan, backup, util, datastore
 from .base import TestBase
 
 class FSEntryTest(TestCase):
@@ -175,11 +175,12 @@ class FSEntryBackup(TestBase):
     def setUp(self):
         super().setUp()
         models.FSEntry.objects.create(path=self.backupdir)
+        self.ds = datastore.get_datastore()
 
     def _assert_file_obj(self, obj, contents):
         """Asserts that the given object is a file object with the given
         contents"""
-        payload = obj.unpack_payload()
+        payload = obj.unpack_payload(obj.payload)
         self.assertEqual("inode", next(payload))
 
         info = next(payload)
@@ -189,7 +190,14 @@ class FSEntryBackup(TestBase):
         buf = bytearray(info['size'])
         for pos, chunkid in chunks:
             chunk = models.Object.objects.get(objid=chunkid)
-            chunkpayload = chunk.unpack_payload()
+            # Blob object should not have payloads
+            self.assertIs(
+                chunk.payload,
+                None
+            )
+            chunkpayload = chunk.unpack_payload(
+                self.ds.get_object(chunk.objid).read()
+            )
             self.assertEqual("blob", next(chunkpayload))
             chunkcontents = next(chunkpayload)
             self.assertRaises(StopIteration, next,chunkpayload)
@@ -200,7 +208,7 @@ class FSEntryBackup(TestBase):
     def _assert_dir(self, obj, contents):
         """Asserts that the given object is a dir object with the given
         contents"""
-        payload = obj.unpack_payload()
+        payload = obj.unpack_payload(obj.payload)
         self.assertEqual("tree", next(payload))
 
         info = next(payload)
@@ -295,10 +303,11 @@ class FSEntryBackup(TestBase):
         self.create_file("dir/file1", "file contents")
         scan.scan()
         backup.backup()
+        ds = datastore.get_datastore()
 
         for obj in models.Object.objects.all():
             cached_payload = obj.payload
-            remote_payload = obj.open_remote().read()
+            remote_payload = ds.get_object(obj.objid).read()
             if cached_payload is None:
                 self.assertEqual(
                     "blob",
