@@ -7,16 +7,14 @@ import math
 import random
 
 import umsgpack
-from django.core.exceptions import ImproperlyConfigured
 
 from django.db import models, IntegrityError
 from django.db.transaction import atomic
 from django.db import connection
 
-from gbackup.datastore import get_datastore
 from gbackup.fields import PathField
-from . import chunker
-from . import util
+from gbackup import chunker
+from gbackup import util
 
 scanlogger = logging.getLogger("gbackup.scan")
 
@@ -166,25 +164,15 @@ class Object(models.Model):
         ) SELECT id FROM reachable
         """
         c = connection.cursor()
-        try:
-            c.execute(query)
-            for row in c:
-                root_id = row[0]
-                root_id_int = int.from_bytes(root_id, 'big')
+        c.execute(query)
+        for row in c:
+            objid_int = int.from_bytes(row[0], 'big')
 
-                for h in hashes:
-                    h ^= root_id_int
-                    h %= m
-                    bytepos, bitpos = divmod(h, 8)
-                    bloom[bytepos] |= 1 << bitpos
-        finally:
-            # Leaving a query open with sqlite may cause it to leave some
-            # locks held or to leave autocommit mode off. This is a
-            # theoretical problem that is probably solved by Python garbage
-            # collecting the cursor, but just to be safe, explicitly close the
-            # cursor.
-            # https://www.sqlite.org/lockingv3.html
-            c.close()
+            for h in hashes:
+                h ^= objid_int
+                h %= m
+                bytepos, bitpos = divmod(h, 8)
+                bloom[bytepos] |= 1 << bitpos
 
         def hash_match(h, objid):
             h ^= objid
