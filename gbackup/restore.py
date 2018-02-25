@@ -121,6 +121,7 @@ def restore_item(obj, path):
                                 path, pos
                             )
                         )
+                        continue
 
                     fileout.seek(pos)
                     fileout.write(blob_contents)

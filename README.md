@@ -152,52 +152,66 @@ When backing up a file, the file's contents is split into chunks and each
 chunk is uploaded individually as its own blob. The algorithm for how to 
 chunk the file will determine how good the deduplication is. Larger chunks 
 mean it's less likely to match content elsewhere, while smaller chunks mean 
-more uploads and more network overhead and slower uploads.
+more uploads, more network overhead, and slower uploads.
+
+Right now Gbackup uses a fixed size chunking algorithm: files are simply 
+split every fixed number of bytes. This works well for most kinds of files 
+found in a typical desktop user's home directory. Most files are going to be 
+very small (so deduplication won't help much), or are going to be binary 
+or compressed file formats that will be completely rewritten on change, and 
+probably won't benefit much from deduplication at all.
 
 Some backup systems (such as Borg) use variable sized chunks and a rolling 
 hash to determine where to split the chunk boundaries. This has the advantage
 of synchronizing chunk boundaries to the content. Consider a fixed size chunk
 of 4MB. A large file that doesn't change will use the same set of blob objects 
-every time. But what if a single byte is inserted at the beginning of the 
-file, pushing all the rest down one byte. Now suddenly the chunks don't match
-previously uploaded ones, so the entire file is re-uploaded.
+every time. But if a single byte is inserted at the beginning of the 
+file, all the data is pushed down by one byte. Now suddenly the chunks don't 
+match previously uploaded ones since the previous chunks of data don't align 
+with chunk boundaries. So the entire file is re-uploaded.
 
-With a rolling hash over the last 4095 bytes like Borg uses, as files are 
-scanned, the decision to split a file is based on the last 4095 bytes seen.
-If one file is split at a particular location, and another file has the same 
-4095 byte sequence somewhere in it, then there will be a chunk split there,
-no matter where those 4095 bytes fall in the file.
+With a rolling hash over a window of bytes, as files are scanned, the 
+decision to split a file is based on the hash of the data in the window. If 
+one file is split at a particular location, and another file has the same 
+byte sequence somewhere in it, then there will be a chunk split there, no 
+matter where those bytes fall in the file.
 
-This self-synchronization helps a lot to deduplicate large files whose 
-contents is moving around. However, I believe this is rather rare. Consider 
-most files in an average home directory of a personal computer fall into 
-these categories:
+I believe that for most kinds of files found in desktop users' home 
+directories, fixed size chunking is sufficient. Most large binary formats 
+avoid inserting bytes because that would involve copying large amounts of 
+data to other sections of the file. Applications managing large data formats 
+will probably have a smarter format that is more friendly to fixed size chunk
+deduplication.
 
-* Text files
-* Compressed binary documents (images, docx, xlsx)
+Some examples of files that perform poorly on fixed size chunking:
 
-Text files are typically small such that re-uploading the entire file on 
-change won't be much overhead.
- 
-For large binary files, typically the format is such that the application 
-does its own management of data, and won't involve shifting large amounts of 
-data due to inserts or deletes in the file. The logic being that an 
-application managing a large binary format won't want to do a lot of data 
-moving or copying for efficiency reasons. So changes to the file aren't 
-likely to produce similarities at different positions in the file.
- 
-Notable exceptions may include video files for video editing work, and virtual 
-machine images.
+* virtual machine images, which may have lots of duplicate data throughout 
+but not necessarily aligned to chunk boundaries.
+* SQL database dumps. Each database dump will contain lots of identical data,
+ but not necessarily in the same places within the file.
+* Video files for video editing. Changes in one section of a video 
+may change the alignment of the rendered video but content in other sections 
+stays the same.
 
-My conclusion is that below about 30MB [1] it's probably not worth splitting 
-files into more than one chunk. Further, a vast majority of files in my own home 
-directory are less than 1 MB: about 97% out of about a million files. So
-for now I don't believe using a rolling hash provides much practical
-benefit, although it should be easy to substitute the chunking algorithm at a
-later point.
+My conclusion is that implementing a rolling hash would help for some 
+situations, but not for the most common cases, so I'm just implementing fixed
+size chunking for now. Changing the chunking algorithm should be easy when it
+becomes necessary.
+
+Also, taking a hint from Backblaze, files below about 30MB in size [1] are 
+probably not worth chunking at all, as the sorts of files that would benefit 
+from a lot of deduplication are mostly huge files (database dumps, VM images,
+etc). 
 
 [1] 30MB is the threshold Backblaze uses, below which files aren't chunked.
 https://help.backblaze.com/hc/en-us/articles/217666728-How-does-Backblaze-handle-large-files-
+
+I've also noticed that an overwhelming 97% of files in my own home 
+directory are less than 1 MB, out of about a million files. Such tiny files 
+won't benefit much from deduplication or rolling hashes, but will benefit 
+much more from pack files, where many objects are uploaded in a single pack. So 
+pack files are a higher priority than rolling hashes.
+
 
 ### Object Cache
 

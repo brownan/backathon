@@ -97,8 +97,9 @@ class DataStore:
         Returns an open file-like object with the Object's payload, decrypted
         and verified if applicable.
 
-        A CorruptedRepository exception is rasied if there is a problem
-        retrieving this object's payload.
+        A CorruptedRepository exception is raised if there is a problem
+        retrieving this object's payload, such as the checksum not matching
+        or a problem decrypting the payload..
 
         """
         file = self.storage.open(self._get_path(objid))
