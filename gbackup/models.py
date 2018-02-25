@@ -428,7 +428,7 @@ class FSEntry(models.Model):
         """
         try:
             stat_result = os.lstat(self.path)
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):
             scanlogger.info("File disappeared: {}".format(self))
             self.delete()
             return

@@ -43,7 +43,7 @@ def restore_item(obj, path):
     The last component of path is the item we're restoring. If it
     doesn't exist, it will be created. In either case, its properties are
     restored according to the obj's properties. If this is a tree object,
-    all entries within it are also restored.
+    all entries within it are also restored recursively.
 
     :type obj: models.Object
     :type path: str
