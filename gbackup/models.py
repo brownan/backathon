@@ -487,8 +487,9 @@ class FSEntry(models.Model):
                 uid=stat_result.st_uid,
                 gid=stat_result.st_gid,
                 mode=stat_result.st_mode,
-                ctime=stat_result.st_ctime_ns,
                 mtime=stat_result.st_mtime_ns,
+                atime=stat_result.st_mtime_ns,
+                # Since we can't restore ctime, there's no point in recording it
             )
             umsgpack.pack(info, buf)
             umsgpack.pack(chunks, buf)
@@ -534,8 +535,8 @@ class FSEntry(models.Model):
                 uid=stat_result.st_uid,
                 gid=stat_result.st_gid,
                 mode=stat_result.st_mode,
-                ctime=stat_result.st_ctime_ns,
                 mtime=stat_result.st_mtime_ns,
+                atime=stat_result.st_mtime_ns,
             )
             umsgpack.pack(info, buf)
             umsgpack.pack(

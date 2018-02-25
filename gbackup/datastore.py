@@ -3,17 +3,18 @@ import hashlib
 import django.core.files.storage
 from django.core.exceptions import ImproperlyConfigured
 from django.db.transaction import atomic
+from django.utils.functional import SimpleLazyObject
 
 from gbackup import models
+from gbackup.exceptions import CorruptedRepository
 
-class CorruptedRepositoryException(Exception):
-    pass
 
 class DataStore:
     """This class acts as an interface to the storage backend
 
     It has logic to keep the local cache in sync with the objects stored on
     the backend.
+
     """
     def __init__(self):
         backend = models.Setting.get("REPO_BACKEND")
@@ -95,6 +96,10 @@ class DataStore:
 
         Returns an open file-like object with the Object's payload, decrypted
         and verified if applicable.
+
+        A CorruptedRepository exception is rasied if there is a problem
+        retrieving this object's payload.
+
         """
         file = self.storage.open(self._get_path(objid))
         hasher = self.hasher()
@@ -102,9 +107,9 @@ class DataStore:
             hasher.update(chunk)
         digest = hasher.digest()
         if digest != objid:
-            raise CorruptedRepositoryException("Object payload does not "
-                                               "match its hash for objid "
-                                               "{}".format(objid))
+            raise CorruptedRepository("Object payload does not "
+                                      "match its hash for objid "
+                                      "{}".format(objid))
         file.seek(0)
         return file
 
@@ -149,3 +154,6 @@ class DataStore:
 
 def get_datastore():
     return DataStore()
+
+
+default_datastore = SimpleLazyObject(get_datastore) # type: DataStore
