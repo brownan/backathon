@@ -176,7 +176,7 @@ class FSEntryBackup(TestBase):
     def setUp(self):
         super().setUp()
         models.FSEntry.objects.create(path=self.backupdir)
-        self.ds = datastore.get_datastore()
+        self.ds = datastore.default_datastore
 
     def _assert_file_obj(self, obj, contents):
         """Asserts that the given object is a file object with the given
@@ -304,7 +304,7 @@ class FSEntryBackup(TestBase):
         self.create_file("dir/file1", "file contents")
         scan.scan()
         backup.backup()
-        ds = datastore.get_datastore()
+        ds = datastore.default_datastore
 
         for obj in models.Object.objects.all():
             # Assert that an object file exists in the backing store and is

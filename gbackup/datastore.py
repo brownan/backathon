@@ -3,10 +3,11 @@ import hashlib
 import django.core.files.storage
 from django.core.exceptions import ImproperlyConfigured
 from django.db.transaction import atomic
-from django.utils.functional import SimpleLazyObject
+from django.utils.functional import SimpleLazyObject, cached_property
 
 from gbackup import models
 from gbackup.exceptions import CorruptedRepository
+from gbackup.signals import db_setting_changed
 
 
 class DataStore:
@@ -17,16 +18,30 @@ class DataStore:
 
     """
     def __init__(self):
+
+        self.hasher = hashlib.sha256
+
+        db_setting_changed.connect(self._clear_cached_properties)
+
+    def _clear_cached_properties(self, setting, **kwargs):
+        """Since there is one instance of this object per process, we have to
+        reconfigure when a setting is changed. This happens mostly when
+        running tests."""
+        if setting == "REPO_BACKEND":
+            self.__dict__.pop('storage', None)
+        elif setting == "REPO_PATH":
+            self.__dict__.pop('storage', None)
+
+    @cached_property
+    def storage(self):
         backend = models.Setting.get("REPO_BACKEND")
         if backend == "local":
-            self.storage = django.core.files.storage.FileSystemStorage(
+            return django.core.files.storage.FileSystemStorage(
                 location=models.Setting.get("REPO_PATH")
             )
         else:
             raise ImproperlyConfigured("Invalid repository backend defined in "
                                        "settings: {}".format(backend))
-
-        self.hasher = hashlib.sha256
 
     def push_object(self, payload, children):
         """Pushes the given payload as a new object into the object store.
@@ -160,8 +175,5 @@ class DataStore:
     def get_snapshot_list(self):
         """Gets a list of snapshots"""
 
-def get_datastore():
-    return DataStore()
 
-
-default_datastore = SimpleLazyObject(get_datastore) # type: DataStore
+default_datastore = SimpleLazyObject(lambda: DataStore()) # type: DataStore

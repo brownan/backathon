@@ -15,6 +15,7 @@ from django.db import connection
 from gbackup.fields import PathField
 from gbackup import chunker
 from gbackup import util
+from gbackup import signals
 
 scanlogger = logging.getLogger("gbackup.scan")
 
@@ -593,3 +594,5 @@ class Setting(models.Model):
     def set(cls, key, value):
         s = cls(key=key, value=value)
         s.save()
+        signals.db_setting_changed.send(sender=Setting, setting=key,
+                                        value=value)

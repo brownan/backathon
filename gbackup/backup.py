@@ -2,7 +2,7 @@ from django.utils import timezone
 from tqdm import tqdm
 
 from . import models
-from .datastore import get_datastore
+from .datastore import default_datastore
 
 def backup(progress_enable=False):
 
@@ -22,7 +22,7 @@ def backup(progress_enable=False):
         progress = None
         progress2 = None
 
-    datastore = get_datastore()
+    datastore = default_datastore
 
     while to_backup.exists():
 

@@ -1,6 +1,9 @@
 import tempfile
 import pathlib
 import logging
+import stat
+import os
+import unittest
 
 from gbackup import scan, backup, models, restore
 
@@ -33,7 +36,7 @@ class TestRestore(TestBase):
         super().tearDown()
 
     def assert_restored_file(self, path, contents):
-        fullpath = pathlib.Path(self.restoredir) / path
+        fullpath = pathlib.Path(self.restoredir, path)
         self.assertEqual(
             contents,
             fullpath.read_text(),
@@ -51,3 +54,42 @@ class TestRestore(TestBase):
 
         self.assert_restored_file("file1", "contents1")
         self.assert_restored_file("dir/file2", "contents2")
+
+    def test_restore_mode(self):
+        file_a = self.create_file("file1", "contents")
+        file_a.chmod(0o777)
+
+        scan.scan()
+        backup.backup()
+        ss = models.Snapshot.objects.get()
+        restore.restore_item(ss.root, self.restoredir)
+
+        file_b = pathlib.Path(self.restoredir, "file1")
+        stat_result = file_b.stat()
+        self.assertEqual(
+            0o777,
+            stat.S_IMODE(stat_result.st_mode),
+        )
+
+    def test_restore_uid_gid(self):
+        file_a = self.create_file("file1", "contents")
+        try:
+            os.chown(file_a, 1, 1)
+        except PermissionError:
+            raise unittest.SkipTest("Process doesn't have chown permission")
+
+        scan.scan()
+        backup.backup()
+        ss = models.Snapshot.objects.get()
+        restore.restore_item(ss.root, self.restoredir)
+
+        file_b = pathlib.Path(self.restoredir, "file1")
+        stat_result = file_b.stat()
+        self.assertEqual(
+            1,
+            stat_result.st_uid
+        )
+        self.assertEqual(
+            1,
+            stat_result.st_gid
+        )
