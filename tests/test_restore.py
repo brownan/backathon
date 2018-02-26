@@ -93,3 +93,57 @@ class TestRestore(TestBase):
             1,
             stat_result.st_gid
         )
+
+    def test_restore_multiple_revisions(self):
+        self.create_file("file", "contents A")
+
+        scan.scan()
+        backup.backup()
+
+        self.create_file("file", "new contents")
+
+        scan.scan()
+        backup.backup()
+
+        snapshots = list(models.Snapshot.objects.order_by("date"))
+
+        self.assertEqual(2, len(snapshots))
+        self.assertEqual(
+            6,
+            models.Object.objects.count()
+        )
+
+        restoredir = pathlib.Path(self.restoredir)
+        restore.restore_item(snapshots[0].root, restoredir/"ss1")
+        restore.restore_item(snapshots[1].root, restoredir/"ss2")
+
+        file1 = restoredir / "ss1" / "file"
+        file2 = restoredir / "ss2" / "file"
+
+        self.assertEqual(
+            "contents A",
+            file1.read_text()
+        )
+        self.assertEqual(
+            "new contents",
+            file2.read_text()
+        )
+
+    def test_restore_single_file(self):
+        self.create_file("file", "contents")
+
+        scan.scan()
+        backup.backup()
+
+        root = models.Snapshot.objects.get().root
+
+        # Should just be one child
+        inode = root.children.get()
+
+        filename = pathlib.Path(self.restoredir, "my_file")
+        restore.restore_item(inode, filename)
+
+        self.assertEqual(
+            "contents",
+            filename.read_text()
+        )

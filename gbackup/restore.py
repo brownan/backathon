@@ -46,7 +46,7 @@ def restore_item(obj, path):
     all entries within it are also restored recursively.
 
     :type obj: models.Object
-    :type path: str
+    :type path: str|pathlib.Path
 
     Many kinds of errors can occur during a restore, as repository and local
     cache data is read in, parsed, and cross referenced with other local and
@@ -166,6 +166,6 @@ def restore_item(obj, path):
             restore_item(childobj, path / name)
 
     else:
-        raise NotImplementedError("Restore not implemented yet for {} "
+        raise NotImplementedError("Restore not implemented for {} "
                                   "object type".format(obj_type))
 
