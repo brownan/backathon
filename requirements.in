@@ -4,3 +4,4 @@ pip-tools
 Django>=2.0rc1
 colorlog
 tqdm
+requests
