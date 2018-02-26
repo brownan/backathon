@@ -25,14 +25,6 @@ class TestBase(TestCase):
         models.Setting.set("REPO_BACKEND", "local")
         models.Setting.set("REPO_PATH", self.datadir)
 
-        self.stack.enter_context(
-            self.settings(
-                MEDIA_ROOT=self.datadir,
-                DEFAULT_FILE_STORAGE="django.core.files.storage"
-                                     ".FileSystemStorage"
-            )
-        )
-
     def path(self, *args):
         return os.path.join(self.backupdir, *args)
 

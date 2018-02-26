@@ -86,9 +86,10 @@ class DataStore:
 
     def _get_path(self, objid):
         """Returns the path for the given objid"""
+        objid_hex = objid.hex()
         return "objects/{}/{}".format(
-            objid[:2],
-            objid,
+            objid_hex[:2],
+            objid_hex,
         )
 
     def get_object(self, objid):
@@ -102,10 +103,16 @@ class DataStore:
         or a problem decrypting the payload..
 
         """
-        file = self.storage.open(self._get_path(objid))
         hasher = self.hasher()
-        for chunk in file.chunks():
-            hasher.update(chunk)
+        try:
+            file = self.storage.open(self._get_path(objid))
+            for chunk in file.chunks():
+                hasher.update(chunk)
+        except Exception as e:
+            raise CorruptedRepository("Failed to read object {}: {}".format(
+                objid.hex(), e
+            )) from e
+
         digest = hasher.digest()
         if digest != objid:
             raise CorruptedRepository("Object payload does not "

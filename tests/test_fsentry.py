@@ -1,6 +1,7 @@
 import stat
 from unittest import mock
 import os
+import pathlib
 
 import umsgpack
 from django.test import TestCase
@@ -306,9 +307,22 @@ class FSEntryBackup(TestBase):
         ds = datastore.get_datastore()
 
         for obj in models.Object.objects.all():
+            # Assert that an object file exists in the backing store and is
+            # named properly. In particular, make sure we're naming them with
+            # the hex representation of the objid
+            obj_filepath = pathlib.Path(
+                self.datadir,
+                "objects",
+                obj.objid.hex()[:2],
+                obj.objid.hex(),
+            )
+            self.assertTrue(obj_filepath.is_file())
+
             cached_payload = obj.payload
             remote_payload = ds.get_object(obj.objid).read()
+
             if cached_payload is None:
+                # Only blob type objects don't have a cached payload
                 self.assertEqual(
                     "blob",
                     umsgpack.unpack(util.BytesReader(remote_payload))

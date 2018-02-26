@@ -38,7 +38,7 @@ class Object(models.Model):
     be calculated.
     """
     # This is the binary representation of the hash of the payload.
-    # To get the int representation, you can use int.from_bytes(objid, 'big')
+    # To get the int representation, you can use int.from_bytes(objid, 'little')
     # To get the hex representation, use objid.hex()
     # To create a bytes representation from a hex representation,
     # use bytes.fromhex(hex_representation)
@@ -166,7 +166,7 @@ class Object(models.Model):
         c = connection.cursor()
         c.execute(query)
         for row in c:
-            objid_int = int.from_bytes(row[0], 'big')
+            objid_int = int.from_bytes(row[0], 'little')
 
             for h in hashes:
                 h ^= objid_int
@@ -183,7 +183,7 @@ class Object(models.Model):
         # Now we can iterate over all objects. If an object does not appear
         # in the bloom filter, we can guarantee it's not reachable.
         for obj in cls.objects.all().iterator():
-            objid = int.from_bytes(obj.objid, 'big')
+            objid = int.from_bytes(obj.objid, 'little')
 
             if not all(hash_match(h, objid) for h in hashes):
                 yield obj
@@ -566,7 +566,7 @@ class FSEntry(models.Model):
 class Snapshot(models.Model):
     """A snapshot of a filesystem at a particular time"""
     path = PathField(
-        help_text="Root directory of this snapshot"
+        help_text="Root directory of this snapshot on the original filesystem"
     )
     root = models.ForeignKey(
         Object,

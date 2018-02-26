@@ -2,16 +2,17 @@ import sys
 import uuid
 import os
 
-DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
-MEDIA_ROOT = "/tmp/gbackup_storage"
-
 DATABASES = {
     'default': {
-        # 'ENGINE': 'django.db.backends.sqlite3',
+        #'ENGINE': 'django.db.backends.sqlite3',
         'ENGINE': 'gbackup.sqlite3_backend',
-        'NAME': os.environ['GBACKUP_CONFIG'],
     }
 }
+
+if "GBACKUP_CONFIG" in os.environ:
+    # Will not be set when running tests:
+    DATABASES['default']['NAME'] = os.environ['GBACKUP_CONFIG']
+
 INSTALLED_APPS = [
     'gbackup',
 ]
@@ -53,6 +54,11 @@ LOGGING = {
     "loggers": {
         "gbackup": {
             "level": "INFO",
+        },
+        "gbackup.restore": {
+            "level": "INFO",
+            "handlers": [],
+            "propagate": False,
         },
         "gbackup.scan": {
             "level": "INFO",

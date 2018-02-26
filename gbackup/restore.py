@@ -93,7 +93,7 @@ def restore_item(obj, path):
 
                     try:
                         blob_payload = models.Object.unpack_payload(
-                            default_datastore.get_object(chunk_id)
+                            default_datastore.get_object(chunk_id).read()
                         )
                     except CorruptedRepository as e:
                         logger.error("Could not restore chunk of {} at byte {}: "

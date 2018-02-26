@@ -1,6 +1,5 @@
 import argparse
 import os.path
-import sys
 import logging
 
 import django
