@@ -4,29 +4,31 @@
 some ideas and maybe it'll turn into something useful, maybe not. But for 
 now, this is not a working backup solution.***
 
-Gbackup is a personal file backup solution that has the following main goals:
+Gbackup is a personal file backup solution that has the following key selling points:
 
-* Low runtime memory usage
+* Low runtime memory usage, designed to run in the background
 * Fast and efficient filesystem scans to discover changed files
-* Content-addressable storage backend (loosely based on Git's object format, 
-hence Gbackup)
+* Content-addressable storage backend for deduplication and quick restores
+  from any past snapshot (loosely based on Git's object format, 
+  hence Gbackup)
 
-Other goals that are a priority for me:
+These are the main design goals that are a priority for me:
 
 * No special software needed on remote storage server (plan to target 
-Backblaze B2)
+  Backblaze B2)
 * Client side encryption (plan to incorporate libsodium)
 * Runs as a daemon with built-in scheduler (no cobbling together wrapper 
-scripts and cron)
+  scripts and cron)
+* Use asymmetric encryption to allow backup and prune operations 
+  without the private key. Only restore operations will require
+  the private key (this may change as the threat model is refined)
+* Efficient pruning of old snapshots to recover space
 * Continuous file monitoring with inotify (this goal was originally intended to 
-avoid having to do expensive filesystem scans, but I've since made the scanning 
-quite efficient, so this may not be necessary)
-* Use asymmetric key encryption to allow backup and prune operations 
-without the secret key. Restore operations will require the secret key. (See 
-below about encryption)
+  avoid having to do expensive filesystem scans, but I've since made the scanning 
+  quite efficient, so this may not be necessary)
 
 No other backup programs I've found quite met these criteria. Gbackup takes 
-ideas from Borg, Duplicati, Bup, and others.
+ideas from Borg, Duplicati, Restic, and others.
 
 GBackup runs on Linux using Python 3.5.3 or newer. At the moment, 
 compatability with any other platforms is coincidental.
@@ -142,7 +144,7 @@ then pushed to the repository are objects for the new file, as well as new
 objects for all parent directories up to the root.
 
 Note that in this heirarchy of objects, objects may be referenced more than 
-onceâ€”they may have more than one parent. A blob may be referenced by more 
+once—they may have more than one parent. A blob may be referenced by more 
 than one inode (or several times in the same file), but also inode and tree 
 objects may be referenced by more than one snapshot.
 
