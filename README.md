@@ -144,7 +144,7 @@ then pushed to the repository are objects for the new file, as well as new
 objects for all parent directories up to the root.
 
 Note that in this heirarchy of objects, objects may be referenced more than 
-once—they may have more than one parent. A blob may be referenced by more 
+onceâ€”they may have more than one parent. A blob may be referenced by more 
 than one inode (or several times in the same file), but also inode and tree 
 objects may be referenced by more than one snapshot.
 
