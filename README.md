@@ -234,7 +234,130 @@ Those objects are then deleted from the local cache and the remote repository.
 
 ### Pack files
 
+*TODO*
+
 ### Backup process
 
-### Encryption
+*TODO*
+
+### Threat Model
+
+***Note: encryption is not yet fully implemented. Below is an outline of my 
+plans, which are still shifting as I learn more and compare strategies from 
+existing projects***
+
+Gbackup uses encryption, like many backup programs, to protect your data 
+repository. With Gbackup, the threat model is an adversary with access to the
+repository (read or write). The goal is to prevent leaking as much 
+information as possible to adversaries with read access, and detect 
+modifications made by adversaries with write access.
+
+Specifically, Gbackup's encryption has these properties:
+
+* All backed up file data and metadata is encrypted and authenticated, making 
+recovering plain text files, metadata, or directory structures impossible 
+without the encryption keys or password
+* Modifications to valid objects are detected by using encryption
+algorithms that incorporate authentication
+* Object identifiers reveal no information by using an HMAC construction
+* Extra objects inserted into the repository are rejected due to not being 
+encrypted and authenticated with the proper keys
+* Old objects re-inserted (replay attack) are vaild, but won't hurt anything 
+because they won't be referenced by any other objects, as objects' 
+contents are also authenticated
+* The snapshot files are encrypted and authenticated, but are suseptible to 
+replay attacks by restoring a valid, deleted object. However, the only thing 
+that would do is restore an old backup that already existed at some point in 
+the past. Since referenced objects may no longer exist, that backup may look 
+valid but actually be unrestorable due to missing objects.
+* Since snapshots are stored one per file, an attacker knows how many 
+snapshots exist
+* An attacker observing access patterns can learn how often backups are 
+taken, and how much data is written to the repository
+* Careful analysis of the uploaded object sizes, number of objects at 
+each size, and the pattern/ordering of uploaded objects may reveal some 
+information about file sizes or directory structure. For example, lots of 
+small files, or lots of directories would generate more metadata objects, which 
+have a fairly predictiable and consistent size.
+* An attacker can delete data from the repository to render some or all 
+snapshots inoperable. The client normally operates in a write-only mode and 
+won't detect this, but a verify operation will walk the entire object tree on
+the remote repository and would detect missing objects.
+
+Another goal of Gbackup is to not require a password for backup and other
+write-only operations to the repository, as it's designed to run in the 
+background and start automatically at boot. The obvious way achieve this is 
+with public/private key encryption. The public key is used for encrypting 
+files before uploading, and is stored in plain text locally. Decryption
+requires the private key, which is stored encrypted with a password.
+
+This is the outline of how encryption is used:
+
+1. When a repository is initialized, a password is entered. The password is 
+used to derive a symmetric encryption key. The parameters used in the key 
+derivation are saved locally and to the remote repository.
+2. A public/private keypair is generated from high quality random sources. 
+The password key is used to encrypt the private key. The encrypted private 
+key is saved locally and to the remote repository as metadata.
+3. The plain text public key is stored locally
+4. During a backup, the public key is used to encrypt data before uploading 
+to the repository. Object IDs are derived using HMAC-SHA256 using the public 
+key as the HMAC key.
+5. During a restore, the password is entered, the password key 
+derived, and the private key decrypted. The private key is then used to 
+decrypt downloaded data
+
+(Deriving a key to encrypt a randomly generated private key lets us change 
+the password without having to re-encrypt all encrypted data)
+
+While this protects against an adversary with read access to the remote 
+repository, it also assumes the local machine is secure and uncompromised, 
+since the public key is stored in plain text locally. If the public key is 
+compromised, there are more threats possible since an attacker could upload 
+valid objects into the object store, and perform brute force attacks on the 
+object IDs. (Although if the local filesystem is compromised, then the 
+attacker could just read all the local files anyways)
+
+So why bother with passwords at all if you assume a secure local machine? 
+Why not just generate and store a symmetric key in plain text? A few reasons:
+
+1. While it's outside the threat model, it *is* still protecting the 
+repository data from being read if the public key is compromised
+2. For consistency: if you store an unencrypted secret key derived from a 
+password, then you can perform backup *and* restore operations without the 
+password. But as soon as you lose a hard drive and need to restore from 
+scratch, you need the password. So some restore operations would need a 
+password and some wouldn't.
+3. To prevent human error: along with the above, you're more likely to forget
+your password if you've never needed it before a total system crash.
+4. Any other scenarios where it's necesary to prevent read access to the 
+repository even if read access to the local filesystem is possible 
+(intentionally or unintentionally)
+
+(Note that most backup systems store a generated symmetric key encrypted with
+a password, and then leave password storage up to the user. With that setup, to
+run a backup automatically e.g. from cron, you have to store your password in
+plaintext somewhere. For purposes of the above argument, I consider that 
+setup the same as just keeping your whole key unencrypted.)
+
+### Encryption Algorithms
+
+***Note: encryption is not yet fully implemented. Below is an outline of my 
+plans, which are still shifting as I learn more and compare strategies from 
+existing projects***
+
+Gbackup uses libsodium for all encryption operations via the PyNaCl bindings 
+to the library.
+
+All files are encrypted using the libsodium
+[Sealed Box](https://download.libsodium.org/doc/public-key_cryptography/sealed_boxes.html)
+construction, which is implemented with XSalsa20-Poly1305.
+The encryption key is derived using an X25519 key exchange between the 
+user's public key and an ephemeral key generated for each call.
+
+To encrypt the private key using a password, the libsodium key derivation 
+function based on the
+[Argon2id algorithm](https://download.libsodium.org/doc/password_hashing/the_argon2i_function.html)
+is used. The salt, opslimit, and memlimit paramaters are stored unencrypted 
+both locally and in the remote repository.
 
