@@ -4,28 +4,25 @@
 some ideas and maybe it'll turn into something useful, maybe not. But for 
 now, this is not a working backup solution.***
 
-Gbackup is a personal file backup solution that has the following key selling points:
+Gbackup is a personal file backup solution that has the following key selling
+points:
 
-* Low runtime memory usage, designed to run in the background
-* Fast and efficient filesystem scans to discover changed files
-* Content-addressable storage backend for deduplication and quick restores
-  from any past snapshot (loosely based on Git's object format, 
-  hence Gbackup)
-
-These are the main design goals that are a priority for me:
-
-* No special software needed on remote storage server (plan to target 
-  Backblaze B2)
-* Client side encryption (plan to incorporate libsodium)
 * Runs as a daemon with built-in scheduler (no cobbling together wrapper 
   scripts and cron)
+* Low runtime memory usage, designed to run in the background
+* Fast and efficient filesystem scans to discover changed files
+* Fast and efficient pruning of old backups to recover space
+
+Additionally, these are the main design goals that are a priority for me:
+
+* Content-addressable repository format for deduplication and quick restores
+  from any past snapshot (loosely based on Git's object format, 
+  hence Gbackup)
+* Targets any generic storage backend (I plan to target Backblaze B2)
+* Client side encryption (I plan to incorporate libsodium)
 * Use asymmetric encryption to allow backup and prune operations 
-  without the private key. Only restore operations will require
-  the private key (this may change as the threat model is refined)
-* Efficient pruning of old snapshots to recover space
-* Continuous file monitoring with inotify (this goal was originally intended to 
-  avoid having to do expensive filesystem scans, but I've since made the scanning 
-  quite efficient, so this may not be necessary)
+  without a password. Only restore operations will require the password
+* Keep the code simple. Complexity is avoided except when absolutely necessary
 
 No other backup programs I've found quite met these criteria. Gbackup takes 
 ideas from Borg, Duplicati, Restic, and others.
