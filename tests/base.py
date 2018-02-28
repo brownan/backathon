@@ -15,6 +15,7 @@ class TestBase(TestCase):
         self.backupdir = self.stack.enter_context(
             tempfile.TemporaryDirectory(),
         )
+        models.FSEntry.objects.create(path=self.backupdir)
 
         # Directory to store the data files
         self.datadir = self.stack.enter_context(

@@ -55,6 +55,9 @@ class Object(models.Model):
     def __repr__(self):
         return "<Object {}>".format(self.objid.hex())
 
+    def __str__(self):
+        return self.objid.hex()
+
     def load_payload(self, payload):
         """Loads a payload of data into this Object entry
 
@@ -76,14 +79,60 @@ class Object(models.Model):
         iterate through all Objects and call obj.load_payload(obj.payload) to
         recompute fields that may not have been populated.
         """
-        buf = util.BytesReader(payload)
-        objtype = umsgpack.unpack(buf)
+        payload_items = Object.unpack_payload(payload)
+        objtype = next(payload_items)
+        payload_items.close()
 
         if objtype != "blob":
             self.payload = payload
 
         # TODO: further processing and indexing of the contents of the payload.
         # (no other indices are currently implemented)
+
+    def calculate_children(self):
+        """Gets the set of children from the cached payload
+
+        Callers can use this to rebuild the children relation table. It's
+        mostly useful when re-building the cache from remote repository data.
+
+        Callers should take care to not just pass the result to
+        obj.children.set(), because the objects may not exist in the
+        database, either because it's missing from the repository, or it just
+        hasn't been inserted yet.
+
+        Further, due to SQLite's deferrable foreign keys, an integrity error
+        won't be raised until the end of the transaction.
+
+        A caller will probably want to check each child object for existence
+        manually before inserting it as a child reference. Alternately,
+        it can use SQLite's foreign_key_check pragma to insert children
+        references in bulk, and then clean them up before committing the
+        transaction.
+
+        """
+        if not self.payload:
+            return []
+
+        payload_items = Object.unpack_payload(self.payload)
+        objtype = next(payload_items)
+        try:
+            if objtype == "tree":
+                next(payload_items)
+                children = [c[1] for c in next(payload_items)]
+
+            elif objtype == "inode":
+                # By coincidence, tree and inode objects have identical
+                # routines for extracting the child objects
+                next(payload_items)
+                children = [c[1] for c in next(payload_items)]
+
+            else:
+                children = []
+
+        finally:
+            payload_items.close()
+
+        return children
 
     @staticmethod
     def unpack_payload(payload):

@@ -25,7 +25,6 @@ class TestRestore(TestBase):
         self.restoredir = self.stack.enter_context(
             tempfile.TemporaryDirectory()
         )
-        models.FSEntry.objects.create(path=self.backupdir)
 
         self.handler = AssertionHandler()
         self.handler.setLevel(logging.WARNING)
@@ -217,3 +216,4 @@ class TestRestore(TestBase):
         restore.restore_item(ss.root, self.restoredir)
 
         self.assert_restored_file(name, "contents")
+

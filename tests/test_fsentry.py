@@ -56,7 +56,6 @@ class FSEntryScan(TestBase):
     def test_scan(self):
         self.create_file("dir/file1", "file contents")
         self.create_file("dir2/file2", "another file contents")
-        models.FSEntry.objects.create(path=self.backupdir)
         scan.scan()
         self.assertEqual(
             5,
@@ -73,7 +72,6 @@ class FSEntryScan(TestBase):
 
     def test_deleted_file(self):
         file = self.create_file("dir/file1", "file contents")
-        models.FSEntry.objects.create(path=self.backupdir)
         scan.scan()
         self.assertTrue(
             models.FSEntry.objects.filter(path=os.fspath(file)).exists()
@@ -86,7 +84,6 @@ class FSEntryScan(TestBase):
 
     def test_deleted_dir(self):
         file = self.create_file("dir/file1", "file contents")
-        models.FSEntry.objects.create(path=self.backupdir)
         scan.scan()
         file.unlink()
         file.parent.rmdir()
@@ -100,7 +97,6 @@ class FSEntryScan(TestBase):
 
     def test_replace_dir_with_file(self):
         file = self.create_file("dir/file1", "file contents")
-        models.FSEntry.objects.create(path=self.backupdir)
         scan.scan()
         file.unlink()
         file.parent.rmdir()
@@ -130,7 +126,6 @@ class FSEntryScan(TestBase):
 
     def test_replace_dir_with_file_2(self):
         file = self.create_file("dir/file1", "file contents")
-        models.FSEntry.objects.create(path=self.backupdir)
         scan.scan()
         file.unlink()
         file.parent.rmdir()
@@ -142,7 +137,6 @@ class FSEntryScan(TestBase):
 
     def test_dir_no_permission(self):
         file = self.create_file("dir/file1", "file contents")
-        models.FSEntry.objects.create(path=self.backupdir)
 
         file.parent.chmod(0o000)
         scan.scan()
@@ -159,7 +153,6 @@ class FSEntryScan(TestBase):
 
     def test_root_merge(self):
         file = self.create_file("dir1/dir2/file", "file contents")
-        models.FSEntry.objects.create(path=self.backupdir)
         models.FSEntry.objects.create(path=os.fspath(file.parent))
         self.assertEqual(
             2,
@@ -175,7 +168,6 @@ class FSEntryBackup(TestBase):
 
     def setUp(self):
         super().setUp()
-        models.FSEntry.objects.create(path=self.backupdir)
         self.ds = datastore.default_datastore
 
     def _assert_file_obj(self, obj, contents):
