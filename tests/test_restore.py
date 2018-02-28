@@ -147,3 +147,22 @@ class TestRestore(TestBase):
             "contents",
             filename.read_text()
         )
+
+    def test_restore_invalid_utf8_filename(self):
+        name = os.fsdecode(b"\xFF\xFFHello\xFF\xFF")
+
+        self.assertRaises(
+            UnicodeEncodeError,
+            name.encode,
+            "utf-8"
+        )
+
+        self.create_file(name, "contents")
+
+        scan.scan()
+        backup.backup()
+        ss = models.Snapshot.objects.get()
+
+        restore.restore_item(ss.root, self.restoredir)
+
+        self.assert_restored_file(name, "contents")
