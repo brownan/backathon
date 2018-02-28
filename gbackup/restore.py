@@ -22,20 +22,24 @@ def _set_file_properties(path, obj_info):
         os.chown(str(path), obj_info['uid'], obj_info['gid'])
     except OSError as e:
         logger.warning("Could not chown {}: {}".format(
-            path, e
+            pathstr(path), e
         ))
     try:
         os.chmod(str(path), obj_info['mode'])
     except OSError as e:
         logger.warning("Could not chmod {}: {}".format(
-            path, e
+            pathstr(path), e
         ))
     try:
         os.utime(str(path), ns=(obj_info['atime'], obj_info['mtime']))
     except OSError as e:
         logger.warning("Could not set mtime on {}: {}".format(
-            path, e
+            pathstr(path), e
         ))
+
+def pathstr(p):
+    """Returns the path string suitable for printing or logging"""
+    return os.fsencode(str(p)).decode("UTF-8", errors="replace")
 
 def restore_item(obj, path):
     """Restore the given object to the given path
@@ -64,6 +68,8 @@ def restore_item(obj, path):
     couldn't be restored.
 
     """
+    # Important: if you print or log an error involving the path, pass it
+    # through pathstr() first to sanitize any undecodable unicode surrogates
     path = pathlib.Path(path)
 
     payload_items = models.Object.unpack_payload(obj.payload)
@@ -76,16 +82,16 @@ def restore_item(obj, path):
         logger.error("Can't restore {}: Object {} has invalid cached "
                      "data. Rebuilding the local cache may fix this "
                      "problem.".format(
-            path, obj.objid
+            pathstr(path), obj.objid
         ))
         return
 
     if obj_type == "inode":
         if path.exists() and not path.is_file():
             logger.error("Can't restore path {}: it already exists but isn't "
-                         "a file".format(path))
+                         "a file".format(pathstr(path)))
             return
-        logger.info("Restoring file {}".format(path))
+        logger.info("Restoring file {}".format(pathstr(path)))
 
         try:
             with path.open("wb") as fileout:
@@ -93,12 +99,12 @@ def restore_item(obj, path):
 
                     try:
                         blob_payload = models.Object.unpack_payload(
-                            default_datastore.get_object(chunk_id).read()
+                            default_datastore.get_object(chunk_id)
                         )
                     except CorruptedRepository as e:
                         logger.error("Could not restore chunk of {} at byte {}: "
                                      "{}".format(
-                            path, pos, e
+                            pathstr(path), pos, e
                         ))
                         continue
 
@@ -109,7 +115,7 @@ def restore_item(obj, path):
                         logger.error(
                             "Could not restore chunk of {} at byte {}: "
                             "invalid or corrupted data".format(
-                                path, pos
+                                pathstr(path), pos
                             )
                         )
                         continue
@@ -118,7 +124,7 @@ def restore_item(obj, path):
                         logger.error(
                             "Could not restore chunk of {} at byte {}: object of "
                             "type blob expected".format(
-                                path, pos
+                                pathstr(path), pos
                             )
                         )
                         continue
@@ -128,7 +134,7 @@ def restore_item(obj, path):
 
         except OSError as e:
             logger.error("Error writing {}: {}".format(
-                path, e
+                pathstr(path), e
             ))
             return
 
@@ -137,7 +143,7 @@ def restore_item(obj, path):
     elif obj_type == "tree":
         if path.exists() and not path.is_dir():
             logger.error("Can't restore path {}: it already exists but isn't "
-                         "a directory".format(path))
+                         "a directory".format(pathstr(path)))
             return
 
         if not path.exists():
@@ -145,7 +151,7 @@ def restore_item(obj, path):
                 path.mkdir(mode=obj_info['mode'])
             except OSError as e:
                 logger.error("Could not make directory {}: {}".format(
-                    path, e
+                    pathstr(path), e
                 ))
                 return
 
@@ -159,7 +165,7 @@ def restore_item(obj, path):
                 logger.error("Could not restore {}: referenced object does "
                              "not exist in the local cache. Rebuilding the "
                              "local cache may help fix this problem".format(
-                    path / name
+                    pathstr(path / name)
                 ))
                 return
 

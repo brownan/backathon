@@ -1,11 +1,16 @@
+import base64
 import hashlib
+import hmac
 
 import django.core.files.storage
 from django.core.exceptions import ImproperlyConfigured
 from django.db.transaction import atomic
 from django.utils.functional import SimpleLazyObject, cached_property
 
+import nacl.public
+
 from gbackup import models
+from gbackup import util
 from gbackup.exceptions import CorruptedRepository
 from gbackup.signals import db_setting_changed
 
@@ -19,8 +24,6 @@ class DataStore:
     """
     def __init__(self):
 
-        self.hasher = hashlib.sha256
-
         db_setting_changed.connect(self._clear_cached_properties)
 
     def _clear_cached_properties(self, setting, **kwargs):
@@ -32,6 +35,18 @@ class DataStore:
         elif setting == "REPO_PATH":
             self.__dict__.pop('storage', None)
 
+        elif setting == "ENCRYPTION":
+            self.__dict__.pop('encrypt_bytes', None)
+            self.__dict__.pop('decrypt_bytes', None)
+            self.__dict__.pop('hasher', None)
+        elif setting == "PUBKEY":
+            self.__dict__.pop('encrypt_bytes', None)
+            self.__dict__.pop('hasher', None)
+
+        elif setting == "COMPRESSION":
+            self.__dict__.pop('compress_bytes', None)
+            self.__dict__.pop('decompress_bytes', None)
+
     @cached_property
     def storage(self):
         backend = models.Setting.get("REPO_BACKEND")
@@ -42,6 +57,78 @@ class DataStore:
         else:
             raise ImproperlyConfigured("Invalid repository backend defined in "
                                        "settings: {}".format(backend))
+
+    @cached_property
+    def hasher(self):
+        """Returns a hasher used to hash bytes into a digest
+
+        If encryption is enabled, this is an hmac object partially evaluated
+        to include the key.
+        """
+        encryption = models.Setting.get("ENCRYPTION")
+        if encryption == "sealed_box":
+            pubkey = base64.b64decode(models.Setting.get("PUBKEY"))
+            return lambda b=None: hmac.new(pubkey, msg=b,
+                                           digestmod=hashlib.sha256)
+        elif encryption == "none":
+            return hashlib.sha256
+
+        else:
+            raise ImproperlyConfigured("Bad encryption type '{}'".format(encryption))
+
+    @cached_property
+    def encrypt_bytes(self):
+        """Returns a function that will encrypt the given bytes depending on
+        the encryption configuration"""
+        encryption = models.Setting.get("ENCRYPTION")
+        if encryption == "sealed_box":
+            pubkey = base64.b64decode(models.Setting.get("PUBKEY"))
+            return nacl.public.SealedBox(pubkey).encrypt
+
+        elif encryption == "none":
+            return lambda b: b
+
+        else:
+            raise ImproperlyConfigured("Bad encryption type '{}'".format(encryption))
+
+    @cached_property
+    def decrypt_bytes(self):
+        """Returns a function that takes a bytes object and an optional key,
+        and returns the decrypted bytes
+
+        Raises a ValueError if the key was not provided but is needed to
+        decrypt the contents
+        """
+        encryption = models.Setting.get("ENCRYPTION")
+        if encryption == "sealed_box":
+            return lambda b, key: nacl.public.SealedBox(key).decrypt(b)
+
+        elif encryption == "none":
+            return lambda b, k: b
+
+        else:
+            raise ImproperlyConfigured("Bad encryption type '{}'".format(encryption))
+
+    def _get_compression_functions(self):
+        compression = models.Setting.get("COMPRESSION")
+        if compression == "zlib":
+            import zlib
+            pair = (zlib.compress, zlib.decompress)
+        elif compression == "none":
+            pair = (lambda b: b), (lambda b: b)
+        else:
+            raise ImproperlyConfigured("Bad compression type '{}'".format(
+                compression))
+
+        return pair
+
+    @cached_property
+    def compress_bytes(self):
+        return self._get_compression_functions()[0]
+
+    @cached_property
+    def decompress_bytes(self):
+        return self._get_compression_functions()[1]
 
     def push_object(self, payload, children):
         """Pushes the given payload as a new object into the object store.
@@ -79,7 +166,11 @@ class DataStore:
 
                 obj_instance.children.set(children)
                 name = self._get_path(objid)
-                self.storage.save(name, payload)
+
+                to_upload = self.encrypt_bytes(
+                    self.compress_bytes(view)
+                )
+                self.storage.save(name, util.BytesReader(to_upload))
             else:
                 # It was already in the database
                 # Do a sanity check to make sure the object's payload is the
@@ -107,34 +198,44 @@ class DataStore:
             objid_hex,
         )
 
-    def get_object(self, objid):
+    def get_object(self, objid, key=None):
         """Retrieves the object from the remote datastore.
 
-        Returns an open file-like object with the Object's payload, decrypted
-        and verified if applicable.
+        :param objid: The object ID to retrieve
+        :type objid: bytes
+
+        :param key: The secret key used to decrypt the payload, if encryption
+        is enabled
+        :type key: bytes
+
+        Returns a bytes-like object containing the Object's payload. This
+        method takes care of decrypting and decompressing, if applicable. It
+        also verifies the payload's hash matches the object id.
 
         A CorruptedRepository exception is raised if there is a problem
         retrieving this object's payload, such as the checksum not matching
         or a problem decrypting the payload..
 
         """
-        hasher = self.hasher()
         try:
             file = self.storage.open(self._get_path(objid))
-            for chunk in file.chunks():
-                hasher.update(chunk)
+            contents = self.decompress_bytes(
+                self.decrypt_bytes(
+                    file.read(),
+                    key
+                )
+            )
         except Exception as e:
             raise CorruptedRepository("Failed to read object {}: {}".format(
                 objid.hex(), e
             )) from e
 
-        digest = hasher.digest()
-        if digest != objid:
+        digest = self.hasher(contents).digest()
+        if not hmac.compare_digest(digest, objid):
             raise CorruptedRepository("Object payload does not "
                                       "match its hash for objid "
                                       "{}".format(objid))
-        file.seek(0)
-        return file
+        return contents
 
     def exists(self, objname):
         pass # TODO

@@ -10,6 +10,7 @@ from gbackup import models, scan, backup, util, datastore
 from .base import TestBase
 
 class FSEntryTest(TestCase):
+    """Tests some misc functionality of the FSEntry class"""
 
     def test_invalidate(self):
         """Tests that the FSEntry.invalidate() method works"""
@@ -52,6 +53,7 @@ class FSEntryTest(TestCase):
         )
 
 class FSEntryScan(TestBase):
+    """Tests the scan functionality of the FSEntry class"""
 
     def test_scan(self):
         self.create_file("dir/file1", "file contents")
@@ -165,6 +167,7 @@ class FSEntryScan(TestBase):
         )
 
 class FSEntryBackup(TestBase):
+    """Tests the backup functionality of the FSEntry class"""
 
     def setUp(self):
         super().setUp()
@@ -189,7 +192,7 @@ class FSEntryBackup(TestBase):
                 None
             )
             chunkpayload = chunk.unpack_payload(
-                self.ds.get_object(chunk.objid).read()
+                self.ds.get_object(chunk.objid)
             )
             self.assertEqual("blob", next(chunkpayload))
             chunkcontents = next(chunkpayload)
@@ -311,7 +314,7 @@ class FSEntryBackup(TestBase):
             self.assertTrue(obj_filepath.is_file())
 
             cached_payload = obj.payload
-            remote_payload = ds.get_object(obj.objid).read()
+            remote_payload = ds.get_object(obj.objid)
 
             if cached_payload is None:
                 # Only blob type objects don't have a cached payload

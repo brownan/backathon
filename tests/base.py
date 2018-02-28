@@ -26,6 +26,9 @@ class TestBase(TestCase):
         models.Setting.set("REPO_BACKEND", "local")
         models.Setting.set("REPO_PATH", self.datadir)
 
+        models.Setting.set("ENCRYPTION", "none")
+        models.Setting.set("COMPRESSION", "none")
+
     def path(self, *args):
         return os.path.join(self.backupdir, *args)
 
