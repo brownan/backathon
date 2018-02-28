@@ -25,6 +25,9 @@ class TestRestore(TestBase):
     functionality
 
     """
+    # Set by subclasses that test encryption
+    key = None
+
     def setUp(self):
         super().setUp()
         self.restoredir = self.stack.enter_context(
@@ -54,7 +57,7 @@ class TestRestore(TestBase):
 
         ss = models.Snapshot.objects.get()
 
-        restore.restore_item(ss.root, self.restoredir)
+        restore.restore_item(ss.root, self.restoredir, self.key)
 
         self.assert_restored_file("file1", "contents1")
         self.assert_restored_file("dir/file2", "contents2")
@@ -66,7 +69,7 @@ class TestRestore(TestBase):
         scan.scan()
         backup.backup()
         ss = models.Snapshot.objects.get()
-        restore.restore_item(ss.root, self.restoredir)
+        restore.restore_item(ss.root, self.restoredir, self.key)
 
         file_b = pathlib.Path(self.restoredir, "file1")
         stat_result = file_b.stat()
@@ -85,7 +88,7 @@ class TestRestore(TestBase):
         scan.scan()
         backup.backup()
         ss = models.Snapshot.objects.get()
-        restore.restore_item(ss.root, self.restoredir)
+        restore.restore_item(ss.root, self.restoredir, self.key)
 
         file_b = pathlib.Path(self.restoredir, "file1")
         stat_result = file_b.stat()
@@ -105,7 +108,7 @@ class TestRestore(TestBase):
         scan.scan()
         backup.backup()
         ss = models.Snapshot.objects.get()
-        restore.restore_item(ss.root, self.restoredir)
+        restore.restore_item(ss.root, self.restoredir, self.key)
 
         file_b = pathlib.Path(self.restoredir, "file1")
 
@@ -135,7 +138,7 @@ class TestRestore(TestBase):
         info = list(models.Object.unpack_payload(tree.payload))[1]
         atime = info['atime']
 
-        restore.restore_item(ss.root, self.restoredir)
+        restore.restore_item(ss.root, self.restoredir, self.key)
 
         dir1 = pathlib.Path(self.restoredir, "dir1")
 
@@ -169,8 +172,8 @@ class TestRestore(TestBase):
         )
 
         restoredir = pathlib.Path(self.restoredir)
-        restore.restore_item(snapshots[0].root, restoredir/"ss1")
-        restore.restore_item(snapshots[1].root, restoredir/"ss2")
+        restore.restore_item(snapshots[0].root, restoredir/"ss1", self.key)
+        restore.restore_item(snapshots[1].root, restoredir/"ss2", self.key)
 
         file1 = restoredir / "ss1" / "file"
         file2 = restoredir / "ss2" / "file"
@@ -196,7 +199,7 @@ class TestRestore(TestBase):
         inode = root.children.get()
 
         filename = pathlib.Path(self.restoredir, "my_file")
-        restore.restore_item(inode, filename)
+        restore.restore_item(inode, filename, self.key)
 
         self.assertEqual(
             "contents",
@@ -218,12 +221,15 @@ class TestRestore(TestBase):
         backup.backup()
         ss = models.Snapshot.objects.get()
 
-        restore.restore_item(ss.root, self.restoredir)
+        restore.restore_item(ss.root, self.restoredir, self.key)
 
         #self.assert_restored_file(name, "contents")
 
     def test_calculate_children(self):
-        """Checks that the Object.calculate_children() works as expected"""
+        """Checks that the Object.calculate_children() works as expected
+
+        Doesn't actually call restore()
+        """
         self.create_file("dir1/file1", "contents")
         self.create_file("dir1/file2", "asdf")
         self.create_file("dir2/file3", "aoeu")
@@ -252,3 +258,44 @@ class TestRestore(TestBase):
                 {c.objid.hex() for c in obj.children.all()},
                 "Object {}'s children don't match".format(obj)
             )
+
+class TestRestoreWithCompression(TestRestore):
+    def setUp(self):
+        super().setUp()
+        models.Setting.set("COMPRESSION", "zlib")
+
+class TestRestoreWithEncryption(TestRestore):
+    def setUp(self):
+        super().setUp()
+
+        import nacl.public
+        self.key = nacl.public.PrivateKey.generate()
+        models.Setting.set("ENCRYPTION", "sealed_box")
+        models.Setting.set("PUBKEY", bytes(self.key.public_key).hex())
+
+    def test_not_plaintext(self):
+        """Tests that the plaintext of a file doesn't appear in the object
+        payload on disk"""
+        self.create_file("secret_file", "super secret contents")
+
+        scan.scan()
+        backup.backup()
+
+        ss = models.Snapshot.objects.get()
+        tree = ss.root
+        inode = tree.children.get()
+        blob = inode.children.get()
+        self.assertIs(None, blob.payload)
+
+        path = pathlib.Path(self.datadir, "objects",
+                            blob.objid.hex()[:2],
+                            blob.objid.hex())
+        self.assertTrue(path.exists())
+        contents = path.read_bytes()
+        self.assertFalse(
+            b"super secret contents" in contents
+        )
+
+class TestRestoreEncryptionAndCompression(TestRestoreWithCompression,
+                                          TestRestoreWithEncryption):
+    pass

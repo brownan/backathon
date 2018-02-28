@@ -41,7 +41,7 @@ def pathstr(p):
     """Returns the path string suitable for printing or logging"""
     return os.fsencode(str(p)).decode("UTF-8", errors="replace")
 
-def restore_item(obj, path):
+def restore_item(obj, path, key=None):
     """Restore the given object to the given path
 
     The last component of path is the item we're restoring. If it
@@ -51,6 +51,7 @@ def restore_item(obj, path):
 
     :type obj: models.Object
     :type path: str|pathlib.Path
+    :type key: The key to decrypt files if decryption was enabled
 
     Many kinds of errors can occur during a restore, as repository and local
     cache data is read in, parsed, and cross referenced with other local and
@@ -99,7 +100,7 @@ def restore_item(obj, path):
 
                     try:
                         blob_payload = models.Object.unpack_payload(
-                            default_datastore.get_object(chunk_id)
+                            default_datastore.get_object(chunk_id, key)
                         )
                     except CorruptedRepository as e:
                         logger.error("Could not restore chunk of {} at byte {}: "
@@ -169,7 +170,7 @@ def restore_item(obj, path):
                 ))
                 return
 
-            restore_item(childobj, path / name)
+            restore_item(childobj, path / name, key)
 
     else:
         raise NotImplementedError("Restore not implemented for {} "

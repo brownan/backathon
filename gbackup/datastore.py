@@ -14,6 +14,8 @@ from gbackup import util
 from gbackup.exceptions import CorruptedRepository
 from gbackup.signals import db_setting_changed
 
+class KeyRequired(Exception):
+    pass
 
 class DataStore:
     """This class acts as an interface to the storage backend
@@ -30,8 +32,10 @@ class DataStore:
         """Since there is one instance of this object per process, we have to
         reconfigure when a setting is changed. This happens mostly when
         running tests."""
+
         if setting == "REPO_BACKEND":
             self.__dict__.pop('storage', None)
+
         elif setting == "REPO_PATH":
             self.__dict__.pop('storage', None)
 
@@ -39,13 +43,19 @@ class DataStore:
             self.__dict__.pop('encrypt_bytes', None)
             self.__dict__.pop('decrypt_bytes', None)
             self.__dict__.pop('hasher', None)
+
         elif setting == "PUBKEY":
-            self.__dict__.pop('encrypt_bytes', None)
-            self.__dict__.pop('hasher', None)
+            self.__dict__.pop('pubkey', None)
 
         elif setting == "COMPRESSION":
             self.__dict__.pop('compress_bytes', None)
             self.__dict__.pop('decompress_bytes', None)
+
+    @cached_property
+    def pubkey(self):
+        key_hex = models.Setting.get("PUBKEY")
+        key = bytes.fromhex(key_hex)
+        return nacl.public.PublicKey(key)
 
     @cached_property
     def storage(self):
@@ -67,8 +77,7 @@ class DataStore:
         """
         encryption = models.Setting.get("ENCRYPTION")
         if encryption == "sealed_box":
-            pubkey = base64.b64decode(models.Setting.get("PUBKEY"))
-            return lambda b=None: hmac.new(pubkey, msg=b,
+            return lambda b=None: hmac.new(bytes(self.pubkey), msg=b,
                                            digestmod=hashlib.sha256)
         elif encryption == "none":
             return hashlib.sha256
@@ -82,8 +91,9 @@ class DataStore:
         the encryption configuration"""
         encryption = models.Setting.get("ENCRYPTION")
         if encryption == "sealed_box":
-            pubkey = base64.b64decode(models.Setting.get("PUBKEY"))
-            return nacl.public.SealedBox(pubkey).encrypt
+            # Call bytes() on the input. If it's a memoryview or other
+            # bytes-like object, pynacl will reject it.
+            return lambda b: nacl.public.SealedBox(self.pubkey).encrypt(bytes(b))
 
         elif encryption == "none":
             return lambda b: b
@@ -96,12 +106,16 @@ class DataStore:
         """Returns a function that takes a bytes object and an optional key,
         and returns the decrypted bytes
 
-        Raises a ValueError if the key was not provided but is needed to
+        Raises a KeyRequired error if the key was not provided but is needed to
         decrypt the contents
         """
         encryption = models.Setting.get("ENCRYPTION")
         if encryption == "sealed_box":
-            return lambda b, key: nacl.public.SealedBox(key).decrypt(b)
+            def _decrypt(b, key=None):
+                if key is None:
+                    raise KeyRequired("An encryption key is required")
+                return nacl.public.SealedBox(key).decrypt(b)
+            return _decrypt
 
         elif encryption == "none":
             return lambda b, k: b
