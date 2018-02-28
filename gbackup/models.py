@@ -392,6 +392,26 @@ class FSEntry(models.Model):
         self.invalidate()
         return
 
+    def _open_file(self):
+        """Opens this file for reading"""
+        flags = os.O_RDONLY
+
+        # Add O_BINARY on windows
+        flags |= getattr(os, "O_BINARY", 0)
+
+        try:
+            flags_noatime = flags | os.O_NOATIME
+        except AttributeError:
+            return os.fdopen(os.open(self.path, flags), "rb")
+
+        # Add O_NOATIME if available. This may fail with permission denied,
+        # so try again without it if failed
+        try:
+            return os.fdopen(os.open(self.path, flags_noatime), "rb")
+        except PermissionError:
+            pass
+        return os.fdopen(os.open(self.path, flags), "rb")
+
     def backup(self):
         """Back up this entry
 
@@ -451,22 +471,8 @@ class FSEntry(models.Model):
             chunks = []
             childobjs = []
 
-            open_flags = os.O_RDONLY
-
-            # Attempt to read the file without updating atimes, so we can
-            # back them up properly.
             try:
-                open_flags |= os.O_NOATIME
-            except AttributeError:
-                pass
-            # Error on symbolic links
-            try:
-                open_flags |= os.O_NOFOLLOW
-            except AttributeError:
-                pass
-
-            try:
-                with os.fdopen(os.open(self.path, open_flags), "rb") as fobj:
+                with self._open_file() as fobj:
                     for pos, chunk in chunker.DefaultChunker(fobj):
                         buf = io.BytesIO()
                         umsgpack.pack("blob", buf)
