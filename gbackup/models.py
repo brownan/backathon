@@ -451,8 +451,22 @@ class FSEntry(models.Model):
             chunks = []
             childobjs = []
 
+            open_flags = os.O_RDONLY
+
+            # Attempt to read the file without updating atimes, so we can
+            # back them up properly.
             try:
-                with open(self.path, "rb") as fobj:
+                open_flags |= os.O_NOATIME
+            except AttributeError:
+                pass
+            # Error on symbolic links
+            try:
+                open_flags |= os.O_NOFOLLOW
+            except AttributeError:
+                pass
+
+            try:
+                with os.fdopen(os.open(self.path, open_flags), "rb") as fobj:
                     for pos, chunk in chunker.DefaultChunker(fobj):
                         buf = io.BytesIO()
                         umsgpack.pack("blob", buf)
@@ -489,8 +503,7 @@ class FSEntry(models.Model):
                 gid=stat_result.st_gid,
                 mode=stat_result.st_mode,
                 mtime=stat_result.st_mtime_ns,
-                atime=stat_result.st_mtime_ns,
-                # Since we can't restore ctime, there's no point in recording it
+                atime=stat_result.st_atime_ns,
             )
             umsgpack.pack(info, buf)
             umsgpack.pack(chunks, buf)
@@ -537,7 +550,7 @@ class FSEntry(models.Model):
                 gid=stat_result.st_gid,
                 mode=stat_result.st_mode,
                 mtime=stat_result.st_mtime_ns,
-                atime=stat_result.st_mtime_ns,
+                atime=stat_result.st_atime_ns,
             )
             umsgpack.pack(info, buf)
             umsgpack.pack(

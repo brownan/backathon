@@ -94,6 +94,57 @@ class TestRestore(TestBase):
             stat_result.st_gid
         )
 
+    def test_restore_time(self):
+        file_a = self.create_file("file1", "contents")
+        os.utime(file_a, ns=(123456789, 987654321))
+
+        scan.scan()
+        backup.backup()
+        ss = models.Snapshot.objects.get()
+        restore.restore_item(ss.root, self.restoredir)
+
+        file_b = pathlib.Path(self.restoredir, "file1")
+
+        stat_result = file_b.stat()
+        self.assertEqual(
+            123456789,
+            stat_result.st_atime_ns,
+        )
+        self.assertEqual(
+            987654321,
+            stat_result.st_mtime_ns,
+        )
+
+    def test_restore_time_dir(self):
+        dir_a = pathlib.Path(self.backupdir, "dir1")
+        dir_a.mkdir()
+        os.utime(dir_a, ns=(123456789, 987654321))
+
+        scan.scan()
+        backup.backup()
+        ss = models.Snapshot.objects.get()
+
+        # The directory atime gets reset before we back it up, so just check
+        # that whatever value it had when it was backed up, that's what gets
+        # restored.
+        tree = ss.root.children.get()
+        info = list(models.Object.unpack_payload(tree.payload))[1]
+        atime = info['atime']
+
+        restore.restore_item(ss.root, self.restoredir)
+
+        dir1 = pathlib.Path(self.restoredir, "dir1")
+
+        stat_result = dir1.stat()
+        self.assertEqual(
+            987654321,
+            stat_result.st_mtime_ns,
+        )
+        self.assertEqual(
+            atime,
+            stat_result.st_atime_ns,
+        )
+
     def test_restore_multiple_revisions(self):
         self.create_file("file", "contents A")
 
