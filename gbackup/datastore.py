@@ -96,6 +96,47 @@ class DataStore:
 
                 self.storage.save("gbackup.config", metadata)
 
+    def get_remote_privatekey(self, password):
+        """Retrieves the private key from the remote store, decrypts it,
+        and returns the PrivateKey object for passing in to the decrypt_bytes()
+        routine
+
+        :rtype: nacl.public.PrivateKey
+
+        """
+        info = json.load(self.storage.open("gbackup.config"))
+        return self._decrypt_privkey(info, password)
+
+    def get_local_privatekey(self, password):
+        """Retrieves the private key from the local cache, decrypting it with
+        the given password
+
+        :rtype: nacl.public.PrivateKey
+        """
+        info = json.loads(models.Setting.get("KEY"))
+        return self._decrypt_privkey(info, password)
+
+    def _decrypt_privkey(self, info, password):
+        salt = bytes.fromhex(info['salt'])
+        ops = info['ops']
+        mem = info['mem']
+        encrypted_private_key = bytes.fromhex(info['key'])
+
+        # Re-derive the symmetric key from the password
+        symmetrickey = nacl.pwhash.argon2id.kdf(
+            nacl.secret.SecretBox.KEY_SIZE,
+            password.encode("UTF-8"),
+            salt=salt,
+            opslimit=ops,
+            memlimit=mem,
+        )
+
+        # Decrypt the key
+        decrypted_key_bytes = nacl.secret.SecretBox(symmetrickey).decrypt(encrypted_private_key)
+
+        return nacl.public.PrivateKey(decrypted_key_bytes)
+
+
     def _clear_cached_properties(self, setting, **kwargs):
         """Since there is one instance of this object per process, we have to
         reconfigure when a setting is changed. This happens mostly when
