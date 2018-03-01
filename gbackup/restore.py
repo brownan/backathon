@@ -51,7 +51,8 @@ def restore_item(obj, path, key=None):
 
     :type obj: models.Object
     :type path: str|pathlib.Path
-    :type key: The key to decrypt files if decryption was enabled
+    :param key: The key to decrypt files if decryption was enabled
+    :type key: None | nacl.public.PrivateKey
 
     Many kinds of errors can occur during a restore, as repository and local
     cache data is read in, parsed, and cross referenced with other local and

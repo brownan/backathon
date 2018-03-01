@@ -118,7 +118,7 @@ class DataStore:
             return _decrypt
 
         elif encryption == "none":
-            return lambda b, k: b
+            return lambda b, k=None: b
 
         else:
             raise ImproperlyConfigured("Bad encryption type '{}'".format(encryption))
@@ -218,9 +218,8 @@ class DataStore:
         :param objid: The object ID to retrieve
         :type objid: bytes
 
-        :param key: The secret key used to decrypt the payload, if encryption
-        is enabled
-        :type key: bytes
+        :param key: The key to decrypt files if decryption was enabled
+        :type key: None | nacl.public.PrivateKey
 
         Returns a bytes-like object containing the Object's payload. This
         method takes care of decrypting and decompressing, if applicable. It

@@ -15,9 +15,9 @@ points:
 
 Additionally, these are the main design goals that are a priority for me:
 
-* Content-addressable repository format for deduplication and quick restores
-  from any past snapshot (loosely based on Git's object format, 
-  hence Gbackup)
+* Repository format is a content-addressable object store for deduplication 
+  and quick restores from any past snapshot (loosely based on Git's object 
+  format, hence Gbackup)
 * Targets any generic storage backend (I plan to target Backblaze B2)
 * Client side encryption (I plan to incorporate libsodium)
 * Use asymmetric encryption to allow backup and prune operations 
@@ -307,35 +307,44 @@ decrypt downloaded data
 (Deriving a key to encrypt a randomly generated private key lets us change 
 the password without having to re-encrypt all encrypted data)
 
-While this protects against an adversary with read access to the remote 
+While this protects against an adversary with access to the remote 
 repository, it also assumes the local machine is secure and uncompromised, 
-since the public key is stored in plain text locally. If the public key is 
-compromised, there are more threats possible since an attacker could upload 
-valid objects into the object store, and perform brute force attacks on the 
-object IDs. (Although if the local filesystem is compromised, then the 
-attacker could just read all the local files anyways)
+since the public key and storage credentials are stored in plain text locally.
+If the public key is compromised, there are more threats possible since an 
+attacker could upload valid objects into the object store, and perform brute 
+force attacks on the object IDs to recover their contents. I believe this is an 
+acceptable compromise for unattended backups since if your local filesystem 
+is compromised, the bigger threat is the attacker just reading your local files 
+directly.
 
 So why bother with passwords at all if you assume a secure local machine? 
 Why not just generate and store a symmetric key in plain text? A few reasons:
 
 1. While it's outside the threat model, it *is* still protecting the 
 repository data from being read if the public key is compromised
-2. For consistency: if you store an unencrypted secret key derived from a 
-password, then you can perform backup *and* restore operations without the 
-password. But as soon as you lose a hard drive and need to restore from 
-scratch, you need the password. So some restore operations would need a 
-password and some wouldn't.
+2. For consistency: if you derive a key from a password and store it 
+unencrypted locally (and encrypted on the remote store), then you can perform
+backup *and* restore operations without the password. But as soon as you lose
+a hard drive and need to restore from scratch, you need the password. Some
+restore operations need a password and some don't.
 3. To prevent human error: along with the above, you're more likely to forget
 your password if you've never needed it before a total system crash.
-4. Any other scenarios where it's necesary to prevent read access to the 
+4. Any other scenarios where it's necessary to prevent read access to the 
 repository even if read access to the local filesystem is possible 
 (intentionally or unintentionally)
 
-(Note that most backup systems store a generated symmetric key encrypted with
-a password, and then leave password storage up to the user. With that setup, to
-run a backup automatically e.g. from cron, you have to store your password in
-plaintext somewhere. For purposes of the above argument, I consider that 
-setup the same as just keeping your whole key unencrypted.)
+Also note that most backup systems generate a symmetric key, encrypt it with
+a password, and then leave password management up to the user. If the user 
+wishes to schedule unattended backups e.g. from cron, they have to store the 
+password in plaintext somewhere. For purposes of the above argument, I 
+consider that setup equivalent to just storing the whole key unencrypted.
+
+If protecting the repository from a compromised client is a priority, then 
+it's theoretically possible to configure a storage backend to give write-only
+access to an API key. Since Gbackup only writes new objects during a backup 
+operation, it doesn't need read or delete access at all. All this prevents, 
+however, is the attacker gaining the API key and using it to delete objects. 
+They already couldn't decrypt objects without the decrypted private key.
 
 ### Encryption Algorithms
 

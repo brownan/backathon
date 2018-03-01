@@ -413,7 +413,7 @@ class FSEntry(models.Model):
                         )
                 except IntegrityError:
                     # This can happen if a new root is added to the database
-                    # that is an ancestor of an existing root. Scaning from
+                    # that is an ancestor of an existing root. Scanning from
                     # the new root will re-discover the existing root. In
                     # this case, just re-parent the old root, merging the two
                     # trees.
