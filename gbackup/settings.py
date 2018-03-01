@@ -13,6 +13,8 @@ if "GBACKUP_CONFIG" in os.environ:
     # Will not be set when running tests:
     DATABASES['default']['NAME'] = os.environ['GBACKUP_CONFIG']
 
+USE_TZ = True
+
 INSTALLED_APPS = [
     'gbackup',
 ]

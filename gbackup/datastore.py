@@ -1,4 +1,5 @@
-import base64
+import io
+import uuid
 import hashlib
 import hmac
 
@@ -8,6 +9,8 @@ from django.db.transaction import atomic
 from django.utils.functional import SimpleLazyObject, cached_property
 
 import nacl.public
+
+import umsgpack
 
 from gbackup import models
 from gbackup import util
@@ -283,8 +286,25 @@ class DataStore:
         pass # TODO
 
     def put_snapshot(self, snapshot):
-        """Adds a new snapshot index file to the storage backend"""
-        pass # TODO
+        """Adds a new snapshot index file to the storage backend
+
+        :type snapshot: models.Snapshot
+        """
+        path = "snapshots/" + str(uuid.uuid4())
+        contents = io.BytesIO()
+        umsgpack.pack("snapshot", contents)
+        umsgpack.pack({
+            "date": snapshot.date.timestamp(),
+            "root": snapshot.root_id,
+            "path": snapshot.path,
+        }, contents)
+        contents.seek(0)
+        to_upload = self.encrypt_bytes(
+            self.compress_bytes(
+                contents.getbuffer()
+            )
+        )
+        self.storage.save(path, util.BytesReader(to_upload))
 
     def get_snapshot_list(self):
         """Gets a list of snapshots"""

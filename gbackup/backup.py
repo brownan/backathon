@@ -1,3 +1,4 @@
+from django.db.transaction import atomic
 from django.utils import timezone
 from tqdm import tqdm
 
@@ -76,8 +77,10 @@ def backup(progress_enable=False):
         parent__isnull=True
     ):
         assert root.obj_id is not None
-        models.Snapshot.objects.create(
-            path=root.path,
-            root_id=root.obj_id,
-            date=now,
-        )
+        with atomic():
+            ss = models.Snapshot.objects.create(
+                path=root.path,
+                root_id=root.obj_id,
+                date=now,
+            )
+            datastore.put_snapshot(ss)

@@ -1,12 +1,12 @@
 import datetime
 
+import pytz
+
 from django.db import IntegrityError
 from django.db.transaction import atomic
 from django.test import TransactionTestCase
 
 from gbackup import models
-from tests.base import TestBase
-
 
 class TestObject(TransactionTestCase):
     """Tests various functionality of the Object class"""
@@ -92,9 +92,11 @@ class TestObject(TransactionTestCase):
             ("J", []),
         )
         models.Snapshot.objects.create(root_id=b"A",
-                                       date=datetime.date(2018, 1,1))
+                                       date=datetime.datetime(2018, 1,1,
+                                                              tzinfo=pytz.UTC))
         models.Snapshot.objects.create(root_id=b"G",
-                                       date=datetime.date(2018, 1,1))
+                                       date=datetime.datetime(2018, 1,1,
+                                                              tzinfo=pytz.UTC))
 
         self.assertEqual(
             10,
