@@ -283,7 +283,7 @@ the remote repository and would detect missing objects.
 
 Another goal of Gbackup is to not require a password for backup and other
 write-only operations to the repository, as it's designed to run in the 
-background and start automatically at boot. The obvious way achieve this is 
+background and start automatically at boot. The obvious way to achieve this is 
 with public/private key encryption. The public key is used for encrypting 
 files before uploading, and is stored in plain text locally. Decryption
 requires the private key, which is stored encrypted with a password.
@@ -352,18 +352,28 @@ They already couldn't decrypt objects without the decrypted private key.
 plans, which are still shifting as I learn more and compare strategies from 
 existing projects***
 
-Gbackup uses libsodium for all encryption operations via the PyNaCl bindings 
-to the library.
+Gbackup uses [libsodium](https://download.libsodium.org/doc/) for all encryption
+operations via the [PyNaCl](https://pynacl.readthedocs.io) bindings to the
+library.
+
+A public-private key pair is generated at repository initialization time. The
+public part of the key is stored in plain text locally. The private part is 
+encrypted with a password and stored locally and in the remote repository.
+
+To do this, libsodium's
+[Argon2id](https://download.libsodium.org/doc/password_hashing/the_argon2i_function.html)-based
+key derivation function is used to generate a symmetric key from the password. 
+The salt, opslimit, and memlimit paramaters are stored unencrypted both 
+locally and in the remote repository. This symmetric key is then used to 
+encrypt the private key with libsodium's
+[Secret Box](https://download.libsodium.org/doc/secret-key_cryptography/authenticated_encryption.html)
+which encrypts and authenticates using XSalsa20-Poly1305. This symmetric key 
+is not stored anywhere. It is re-derived from the password if access to the 
+private key is needed (e.g. for a restore operation)
 
 All files are encrypted using the libsodium
 [Sealed Box](https://download.libsodium.org/doc/public-key_cryptography/sealed_boxes.html)
-construction, which is implemented with XSalsa20-Poly1305.
+construction, which is also implemented with XSalsa20-Poly1305.
 The encryption key is derived using an X25519 key exchange between the 
 user's public key and an ephemeral key generated for each call.
-
-To encrypt the private key using a password, the libsodium key derivation 
-function based on the
-[Argon2id algorithm](https://download.libsodium.org/doc/password_hashing/the_argon2i_function.html)
-is used. The salt, opslimit, and memlimit paramaters are stored unencrypted 
-both locally and in the remote repository.
 

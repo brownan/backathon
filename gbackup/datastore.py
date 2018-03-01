@@ -2,6 +2,7 @@ import io
 import uuid
 import hashlib
 import hmac
+import json
 
 import django.core.files.storage
 from django.core.exceptions import ImproperlyConfigured
@@ -9,6 +10,9 @@ from django.db.transaction import atomic
 from django.utils.functional import SimpleLazyObject, cached_property
 
 import nacl.public
+import nacl.pwhash.argon2id
+import nacl.secret
+import nacl.utils
 
 import umsgpack
 
@@ -30,6 +34,67 @@ class DataStore:
     def __init__(self):
 
         db_setting_changed.connect(self._clear_cached_properties)
+
+    def initialize(self, encryption, compression, repo_backend,
+                   repo_path, password=None):
+        """Initializes a new repository.
+
+        This sets local settings, and also uploads necessary metadata files
+        to the remote repository
+
+        :param encryption: A string indicating what kind of encryption to use
+        :param compression: A string indicating what kind of compression to use
+        :param repo_backend: A string indicating what storage backend to use
+        :param repo_path: A string specifying parameters to the storage backend
+        :param password: A string indicating the password securing the secret
+        key, if encryption is used
+
+        """
+        with atomic():
+            models.Setting.set("REPO_BACKEND", repo_backend)
+            models.Setting.set("REPO_PATH", repo_path)
+            models.Setting.set("COMPRESSION", compression)
+            models.Setting.set("ENCRYPTION", encryption)
+
+            if encryption == "sealed_box":
+                # Derive a secret key from the password
+                salt = nacl.utils.random(nacl.pwhash.argon2id.SALTBYTES)
+                ops = nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE
+                mem = nacl.pwhash.argon2id.MEMLIMIT_SENSITIVE
+
+                symmetrickey = nacl.pwhash.argon2id.kdf(
+                    nacl.secret.SecretBox.KEY_SIZE,
+                    password.encode("UTF-8"),
+                    salt=salt,
+                    opslimit=ops,
+                    memlimit=mem,
+                )
+
+                # Generate a new key pair
+                key = nacl.public.PrivateKey.generate()
+
+                # Encrypt the private key's bytes using the symmetric key
+                encrypted_private_key = nacl.secret.SecretBox(
+                    symmetrickey
+                ).encrypt(bytes(key))
+
+                # This info dict will be stored in plain text locally and
+                # remotely. It should not contain any secret parameters
+                info = {
+                    'salt': salt.hex(),
+                    'ops': ops,
+                    'mem': mem,
+                    'key': encrypted_private_key.hex()
+                }
+
+                models.Setting.set("KEY", json.dumps(info))
+                models.Setting.set("PUBKEY", bytes(key.public_key).hex())
+
+                metadata = io.BytesIO()
+                json.dump(info, metadata)
+                metadata.seek(0)
+
+                self.storage.save("gbackup.config", metadata)
 
     def _clear_cached_properties(self, setting, **kwargs):
         """Since there is one instance of this object per process, we have to

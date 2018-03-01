@@ -172,9 +172,11 @@ class TestObject(TransactionTestCase):
 
 
         models.Snapshot.objects.create(root_id=b"root_A",
-                                       date=datetime.date(2018, 1,1))
+                                       date=datetime.datetime(2018, 1,1,
+                                                              tzinfo=pytz.UTC))
         models.Snapshot.objects.create(root_id=b"root_B",
-                                       date=datetime.date(2018, 1,1))
+                                       date=datetime.datetime(2018, 1,1,
+                                                              tzinfo=pytz.UTC))
 
         self.assertEqual(
             N*2 + 2,
