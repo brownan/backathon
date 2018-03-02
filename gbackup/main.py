@@ -7,8 +7,10 @@ from django.core.management import call_command
 
 logger = logging.getLogger("gbackup.main")
 
-def setup():
+def setup(dbpath=None):
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "gbackup.settings")
+    if dbpath:
+        os.environ['GBACKUP_CONFIG'] = dbpath
     django.setup()
 
 def main():
