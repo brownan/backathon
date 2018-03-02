@@ -95,23 +95,24 @@ Subsequent passes perform the same operation on all newly created entries for
 new files. Passes continue until there are no new files to scan.
 
 This approach to scanning turns out to be very fast, especially for 
-subsequent scans but even the inital scan. Memory usage remains low and if 
-database writes are performed in a single SQLite transaction, IO is also kept
-to a minimum. The reason scans are quick is it avoids problems with recursive 
+subsequent scans but even the inital scan. Memory usage remains low and since
+database writes are performed in a single SQLite transaction using the 
+SQLite Write-Ahead Log, IO is also kept to a minimum.
+The reason scans are quick is it avoids problems with recursive 
 tree traversals: each visit to a node would require a separate database query
 or listdir call to get the list of children, which is more IO to perform. By 
 scanning files in no particular order, every entry is streamed from the 
 database in large batches and IO is kept to a minimum. The limiting factor is
 having to perform all the lstat calls for every filesystem entry.
 
-Note that a directory's mtime is updated by the creation or deletion of files
-in the directory, so we can avoid listdir on unchanging directories. Also, if
-the scan turns out to be CPU bound, it is easily parallelizable. However, 
-raw speed is not the top priority, as consuming all of the CPU is not 
-desirable for a program that runs in the background.
+Further, since a directory's mtime is updated by the creation or deletion of 
+files in the directory, we can avoid listdir on unchanging directories.
 
-The backup process thus consists of iterating over all entries in the 
-database that are flagged as needing backup, and backing them up.
+Finally, note that in Gbackup the scanning operation is decoupled from the 
+backup operation. This lets us plug in different methods for detecting 
+changes, and perform efficient backups on only the files that have changed.
+The backup process will only iterate over the entries in the cache
+database that need backing up.
 
 ### Storage Format
 
