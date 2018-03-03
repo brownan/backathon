@@ -6,12 +6,14 @@ DATABASES = {
     'default': {
         #'ENGINE': 'django.db.backends.sqlite3',
         'ENGINE': 'gbackup.sqlite3_backend',
+
+        # Default value is here for testing. All the normal entry points make
+        # sure this environment variable is set before calling django.setup()
+        'NAME': os.environ.get('GBACKUP_CONFIG',"db.sqlite3"),
     }
 }
 
-if "GBACKUP_CONFIG" in os.environ:
-    # Will not be set when running tests:
-    DATABASES['default']['NAME'] = os.environ['GBACKUP_CONFIG']
+DEBUG = True
 
 USE_TZ = True
 

@@ -213,16 +213,16 @@ class Object(models.Model):
             INNER JOIN reachable ON reachable.id=from_object_id
         ) SELECT id FROM reachable
         """
-        c = connection.cursor()
-        c.execute(query)
-        for row in c:
-            objid_int = int.from_bytes(row[0], 'little')
+        with connection.cursor() as c:
+            c.execute(query)
+            for row in c:
+                objid_int = int.from_bytes(row[0], 'little')
 
-            for h in hashes:
-                h ^= objid_int
-                h %= m
-                bytepos, bitpos = divmod(h, 8)
-                bloom[bytepos] |= 1 << bitpos
+                for h in hashes:
+                    h ^= objid_int
+                    h %= m
+                    bytepos, bitpos = divmod(h, 8)
+                    bloom[bytepos] |= 1 << bitpos
 
         def hash_match(h, objid):
             h ^= objid
@@ -325,17 +325,17 @@ class FSEntry(models.Model):
         """Runs a query to invalidate this node and all parents up to the root
 
         """
-        cursor = connection.cursor()
-        cursor.execute("""
-        WITH RECURSIVE ancestors(id) AS (
-          SELECT id FROM gbackup_fsentry WHERE id=?
-          UNION ALL
-          SELECT gbackup_fsentry.parent_id FROM gbackup_fsentry
-          INNER JOIN ancestors ON (gbackup_fsentry.id=ancestors.id)
-          WHERE gbackup_fsentry.parent_id IS NOT NULL
-        ) UPDATE gbackup_fsentry SET obj_id=NULL
-          WHERE gbackup_fsentry.id IN ancestors
-        """, (self.id,))
+        with connection.cursor() as cursor:
+            cursor.execute("""
+            WITH RECURSIVE ancestors(id) AS (
+              SELECT id FROM gbackup_fsentry WHERE id=?
+              UNION ALL
+              SELECT gbackup_fsentry.parent_id FROM gbackup_fsentry
+              INNER JOIN ancestors ON (gbackup_fsentry.id=ancestors.id)
+              WHERE gbackup_fsentry.parent_id IS NOT NULL
+            ) UPDATE gbackup_fsentry SET obj_id=NULL
+              WHERE gbackup_fsentry.id IN ancestors
+            """, (self.id,))
 
     @atomic()
     def scan(self):
