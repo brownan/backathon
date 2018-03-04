@@ -328,7 +328,7 @@ class FSEntry(models.Model):
         with connection.cursor() as cursor:
             cursor.execute("""
             WITH RECURSIVE ancestors(id) AS (
-              SELECT id FROM gbackup_fsentry WHERE id=?
+              SELECT id FROM gbackup_fsentry WHERE id=%s
               UNION ALL
               SELECT gbackup_fsentry.parent_id FROM gbackup_fsentry
               INNER JOIN ancestors ON (gbackup_fsentry.id=ancestors.id)
