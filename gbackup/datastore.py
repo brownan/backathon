@@ -56,7 +56,7 @@ class DataStore:
             models.Setting.set("COMPRESSION", compression)
             models.Setting.set("ENCRYPTION", encryption)
 
-            if encryption == "sealed_box":
+            if encryption == "nacl":
                 # Derive a secret key from the password
                 salt = nacl.utils.random(nacl.pwhash.argon2id.SALTBYTES)
                 ops = nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE
@@ -90,9 +90,9 @@ class DataStore:
                 models.Setting.set("KEY", json.dumps(info))
                 models.Setting.set("PUBKEY", bytes(key.public_key).hex())
 
-                metadata = io.BytesIO()
-                json.dump(info, metadata)
-                metadata.seek(0)
+                metadata = io.BytesIO(
+                    json.dumps(info).encode("UTF-8")
+                )
 
                 self.storage.save("gbackup.config", metadata)
 
@@ -185,7 +185,7 @@ class DataStore:
         to include the key.
         """
         encryption = models.Setting.get("ENCRYPTION")
-        if encryption == "sealed_box":
+        if encryption == "nacl":
             return lambda b=None: hmac.new(bytes(self.pubkey), msg=b,
                                            digestmod=hashlib.sha256)
         elif encryption == "none":
@@ -199,7 +199,7 @@ class DataStore:
         """Returns a function that will encrypt the given bytes depending on
         the encryption configuration"""
         encryption = models.Setting.get("ENCRYPTION")
-        if encryption == "sealed_box":
+        if encryption == "nacl":
             # Call bytes() on the input. If it's a memoryview or other
             # bytes-like object, pynacl will reject it.
             return lambda b: nacl.public.SealedBox(self.pubkey).encrypt(bytes(b))
@@ -219,7 +219,7 @@ class DataStore:
         decrypt the contents
         """
         encryption = models.Setting.get("ENCRYPTION")
-        if encryption == "sealed_box":
+        if encryption == "nacl":
             def _decrypt(b, key=None):
                 if key is None:
                     raise KeyRequired("An encryption key is required")

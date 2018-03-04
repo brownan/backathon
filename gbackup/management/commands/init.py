@@ -10,11 +10,15 @@ class Command(BaseCommand):
         parser.add_argument("-c", "--compression",
                             help="Set compression mode",
                             choices=['none', 'zlib'],
-                            default='zlib')
+                            action="store",
+                            required=True,
+                            )
         parser.add_argument("-e", "--encryption",
                             help="Set encryption mode",
                             choices=['none', 'nacl'],
-                            required=True)
+                            action="store",
+                            required=True,
+                            )
         parser.add_argument("-s", "--storage",
                             required=True,
                             choices=['local'],
@@ -43,6 +47,7 @@ class Command(BaseCommand):
 
         # Now initialize things
         from gbackup.datastore import default_datastore
+        self.stderr.write("Initializing database...")
         default_datastore.initialize(
             encryption=options['encryption'],
             compression=options['compression'],
