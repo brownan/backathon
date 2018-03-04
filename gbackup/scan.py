@@ -1,5 +1,3 @@
-import sys
-
 from tqdm import tqdm
 
 from django.db.transaction import atomic
@@ -7,7 +5,7 @@ from django.db.transaction import atomic
 from . import models
 
 @atomic()
-def scan(progress=False):
+def scan(progress=False, skip_existing=False):
     """Scans all FSEntry objects for changes
 
     The scan works in multiple passes. The first pass calls scan() on each
@@ -23,6 +21,8 @@ def scan(progress=False):
 
     # Start by scanning all existing entries
     qs = models.FSEntry.objects.all()
+    if skip_existing:
+        qs = models.FSEntry.objects.filter(new=True)
 
     # Note about the below use of qs.iterator()
     # Usual evaluation of a queryset will pull every single entry into

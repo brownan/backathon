@@ -5,7 +5,7 @@ import sys
 
 import django
 from django.core.management import load_command_class, find_commands, \
-    BaseCommand
+    BaseCommand, CommandError
 from django.apps import apps
 
 logger = logging.getLogger("gbackup.main")
@@ -114,7 +114,11 @@ def main():
         dbpath
     ))
 
-    command_class.handle(**vars(options))
+    try:
+        command_class.handle(**vars(options))
+    except CommandError as e:
+        command_class.stderr.write(str(e))
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

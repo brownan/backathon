@@ -43,7 +43,7 @@ class Command(BaseCommand):
                 print("Passwords do not match")
                 return
         else:
-            password=None
+            password = None
 
         # Now initialize things
         from gbackup.datastore import default_datastore

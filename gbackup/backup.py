@@ -6,6 +6,9 @@ from . import models
 from .datastore import default_datastore
 
 def backup(progress_enable=False):
+    if models.FSEntry.objects.filter(new=True).exists():
+        # This happens when a new root is added but hasn't been scanned yet.
+        raise RuntimeError("You need to run a scan first")
 
     to_backup = models.FSEntry.objects.filter(obj__isnull=True)
 

@@ -643,6 +643,14 @@ class Snapshot(models.Model):
     )
     date = models.DateTimeField(db_index=True)
 
+    @property
+    def printablepath(self):
+        """Used in printable representations"""
+        # Use the replacement error handler to turn any surrogate codepoints
+        # into something that won't crash attempts to encode them
+        bytepath = os.fsencode(self.path)
+        return bytepath.decode("utf-8", errors="replace")
+
 class Setting(models.Model):
     """Configuration table for settings set at runtime"""
     key = models.TextField(primary_key=True)
