@@ -46,18 +46,10 @@ LOGGING = {
             "class": "logging.StreamHandler",
             "formatter": "color" if sys.stderr.isatty() else "nocolor",
         },
-        "scanlog": {
-            "class": "logging.FileHandler",
-            "formatter": "scanlog",
-            "filename": "scan.log",
-            "mode": "w",
-            "encoding": "UTF-8",
-            "delay": True,
-        }
     },
     "loggers": {
         "gbackup": {
-            "level": "INFO",
+            "level": "WARNING",
         },
         "gbackup.restore": {
             "level": "INFO",
@@ -66,7 +58,7 @@ LOGGING = {
         },
         "gbackup.scan": {
             "level": "INFO",
-            "handlers": ["scanlog"],
+            "handlers": [],
             "propagate": False,
         },
         "django.db": {
