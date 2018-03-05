@@ -210,6 +210,11 @@ class DataStore:
         else:
             raise ImproperlyConfigured("Bad encryption type '{}'".format(encryption))
 
+    @property
+    def key_required(self):
+        """True if decryption routines will require a key"""
+        return models.Setting.get("ENCRYPTION") == "nacl"
+
     @cached_property
     def decrypt_bytes(self):
         """Returns a function that takes a bytes object and an optional key,

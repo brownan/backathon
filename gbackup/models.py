@@ -238,6 +238,35 @@ class Object(models.Model):
             if not all(hash_match(h, objid) for h in hashes):
                 yield obj
 
+    def get_child_by_name(self, name):
+        """For tree objects, this gets the child object of the given name
+
+        Raises ValueError if the current object is not a tree.
+        Raises Object.DoesNotExist if a child with the given name is not found
+
+        :param name: The name to search for. If a string is given,
+        it's encoded with the default filesystem encoding.
+        :type name: str|bytes
+        """
+        # Currently implemented by parsing the metadata. When a directory
+        # index is implemented, this method should be rewritten to check that
+        if isinstance(name, str):
+            name = os.fsencode(name)
+
+        if not self.payload:
+            raise self.DoesNotExist("No payload")
+
+        payload_items = Object.unpack_payload(self.payload)
+        if next(payload_items) != "tree":
+            raise ValueError("Object is not a tree")
+
+        next(payload_items)
+        for n, objid in next(payload_items):
+            if n == name:
+                return self.children.get(id=objid)
+        raise Object.DoesNotExist("Object has no child named {!r}".format(name))
+
+
 class FSEntry(models.Model):
     """Keeps track of an entry in the local filesystem, either a directory,
     or a file.
