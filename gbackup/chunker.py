@@ -13,10 +13,11 @@ class FixedChunker:
         return 2**20
 
     def __iter__(self):
-        pos = self.f.tell()
-        data = self.f.read(self._get_chunksize())
-        if not data:
-            raise StopIteration()
-        yield pos, data
+        while True:
+            pos = self.f.tell()
+            data = self.f.read(self._get_chunksize())
+            if not data:
+                return
+            yield pos, data
 
 DefaultChunker = FixedChunker

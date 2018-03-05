@@ -4,6 +4,7 @@ import logging
 import stat
 import os
 import unittest
+import hashlib
 
 from django.db import connection
 
@@ -259,6 +260,38 @@ class TestRestore(TestBase):
                 "Object {}'s children don't match".format(obj)
             )
 
+    def test_restore_large_file(self):
+        """This file should take more than one block to save, so it tests
+        routines that must operate on multiple blocks.
+
+        """
+        infile = self.create_file("bigfile", "")
+        block = b"\0"*1024*1024
+        h = hashlib.md5()
+
+        with infile.open("wb") as f:
+            for _ in range(50):
+                h.update(block)
+                f.write(block)
+
+        scan.scan()
+        backup.backup()
+        ss = models.Snapshot.objects.get()
+        restore.restore_item(ss.root, self.restoredir, self.key)
+
+        outfile = pathlib.Path(self.restoredir, "bigfile")
+        h2 = hashlib.md5()
+        with outfile.open("rb") as f:
+            while True:
+                a = f.read(64*2**10)
+                if not a:
+                    break
+                h2.update(a)
+        self.assertEqual(
+            h.hexdigest(),
+            h2.hexdigest()
+        )
+
 class TestRestoreWithCompression(TestRestore):
     def setUp(self):
         super().setUp()
@@ -270,7 +303,7 @@ class TestRestoreWithEncryption(TestRestore):
 
         import nacl.public
         self.key = nacl.public.PrivateKey.generate()
-        models.Setting.set("ENCRYPTION", "sealed_box")
+        models.Setting.set("ENCRYPTION", "nacl")
         models.Setting.set("PUBKEY", bytes(self.key.public_key).hex())
 
     def test_not_plaintext(self):
