@@ -19,11 +19,6 @@ def scan(progress=False, skip_existing=False):
 
     """
 
-    # Start by scanning all existing entries
-    qs = models.FSEntry.objects.all()
-    if skip_existing:
-        qs = models.FSEntry.objects.filter(new=True)
-
     # Note about the below use of qs.iterator()
     # Usual evaluation of a queryset will pull every single entry into
     # memory, but we must avoid that since the table could be very large.
@@ -63,28 +58,44 @@ def scan(progress=False, skip_existing=False):
     # [5] https://sqlite.org/c3ref/reset.html
     # [6] https://sqlite.org/c3ref/bind_blob.html (see paragraph about SQLITE_MISUSE)
 
-    pass_ = 0
-    while qs.exists():
+    if not skip_existing:
+        # First pass, scan all existing entries
+        qs = models.FSEntry.objects.all()
 
-        pass_ += 1
-        count = qs.count()
-
-        iterator = qs.iterator()
         if progress:
-            iterator = tqdm(
-                iterator,
-                desc="Pass {}".format(pass_),
-                total=count,
-                unit='entries',
+            entries = tqdm(
+                qs.iterator(),
+                desc="Existing Entries",
+                total=qs.count(),
+                unit="",
             )
+        else:
+            entries = qs.iterator()
 
-        # This loop will sometimes iterate more than count times due to the
-        # above noted SQLite undefined behavior.
-        for entry in iterator:
+        for entry in entries:
             entry.scan()
 
-            # Guard against bugs in scan() causing an infinite loop
+    # Now keep scanning for new objects until there are no more new objects
+    qs = models.FSEntry.objects.filter(new=True)
+    if progress:
+        pbar = tqdm(
+            desc="New Entries",
+            unit=""
+        )
+    else:
+        pbar = None
+
+    while qs.all().exists():
+
+        for entry in qs.iterator():
+            entry.scan()
+
+            # Guard against bugs in scan() causing an infinite loop. If this
+            # item wasn't either deleted or marked new=False, then it would be
+            # selected next pass
             assert entry.new is False or entry.id is None
 
-        # Subsequent iterations get any new entries
-        qs = models.FSEntry.objects.filter(new=True)
+            if pbar is not None:
+                pbar.update(1)
+    if pbar is not None:
+        pbar.close()

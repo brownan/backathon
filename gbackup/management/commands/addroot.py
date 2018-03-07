@@ -2,6 +2,8 @@ import os.path
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import IntegrityError
+from django.db.models import Sum
+from django.template.defaultfilters import filesizeformat
 
 from gbackup import models, scan
 
@@ -18,7 +20,12 @@ class Command(BaseCommand):
         if not os.path.isdir(root_path):
             raise CommandError("Not a directory: {}".format(root_path))
 
-        num_files = models.FSEntry.objects.count()
+        num_files_before = models.FSEntry.objects.count()
+        size_before = models.FSEntry.objects.aggregate(size=Sum("st_size"))['size']
+        if not size_before:
+            # On first add, there will only be one item and it won't have a
+            # size yet
+            size_before = 0
 
         try:
             models.FSEntry.objects.create(
@@ -31,7 +38,11 @@ class Command(BaseCommand):
 
         scan.scan(progress=True, skip_existing=True)
 
-        new_num_files = models.FSEntry.objects.count()
-        self.stderr.write("{} new entries added to backup set".format(
-            new_num_files - num_files
+        num_files_after = models.FSEntry.objects.count()
+        size_after = models.FSEntry.objects.aggregate(size=Sum("st_size"))['size']
+
+        self.stderr.write("{} new entries (totaling {}) added to backup "
+                          "set".format(
+            num_files_after - num_files_before,
+            filesizeformat(size_after-size_before)
         ))

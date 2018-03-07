@@ -20,11 +20,9 @@ def backup(progress_enable=False):
     )
 
     if progress_enable:
-        progress = tqdm(total=to_backup.count(), unit="files")
-        progress2 = tqdm(desc="pass", unit="")
+        progress = tqdm(total=to_backup.count(), unit="")
     else:
         progress = None
-        progress2 = None
 
     datastore = default_datastore
 
@@ -71,8 +69,6 @@ def backup(progress_enable=False):
         # There would be entries needing backing up, but none of them have
         # all their dependent children backed up.
         assert ct > 0
-        if progress2 is not None:
-            progress2.update(1)
 
     now = timezone.now()
 
