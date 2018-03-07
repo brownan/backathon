@@ -2,40 +2,41 @@
 
 ***Note: This project is currently in the experiment phase. I'm trying out 
 some ideas and maybe it'll turn into something useful, maybe not. But for 
-now, this is not a working backup solution.***
+now I wouldn't recommend using unless you're interested in development or 
+contributing ideas. Use at your own risk!***
 
 Gbackup is a personal file backup solution that has the following key selling
 points:
 
 * Runs as a daemon with built-in scheduler (no cobbling together wrapper 
   scripts and cron)
-* Low runtime memory usage, designed to run in the background
-* Fast and efficient filesystem scans to discover changed files
-* Fast and efficient pruning of old backups to recover space
-
-Additionally, these are the main design goals that are a priority for me:
-
+* Use asymmetric encryption to allow unattended backup and prune operations 
+  without a password. Only restore operations will require the password
 * Repository format is a content-addressable object store for deduplication 
   and quick restores from any past snapshot (loosely based on Git's object 
   format, hence Gbackup)
+
+Additionally, these are the main design goals that are a priority for me:
+
+* Low runtime memory usage, designed to run in the background
+* Fast and efficient filesystem scans to discover changed files
+* Fast and efficient pruning of old backups to recover space
 * Targets any generic storage backend (I plan to target Backblaze B2)
 * Client side encryption (I plan to incorporate libsodium)
-* Use asymmetric encryption to allow backup and prune operations 
-  without a password. Only restore operations will require the password
 * Keep the code simple. Complexity is avoided except when absolutely necessary
 
 No other backup programs I've found quite met these criteria. Gbackup takes 
-ideas from Borg, Duplicati, Restic, and others.
+ideas from Borg, Restic, Duplicati, and others.
 
 GBackup runs on Linux using Python 3.5.3 or newer. At the moment, 
 compatability with any other platforms is coincidental.
 
-These features are not a priority at the moment
+These features are not a priority and probably won't be implemented:
 
-* Multi-client support (multiple machines backing up to the same repository, 
-with deduplication across all files. This would require repository locking 
-and synchronizing of metadata, which isn't a problem I want to tackle right 
-now)
+* Multi-client support (meaning multiple machines backing up to the same 
+repository, with deduplication across all files. This would require 
+repository locking and synchronizing of metadata, which isn't a problem I 
+want to tackle)
 
 ## Architecture
 
@@ -44,89 +45,80 @@ now)
 Repository - The remote storage service where backup data is stored, 
     typically encrypted.
     
-Backup set - The set of files on a local filesystem to be backed up. This is 
-    defined by a single path to a root directory.
+Backup set - The set of files on a local filesystem to be backed up.
     
 Snapshot - When a backup set is backed up, that forms a snapshot of all the 
-    files in the backup set.
+    files in the backup set at that point in time. Snapshots are saved in the
+    repository and are available for later restore.
 
-### Scan process
+### Scan process and files cache
 
-One of the fundamental aspects of any backup software is deciding which files
-to back up and which files haven't changed since last backup. Some software, 
-e.g. rsync, don't keep any local state and check which files have changed by 
-comparing file attributes against a remote copy of the file. Some software 
-keep a local database either in memory or on disk of file attributes and
-compared the database values with the file. This is all to avoid transferring
-more data across a perhaps slow network connection than is necessary, but 
-with very large filesystems to back up, it's a necessary optimization.
+Before a backup can be made, the backup set must be scanned. The scan
+determines which files have changed and therefore which files need backing 
+up. In many backup programs these two functions happen together: files are 
+scanned and backed up if needed in a single step. However, in Gbackup the scan 
+routine is decoupled from the backup routine. This has several advantages:
+
+* Scanning can easily be replaced with an inotify watcher. Scans can then 
+happen much less often (e.g. once a day). Inotify would mark files as "dirty" 
+and the backup routine only has to read in those files.
+* To report accurate info on the size and number of files to be backed up, 
+and show progress during backup.
+
+Gbackup keeps a local cache of all files in the backup set, and stores some 
+metadata on each one. When a scan is performed, metadata from an `lstat()` 
+system call is compared with the information in the database, and if the 
+information differs, the file is marked as dirty and will be backed up next 
+backup.
+
+(Note that a file marked as dirty doesn't necessarily mean its contents have 
+changed. During the backup, the file's contents is read in and hashed to 
+determine if any new chunks actually need uploading. The scan really just 
+finds which files should be read in and checked.)
+
+Right now, the metadata stored and used to determine changed files is:
+
+* st_mode (includes file type and permissions)
+* st_mtime_ns (last modified time)
+* st_size
+
+The file cache is kept in a local SQLite table. The scan process selects all 
+entries from this table and iterates over them, performing the `lstat()` call
+on each one. If a file has changed according to the metadata listed above, it
+is marked as dirty and its metadata updated in the database. If a directory 
+has changed, a `listdir()` is performed and its children updated: any old 
+children are deleted and any new children are added and flagged as "new" for 
+the next pass.
+
+When the first scan pass finishes, a second pass selects any entries with the 
+"new" flag and the same process is repeated. Passes continue until no more 
+new files are selected. For the initial scan, that would effectively make 
+this a breadth-first search from the root of the backup set.
  
-GBackup can't read remote data, since that data may be encrypted with a 
-private key that the backup process won't have access to. So our only option 
-is to keep a local cache of file attributes of every file in the backup set. 
-Early experiments used hierarchy of Python objects in memory. When the 
-process started, the filesystem was traversed and the hierarchy of objects 
-created, each object storing file attributes. Periodically, a simple 
-recursive algorithm could traverse this tree in a post-order to iterate over 
-all filesystem entries to either see if they've changed, or iterate over only
-changed objects to back them up. Additionally, this architecture has a nice 
-Python implementation using recursive generator functions and Python's `yield 
-from` expressions. Each object's backup() function would yield objects to 
-back up, and recurse using `yield from` into its child objects before backing
-itself up.
+Traversing the entries by iterating over the database table helps keep I/O 
+relatively low compared to traversing the filesystem, which would require a 
+`listdir()` call to each directory. We avoid `listdir()` calls on directories
+that haven't changed by comparing the metadata: when a directory's entries 
+change its mtime is updated. 
 
-This approach wasn't very fast and required quite a lot of memory to run. So 
-I decided to experiment with the other extreme: store nothing in memory and
-put all state into a local SQLite database. This turns out to have a lot of 
-other advantages, in that I can do SQL queries to select and sort entries 
-however I want, and gives more flexability in how I traverse the filesystem. 
-But more importantly, it turns out to be very fast, with low memory usage. 
-Scans are bounded mostly by the time to perform the lstat system call on 
-every file in the backup set.
-
-The current scan process is a multi-pass scan. On the first pass, it 
-iterates over all objects in the local database (in arbitrary order) and 
-performs an lstat to see if the entry has changed from what's in the database.
-If it has changed, it's flagged as needing backup. For directories needing 
-backup, a listdir call lists the children and any new entries are created for
-new children. 
-
-Subsequent passes perform the same operation on all newly created entries for
-new files. Passes continue until there are no new files to scan.
-
-This approach to scanning turns out to be very fast, especially for 
-subsequent scans but even the inital scan. Memory usage remains low and since
-database writes are performed in a single SQLite transaction using the 
-SQLite Write-Ahead Log, IO is also kept to a minimum.
-The reason scans are quick is it avoids problems with recursive 
-tree traversals: each visit to a node would require a separate database query
-or listdir call to get the list of children, which is more IO to perform. By 
-scanning files in no particular order, every entry is streamed from the 
-database in large batches and IO is kept to a minimum. The limiting factor is
-having to perform all the lstat calls for every filesystem entry.
-
-Further, since a directory's mtime is updated by the creation or deletion of 
-files in the directory, we can avoid listdir on unchanging directories.
-
-Finally, note that in Gbackup the scanning operation is decoupled from the 
-backup operation. This lets us plug in different methods for detecting 
-changes, and perform efficient backups on only the files that have changed.
-The backup process will only iterate over the entries in the cache
-database that need backing up.
+This results in very fast scans over files that haven't changed. 
+The initial scan is slower, mostly due to the I/O in performing all the 
+inserts into the cache table, but there may be room for optimization here. 
+Memory is also kept low since all data is stored on disk in the SQLite database.
 
 ### Storage Format
 
-The storage repository is loosely based on Git's object store. With this, 
-everything uploaded into the repository is an object, and objects are named 
-after a hash of their contents. This has the advantage of inherent 
+The storage repository is loosely based on Git's object store: 
+everything uploaded into the repository is an object, and objects are 
+identified by a hash of their contents. This has the advantage of inherent 
 deduplication, as two objects with the same contents will only be stored once.
 
 In this system, there are three kinds of objects: Tree objects, Inode 
 objects, and Blob objects. They roughly correspond to their respective 
 filesystem counterparts.
 
-Tree objects store stat info about a directory, as well as a list of 
-directory entries and the name of the objects for each entry. Directory 
+Tree objects store stat info about a directory, as well as a list of
+directory entries and the name of the objects for each entry. Directory
 entries can be other tree objects or inode objects.
 
 Inode objects store stat info about a file, and a list of blob objects that 
@@ -134,57 +126,101 @@ make up the content of that file.
 
 Blob objects store a blob of data.
 
-Since each object is named with a hash of its contents, and objects reference
-other objects by name, this forms a merkle tree. A root object's hash 
-cryptographicaly verifies the entire object tree for a snapshot (much like Git).
-If another snapshot is taken and only one file changed deep in the filesystem, 
-then pushed to the repository are objects for the new file, as well as new 
-objects for all parent directories up to the root.
+Since each object is identified by a hash of its contents, and objects 
+reference other objects by their identifier, this forms a merkle tree. A root
+object's hash cryptographicaly verifies the entire object tree for a snapshot
+(much like Git). If another snapshot is taken and only one file changed deep 
+in the filesystem, then pushed to the repository are objects for the new 
+file, as well as new objects for all parent directories up to the root. All 
+identical objects are shared between snapshots.
 
-Note that in this heirarchy of objects, objects may be referenced more than 
-once—they may have more than one parent. A blob may be referenced by more 
-than one inode (or several times in the same file), but also inode and tree 
-objects may be referenced by more than one snapshot.
+### Object Cache and Garbage Collection
+
+In the local SQLite database, along with the filesystem cache table, there is
+an object cache table. This table keeps track of objects that exist in the 
+remote storage repository. This allows Gbackup to avoid uploading objects 
+that already exist by performing a quick query to the local database.
+
+Since objects hold references to each other, another local table of object 
+relationships is maintained. This forms a directed graph of objects, and 
+allows Gbackup to calculate which objects should be deleted when an old 
+snapshot is pruned. Since objects may be referenced by more than one 
+snapshot, only objects not reachable by any snapshot may be deleted.
+
+This is a classic garbage collection problem. To calculate the set of 
+"garbage" objects quickly and efficiently, there are several options 
+available including classic and well researched garbage collection algorithms. 
+I've however chosen to implement a bloom filter, tuned to collect on average 
+95% of all garbage objects. This has the advantage of taking just two passes 
+over the entire object collection, the first of which is read only, so there 
+is low I/O. And since it's tuned for 95% (instead of something higher) the 
+memory usage is also low: about 760k for a million objects.
+
+The first pass walks the tree of objects starting at the snapshot roots. This
+walks the set of reachable objects. Each object is added to the bloom filter.
+The hash functions are simply randomly generated bit strings xor'd into the
+object identifiers, which themselves are already random strings since 
+they're cryptographic hashes.
+
+The second pass iterates over the entire table of objects. If an object 
+appears in the bloom filter, there's a 95% change it was reachable. If the 
+item doesn't appear, then the bloom filter guarantees the object was not 
+reachable and can be deleted.
+
+Since the garbage collection calculations happen entirely on the client-side,
+the client can issue delete requests for objects in the remote repository 
+without having to download and decrypt them. This keeps with the goal of not 
+needing the encryption password for routine prune operations.
 
 ### Chunking
 
-When backing up a file, the file's contents is split into chunks and each 
-chunk is uploaded individually as its own blob. The algorithm for how to 
-chunk the file will determine how good the deduplication is. Larger chunks 
-mean it's less likely to match content elsewhere, while smaller chunks mean 
-more uploads, more network overhead, and slower uploads.
+When backing up a file, the file's contents is split into chunks and each
+chunk is uploaded individually as its own blob object. The chunking algorithm
+determines where and how many splits to make, which also determines how good
+the deduplication is. Larger chunks make for more efficient uploads, but
+mean it's less likely to match content elsewhere (since a single change
+in a chunk will cause the entire chunk to be re-uploaded). Smaller
+chunks give better deduplication, but mean more uploads, more network
+overhead, slower uploads, and more cache overhead.
 
 Right now Gbackup uses a fixed size chunking algorithm: files are simply 
-split every fixed number of bytes. This works well for most kinds of files 
-found in a typical desktop user's home directory. Most files are going to be 
-very small (so deduplication won't help much), or are going to be binary 
-or compressed file formats that will be completely rewritten on change, and 
-probably won't benefit much from deduplication at all.
+split every fixed number of bytes. Fixed size chunkers are quick and simple 
+but don't provide good deduplication between files if it's unlikely similar 
+regions will align to the same chunk boundaries, or between the same file 
+across snapshots in cases where bytes are inserted into files pushing existing 
+data down and causing chunk misalignment.
+
+The fixed size chunker is likely to change to something more sophisticated in
+the future, but I believe fixed size chunking is adequate for most kinds of 
+files found in a typical desktop user's home directory. My rationale is that 
+most files are going to be very small (so deduplication won't help much), or 
+are going to be binary or compressed file formats that will be completely 
+rewritten on change, and probably won't benefit much from deduplication at 
+all. Most large binary formats would want to avoid inserting bytes because 
+that would involve copying large amounts of data to other sections of the file.
+
+So large files that manage their data effectively will deduplicate effectively 
+with a fixed size chunk. And small files are small enough to just upload 
+completely each change.
+
+This leaves two questions:
+
+1. How big should the chunks be?
+2. How large does a file have to be before it's worth chunking at all?
+
+Backblaze has set these parameters at 10MB and 30MB respectively [1], and 
+these are the parameters I've chosen to implement initially. As the software 
+matures and I get more feedback and benchmarks, these parameters can be tuned.
 
 Some backup systems (such as Borg) use variable sized chunks and a rolling 
 hash to determine where to split the chunk boundaries. This has the advantage
-of synchronizing chunk boundaries to the content. Consider a fixed size chunk
-of 4MB. A large file that doesn't change will use the same set of blob objects 
-every time. But if a single byte is inserted at the beginning of the 
-file, all the data is pushed down by one byte. Now suddenly the chunks don't 
-match previously uploaded ones since the previous chunks of data don't align 
-with chunk boundaries. So the entire file is re-uploaded.
-
-With a rolling hash over a window of bytes, as files are scanned, the 
-decision to split a file is based on the hash of the data in the window. If 
-one file is split at a particular location, and another file has the same 
-byte sequence somewhere in it, then there will be a chunk split there, no 
-matter where those bytes fall in the file.
-
-I believe that for most kinds of files found in desktop users' home 
-directories, fixed size chunking is sufficient. Most large binary formats 
-avoid inserting bytes because that would involve copying large amounts of 
-data to other sections of the file. Applications managing large data formats 
-will probably have a smarter format that is more friendly to fixed size chunk
-deduplication.
-
-Some examples of files that perform poorly on fixed size chunking:
-
+of synchronizing chunk boundaries to the content, so a single inserted byte 
+won't cause the chunk boundaries to misalign with the previous backup causing
+the entire file to be re-uploaded. It's also more likely to discover similar 
+portions within a file and across different files. This increases the 
+deduplication in lots of situations where fixed size chunking falls flat. 
+Some examples where fixed size chunking is likely to perform poorly:
+ 
 * virtual machine images, which may have lots of duplicate data throughout 
 but not necessarily aligned to chunk boundaries.
 * SQL database dumps. Each database dump will contain lots of identical data,
@@ -192,47 +228,13 @@ but not necessarily aligned to chunk boundaries.
 * Video files for video editing. Changes in one section of a video 
 may change the alignment of the rendered video but content in other sections 
 stays the same.
+ 
+Something of this sort is likely to be implemented in the future but is lower
+on my priorities for the reasons explained above. I want to optimize for the 
+common case, and as a single data point: 97% of the million files in my home 
+directory are below 1MB, and probably aren't worth chunking at all.
 
-My conclusion is that implementing a rolling hash would help for some 
-situations, but not for the most common cases, so I'm just implementing fixed
-size chunking for now. Changing the chunking algorithm should be easy when it
-becomes necessary.
-
-Also, taking a hint from Backblaze, files below about 30MB in size [1] are 
-probably not worth chunking at all, as the sorts of files that would benefit 
-from a lot of deduplication are mostly huge files (database dumps, VM images,
-etc). 
-
-[1] 30MB is the threshold Backblaze uses, below which files aren't chunked.
-https://help.backblaze.com/hc/en-us/articles/217666728-How-does-Backblaze-handle-large-files-
-
-I've also noticed that an overwhelming 97% of files in my own home 
-directory are less than 1 MB, out of about a million files. Such tiny files 
-won't benefit much from deduplication or rolling hashes, but will benefit 
-much more from pack files, where many objects are uploaded in a single pack. So 
-pack files are a higher priority than rolling hashes.
-
-
-### Object Cache
-
-In the local database, a cache of objects is kept in a table. This table 
-helps keep track of objects that have been uploaded to the remote repository,
-saving network requests. This also lets us avoid uploading a file even if the
-scanning process thinks a file changed when it hasn't. The file will be split
-into chunks, the chunks hashed, and then the hash looked up in the database.
-If the object already exists in the database, then it's assumed to have been 
-uploaded to the repository already.
-
-The Object cache also keeps track of relationships between objects. This is 
-used when removing an old snapshot. When a snapshot is removed, the 
-objects aren't immediately deleted, since they may be referenced by other 
-snapshots. Instead, a garbage collection routine is used to traverse the 
-object tree starting at each root, and calculate a set of unreachable objects.
-Those objects are then deleted from the local cache and the remote repository.
-
-### Pack files
-
-*TODO*
+[1] https://help.backblaze.com/hc/en-us/articles/217666728-How-does-Backblaze-handle-large-files-
 
 ### Backup process
 
