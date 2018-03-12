@@ -21,9 +21,12 @@ Additionally, these are the main design goals that are a priority for me:
 * Low runtime memory usage, designed to run in the background
 * Fast and efficient filesystem scans to discover changed files
 * Fast and efficient pruning of old backups to recover space
-* Targets any generic storage backend (I plan to target Backblaze B2)
-* Client side encryption (I plan to incorporate libsodium)
-* Keep the code simple. Complexity is avoided except when absolutely necessary
+* Fast and efficient local cache for browsing backed up file manifests,
+  for easy restores of select files.
+* Targets any generic object storage service (I plan to target Backblaze B2)
+* Client side encryption (currently using libsodium)
+* Keep the code and architecture simple. Complexity is avoided except when
+  absolutely necessary
 
 No other backup programs I've found quite met these criteria. Gbackup takes 
 ideas from Borg, Restic, Duplicati, and others.
