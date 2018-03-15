@@ -292,7 +292,15 @@ class DataStore:
                 obj_instance.load_payload(view)
                 obj_instance.save()
 
-                obj_instance.children.set(children)
+                # Note, there could be duplicate children so we have to
+                # deduplicate to avoid a unique constraint violation
+                models.ObjectRelation.objects.bulk_create([
+                    models.ObjectRelation(
+                        parent=obj_instance,
+                        child_id=c,
+                    ) for c in set(child.objid for child in children)
+                ])
+
                 name = self._get_path(objid)
 
                 to_upload = self.encrypt_bytes(

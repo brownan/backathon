@@ -10,6 +10,7 @@ from gbackup import models
 class TestBase(TestCase):
     def setUp(self):
         self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
 
         # Directory to be backed up
         self.backupdir = self.stack.enter_context(
@@ -40,5 +41,3 @@ class TestBase(TestCase):
         pathobj.write_text(contents, encoding="UTF-8")
         return pathobj
 
-    def tearDown(self):
-        self.stack.close()

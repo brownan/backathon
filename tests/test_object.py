@@ -29,9 +29,11 @@ class TestObject(TransactionTestCase):
                 obj = models.Object.objects.create(
                     objid=objid,
                 )
-                obj.children.set([
-                    c.encode("ASCII") if isinstance(c, str) else c
-                    for c in children
+                models.ObjectRelation.objects.bulk_create([
+                    models.ObjectRelation(
+                        parent=obj,
+                        child_id=c.encode("ASCII") if isinstance(c,str) else c
+                    ) for c in children
                 ])
 
     def assert_objects(self, objs, roots=None, no_extras=True):
@@ -167,7 +169,10 @@ class TestObject(TransactionTestCase):
                 obj2 = models.Object.objects.create(
                     objid="obj_{}_{}".format(root,i).encode("ASCII")
                 )
-                obj.children.set([obj2])
+                models.ObjectRelation.objects.create(
+                    parent=obj,
+                    child=obj2
+                )
                 obj = obj2
 
 

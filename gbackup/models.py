@@ -38,6 +38,10 @@ class Object(models.Model):
     when a root object is deleted, a set of unreachable garbage objects can
     be calculated.
     """
+
+    class Meta:
+        db_table = "objects"
+
     # This is the binary representation of the hash of the payload.
     # To get the int representation, you can use int.from_bytes(objid, 'little')
     # To get the hex representation, use objid.hex()
@@ -50,6 +54,8 @@ class Object(models.Model):
         "self",
         symmetrical=False,
         related_name="parents",
+        through="ObjectRelation",
+        through_fields=('parent', 'child'),
     )
 
     def __repr__(self):
@@ -207,10 +213,10 @@ class Object(models.Model):
         # traversing the links in the ManyToMany relation.
         query = """
         WITH RECURSIVE reachable(id) AS (
-            SELECT root_id FROM gbackup_snapshot
+            SELECT root_id FROM snapshots
             UNION ALL
-            SELECT to_object_id FROM gbackup_object_children
-            INNER JOIN reachable ON reachable.id=from_object_id
+            SELECT child_id FROM object_relations
+            INNER JOIN reachable ON reachable.id=parent_id
         ) SELECT id FROM reachable
         """
         with connection.cursor() as c:
@@ -266,6 +272,24 @@ class Object(models.Model):
                 return self.children.get(id=objid)
         raise Object.DoesNotExist("Object has no child named {!r}".format(name))
 
+class ObjectRelation(models.Model):
+    """Keeps track of the dependency graph between objects"""
+    class Meta:
+        db_table = "object_relations"
+        unique_together = [
+            ('parent', 'child'),
+        ]
+
+    parent = models.ForeignKey(
+        "Object",
+        on_delete=models.CASCADE,
+        related_name="+",
+    )
+    child = models.ForeignKey(
+        "Object",
+        on_delete=models.CASCADE,
+        related_name="+",
+    )
 
 class FSEntry(models.Model):
     """Keeps track of an entry in the local filesystem, either a directory,
@@ -278,6 +302,9 @@ class FSEntry(models.Model):
     this object. If obj is null, then this entry is considered "dirty"
     and needs to be uploaded.
     """
+    class Meta:
+        db_table = "fsentry"
+
     obj = models.ForeignKey(
         "Object",
         null=True, blank=True,
@@ -357,13 +384,13 @@ class FSEntry(models.Model):
         with connection.cursor() as cursor:
             cursor.execute("""
             WITH RECURSIVE ancestors(id) AS (
-              SELECT id FROM gbackup_fsentry WHERE id=%s
+              SELECT id FROM fsentry WHERE id=%s
               UNION ALL
-              SELECT gbackup_fsentry.parent_id FROM gbackup_fsentry
-              INNER JOIN ancestors ON (gbackup_fsentry.id=ancestors.id)
-              WHERE gbackup_fsentry.parent_id IS NOT NULL
-            ) UPDATE gbackup_fsentry SET obj_id=NULL
-              WHERE gbackup_fsentry.id IN ancestors
+              SELECT fsentry.parent_id FROM fsentry
+              INNER JOIN ancestors ON (fsentry.id=ancestors.id)
+              WHERE fsentry.parent_id IS NOT NULL
+            ) UPDATE fsentry SET obj_id=NULL
+              WHERE fsentry.id IN ancestors
             """, (self.id,))
 
     @atomic()
@@ -663,6 +690,9 @@ class FSEntry(models.Model):
 
 class Snapshot(models.Model):
     """A snapshot of a filesystem at a particular time"""
+    class Meta:
+        db_table = "snapshots"
+
     path = PathField(
         help_text="Root directory of this snapshot on the original filesystem"
     )
@@ -682,6 +712,9 @@ class Snapshot(models.Model):
 
 class Setting(models.Model):
     """Configuration table for settings set at runtime"""
+    class Meta:
+        db_table = "settings"
+
     key = models.TextField(primary_key=True)
     value = models.TextField()
 
