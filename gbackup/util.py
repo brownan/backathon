@@ -1,3 +1,5 @@
+from django.db import DEFAULT_DB_ALIAS
+from django.db.transaction import Atomic, get_connection
 
 class BytesReader:
     """A file-like object that reads from a bytes-like object
@@ -64,3 +66,53 @@ class BytesReader:
     def seek(self, pos):
         self.pos = pos
 
+
+class AtomicImmediate(Atomic):
+    """A version of django.db.transaction.Atomic that begins a write transaction
+
+    Used with the custom SQLite backend, this uses SQLite's BEGIN IMMEDIATE
+    statement to start a transaction if this is the outermost atomic block
+    and SQLite is in autocommit mode (the default for Django).
+    Otherwise, acts as any other atomic block.
+
+    This should be used whenever a transaction is opened that will do some
+    reading first and then eventually need to write to the database. With a
+    normal transaction, SQLite acquires the shared lock, which allows
+    reading. Only once a write is attempted does SQLite acquire the RESERVED
+    lock. If multiple connections acquire the SHARED lock, then only the first
+    connection to attempt a write can upgrade the transaction to a write
+    transaction. All other transactions will fail on the first write
+    operation, requiring a rollback.
+
+    Using BEGIN IMMEDIATE will acquire the RESERVED lock immediately,
+    guaranteeing that any eventual writes will succeed. If another connection
+    holds the RESERVED lock when BEGIN IMMEDIATE is executed, then the
+    default 5 second busy timeout will block waiting for the lock. So if
+    write transactions finish in fewer than 5 seconds, there should be no
+    failed transactions due to busy errors. Code that uses this transaction
+    mode should try to keep its transactions quick, and avoid opening
+    long-running write transactions.
+    """
+    def __init__(self, *args, **kwargs):
+        self.set_begin_immediate = False
+        super().__init__(*args, **kwargs)
+
+    def __enter__(self):
+        connection = get_connection(self.using)
+        if not connection.in_atomic_block:
+            connection.begin_immediate = True
+            self.set_begin_immediate = True
+
+        super().__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.set_begin_immediate:
+            connection = get_connection(self.using)
+            connection.begin_immediate = False
+        super().__exit__(exc_type, exc_val, exc_tb)
+
+def atomic_immediate(using=None, savepoint=True):
+    if callable(using):
+        return AtomicImmediate(DEFAULT_DB_ALIAS, savepoint)(using)
+    else:
+        return AtomicImmediate(using, savepoint)

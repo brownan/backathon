@@ -1,10 +1,17 @@
 """
 This custom database backend inherits from the sqlite3 backend but adds
-cascading deletes to foreign key relations. Foreign key fields with on_delete
-set to DO_NOTHING will efficiently delete all objects referencing the deleted
-object without pulling them into memory. Signals and such aren't run, but for
-large tables, this is the only way to delete a large number of objects
-without blowing up memory usage and taking forever.
+a few customizations for this application.
+
+In particular, it adds:
+* Cascading deletes to foreign key relations. Foreign key fields with on_delete
+  set to DO_NOTHING will efficiently delete all objects referencing the deleted
+  object without pulling them into memory. Signals and such aren't run, but for
+  large tables, this is the only way to delete a large number of objects
+  without blowing up memory usage and taking forever.
+* Uses the Write-ahead Log journal mode to support readers reading
+  simultaneously with a single writer.
+* Supports starting transactions with BEGIN IMMEDIATE for immediately
+  acquiring the RESERVED lock
 
 """
 from django.db.backends.sqlite3 import base, schema
@@ -16,6 +23,12 @@ class DatabaseSchemaEditor(schema.DatabaseSchemaEditor):
 
 class DatabaseWrapper(base.DatabaseWrapper):
     SchemaEditorClass = DatabaseSchemaEditor
+
+    def __init__(self, *args, **kwargs):
+        # Set by a custom context manager to tell us to use BEGIN IMMEDIATE
+        # when beginning a transaction
+        self.begin_immediate = False
+        super().__init__(*args, **kwargs)
 
     def get_new_connection(self, conn_params):
         """Enable a couple sqlite features that are disabled by default"""
@@ -43,3 +56,9 @@ class DatabaseWrapper(base.DatabaseWrapper):
         # more memory than I expect.
         #conn.execute("PRAGMA mmap_size=1073741824;").close()
         return conn
+
+    def _start_transaction_under_autocommit(self):
+        if self.begin_immediate:
+            self.cursor().execute("BEGIN IMMEDIATE")
+        else:
+            self.cursor().execute("BEGIN")
