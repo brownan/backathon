@@ -294,7 +294,7 @@ class FSEntryBackup(TestBase):
             self._assert_objects(structure, roots)
 
     def test_objects_comitted(self):
-        """Do a backup and then assert the objects actually get comitted to
+        """Do a backup and then assert the objects actually get committed to
         the backing store"""
         self.create_file("dir/file1", "file contents")
         scan.scan()
@@ -308,7 +308,7 @@ class FSEntryBackup(TestBase):
             obj_filepath = pathlib.Path(
                 self.datadir,
                 "objects",
-                obj.objid.hex()[:2],
+                obj.objid.hex()[:3],
                 obj.objid.hex(),
             )
             self.assertTrue(obj_filepath.is_file())

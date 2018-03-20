@@ -330,7 +330,7 @@ class DataStore:
         """Returns the path for the given objid"""
         objid_hex = objid.hex()
         return "objects/{}/{}".format(
-            objid_hex[:2],
+            objid_hex[:3],
             objid_hex,
         )
 

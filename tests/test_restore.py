@@ -321,7 +321,7 @@ class TestRestoreWithEncryption(TestRestore):
         self.assertIs(None, blob.payload)
 
         path = pathlib.Path(self.datadir, "objects",
-                            blob.objid.hex()[:2],
+                            blob.objid.hex()[:3],
                             blob.objid.hex())
         self.assertTrue(path.exists())
         contents = path.read_bytes()
