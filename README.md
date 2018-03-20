@@ -262,35 +262,31 @@ recovering plain text files, metadata, or directory structures impossible
 without the encryption keys or password
 * Modifications to valid objects are detected by using encryption
 algorithms that incorporate authentication
-* Object identifiers reveal no information by using an HMAC construction
-* Extra objects inserted into the repository are rejected due to not being 
-encrypted and authenticated with the proper keys
-* Old objects re-inserted (replay attack) are vaild, but won't hurt anything 
-because they won't be referenced by any other objects, as objects' 
-contents are also authenticated
+* Object identifiers are an HMAC of their plaintext contents, revealing no 
+information and also providing another layer of authentication for objects
+* Attacker-created objects inserted into the repository are rejected due to not 
+being encrypted and authenticated with the proper keys
+* Valid, deleted objects may be re-inserted (replay attack), but it's 
+impossible for an attacker to construct a new original snapshot out of 
+existing or old valid objects since the references to other objects within 
+the object payload are authenticated.
 
 These are the possible threats with this model:
 
-* The snapshot files are encrypted and authenticated, but are suseptible to 
-replay attacks by restoring a valid, deleted object. Since objects reference 
-each other by their authenticated identifiers, extra objects won't hurt 
-anything since they wouldn't be referenced by any other objects.
 * Since snapshots are stored one per file, an attacker knows how many 
 snapshots exist
-* An attacker can restore an old snapshot file, which may look valid but 
-without the referenced objects, would actually fail to restore.
+* An attacker can restore an old snapshot file. Without the referenced 
+objects, it would look valid but would actually fail to restore.
 * An attacker can delete objects or corrupt their contents to render some or 
-all snapshots inoperable. Missing files can be detected by iterating over 
-objects in the local cache database and checking that they exist. Corruption 
-can be detected by downloading all objects and validating them (decrypting 
-and checking their contents hashes to match the object identifier)
+all snapshots inoperable. Such corruption would be detected during a restore,
+but would not be detected during the normal backup process.
 * An attacker observing access patterns can learn how often backups are 
 taken, and how much data is written to the repository
 * Careful analysis of the uploaded object sizes, number of objects at 
 each size, and the pattern/ordering of uploaded objects may reveal some 
-information about file sizes or directory structure. For example, lots of 
-small files, or lots of directories would generate more metadata objects, which 
-have a fairly predictiable and consistent size.
+information about file sizes or directory structure of the backup set. For 
+example, lots of small files, or lots of directories would generate more 
+metadata objects, which have a fairly predictiable and consistent size.
 * If an attacker has write access to a file in the backup set, it's possible 
 to mount a fingerprinting attack, where known data is written to a local file. 
 The attacker can then observe whether a new chunk is uploaded to the 
