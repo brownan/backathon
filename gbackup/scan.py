@@ -1,6 +1,7 @@
 from tqdm import tqdm
 
 from django.db.transaction import atomic
+from django.db import connection
 
 from . import models
 
@@ -97,5 +98,11 @@ def scan(progress=False, skip_existing=False):
 
             if pbar is not None:
                 pbar.update(1)
+
+    cursor = connection.cursor()
+    cursor.execute("ANALYZE fsentry")
+    cursor.close()
+
     if pbar is not None:
         pbar.close()
+

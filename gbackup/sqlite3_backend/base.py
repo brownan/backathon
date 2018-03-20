@@ -35,6 +35,11 @@ class DatabaseWrapper(base.DatabaseWrapper):
         """Enable some sqlite features that are disabled by the default"""
         conn = super().get_new_connection(conn_params)
 
+        # Set the page size. In SQLite version 3.12.0 this was changed to a
+        # default of 4096, but some distros still use older versions of SQLite.
+        conn.execute("PRAGMA page_size=4096").close()
+        conn.execute("PRAGMA page_cache=-2000").close()
+
         # The write-ahead-log's main advantage is that it allows readers
         # while another connection is in a write transaction. It also may add
         # some performance improvements, but at the moment, tests show

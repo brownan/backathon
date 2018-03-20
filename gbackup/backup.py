@@ -1,4 +1,5 @@
 from django.db.transaction import atomic
+from django.db import connection
 from django.utils import timezone
 from tqdm import tqdm
 
@@ -83,3 +84,7 @@ def backup(progress_enable=False):
                 date=now,
             )
             datastore.put_snapshot(ss)
+
+    cursor = connection.cursor()
+    cursor.execute("ANALYZE")
+    cursor.close()
