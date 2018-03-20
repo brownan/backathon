@@ -268,13 +268,22 @@ encrypted and authenticated with the proper keys
 * Old objects re-inserted (replay attack) are vaild, but won't hurt anything 
 because they won't be referenced by any other objects, as objects' 
 contents are also authenticated
+
+These are the possible threats with this model:
+
 * The snapshot files are encrypted and authenticated, but are suseptible to 
-replay attacks by restoring a valid, deleted object. However, the only thing 
-that would do is restore an old backup that already existed at some point in 
-the past. Since referenced objects may no longer exist, that backup may look 
-valid but actually be unrestorable due to missing objects.
+replay attacks by restoring a valid, deleted object. Since objects reference 
+each other by their authenticated identifiers, extra objects won't hurt 
+anything since they wouldn't be referenced by any other objects.
 * Since snapshots are stored one per file, an attacker knows how many 
 snapshots exist
+* An attacker can restore an old snapshot file, which may look valid but 
+without the referenced objects, would actually fail to restore.
+* An attacker can delete objects or corrupt their contents to render some or 
+all snapshots inoperable. Missing files can be detected by iterating over 
+objects in the local cache database and checking that they exist. Corruption 
+can be detected by downloading all objects and validating them (decrypting 
+and checking their contents hashes to match the object identifier)
 * An attacker observing access patterns can learn how often backups are 
 taken, and how much data is written to the repository
 * Careful analysis of the uploaded object sizes, number of objects at 
@@ -282,10 +291,13 @@ each size, and the pattern/ordering of uploaded objects may reveal some
 information about file sizes or directory structure. For example, lots of 
 small files, or lots of directories would generate more metadata objects, which 
 have a fairly predictiable and consistent size.
-* An attacker can delete data from the repository to render some or all 
-snapshots inoperable. The client normally operates in a write-only mode and 
-won't detect this, but a verify operation will walk the entire object tree on
-the remote repository and would detect missing objects.
+* If an attacker has write access to a file in the backup set, it's possible 
+to mount a fingerprinting attack, where known data is written to a local file. 
+The attacker can then observe whether a new chunk is uploaded to the 
+repository or not, revealing whether that chunk of data already existed in 
+the repository from some other file. This is a consequence of the 
+deduplication system, although there may be ways to make this sort of attack 
+more difficult.
 
 Another goal of Gbackup is to not require a password for backup and other
 write-only operations to the repository, as it's designed to run in the 
