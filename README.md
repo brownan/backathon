@@ -251,9 +251,10 @@ existing projects***
 
 Gbackup uses encryption, like many backup programs, to protect your data 
 repository. With Gbackup, the threat model is an adversary with access to the
-repository (read or write). The goal is to prevent leaking as much 
-information as possible to adversaries with read access, and detect 
-modifications made by adversaries with write access.
+repository (read or write) while assuming a secure and trusted client. The 
+goal is to prevent leaking as much information as possible to adversaries 
+with read access, and detect modifications made by adversaries with write 
+access.
 
 Specifically, Gbackup's encryption has these properties:
 
@@ -275,11 +276,15 @@ These are the possible threats with this model:
 
 * Since snapshots are stored one per file, an attacker knows how many 
 snapshots exist
-* An attacker can restore an old snapshot file. Without the referenced 
-objects, it would look valid but would actually fail to restore.
+* An attacker can restore an old snapshot file. Without all the referenced 
+objects, the snapshot would fail to restore entirely (although 
+the local cache would have no knowledge of the snapshot, and rebuilding the 
+cache from the repository would notice missing objects)
+* An attacker can restore an old snapshot and all referenced objects, 
+effectively restoring that snapshot
 * An attacker can delete objects or corrupt their contents to render some or 
 all snapshots inoperable. Such corruption would be detected during a restore,
-but would not be detected during the normal backup process.
+but would not be detected during the normal backup process
 * An attacker observing access patterns can learn how often backups are 
 taken, and how much data is written to the repository
 * Careful analysis of the uploaded object sizes, number of objects at 
