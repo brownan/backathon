@@ -352,7 +352,7 @@ your password if you've never needed it before a total system crash.
 repository even if read access to the local filesystem is possible 
 (intentionally or unintentionally)
 
-Also note that most backup systems generate a symmetric key, encrypt it with
+Also note that a lot of backup systems generate a symmetric key, encrypt it with
 a password, and then leave password management up to the user. If the user 
 wishes to schedule unattended backups e.g. from cron, they have to store the 
 password in plaintext somewhere. For purposes of the above argument, I 
