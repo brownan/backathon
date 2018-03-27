@@ -4,11 +4,11 @@ import os
 
 from umsgpack import UnpackException
 
-from gbackup import models
-from gbackup.datastore import default_datastore
-from gbackup.exceptions import CorruptedRepository
+from . import models
+from .datastore import default_datastore
+from .exceptions import CorruptedRepository
 
-logger = logging.getLogger("gbackup.restore")
+logger = logging.getLogger("backathon.restore")
 
 def _set_file_properties(path, obj_info):
     """Sets the file properties of the given path
@@ -60,7 +60,7 @@ def restore_item(obj, path, key=None):
     by rebuilding the local cache, assuming the remote repository is still
     good. There could also be corruptions and inconsistencies in remote
     repository data, and errors writing to the local filesystem.
-    All errors are logged to the gbackup.restore logger, and the restore
+    All errors are logged to the backathon.restore logger, and the restore
     will continue restoring as much as it can. Callers should watch log
     entries at the WARNING level and higher for messages about files that
     could not be restored entirely.

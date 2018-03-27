@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 
-from gbackup import models
+from ... import models
 
 class Command(BaseCommand):
     help="Lists currently defined backup roots"

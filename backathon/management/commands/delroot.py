@@ -3,7 +3,7 @@ import os.path
 from django.core.management.base import BaseCommand, CommandError
 from django.db import IntegrityError
 
-from gbackup import models
+from ... import models
 
 class Command(BaseCommand):
     help="Adds the given filesystem path as a backup root"

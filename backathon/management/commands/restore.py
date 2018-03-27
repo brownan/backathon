@@ -4,9 +4,9 @@ import logging
 
 from django.core.management import BaseCommand, CommandError
 
-from gbackup import models
-from gbackup.datastore import default_datastore
-from gbackup import restore
+from ... import models
+from ...datastore import default_datastore
+from ... import restore
 
 class Command(BaseCommand):
     help = "Restore one or more files or directories"
@@ -63,7 +63,7 @@ class Command(BaseCommand):
 
         self.stdout.write("Restoring files...")
 
-        logging.getLogger("gbackup.restore").addHandler(
+        logging.getLogger("backathon.restore").addHandler(
             logging.StreamHandler()
         )
         restore.restore_item(root, dest_dir, key)

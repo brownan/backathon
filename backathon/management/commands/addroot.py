@@ -5,7 +5,7 @@ from django.db import IntegrityError
 from django.db.models import Sum
 from django.template.defaultfilters import filesizeformat
 
-from gbackup import models, scan
+from ... import models, scan
 
 
 class Command(BaseCommand):

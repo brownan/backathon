@@ -5,7 +5,7 @@ import pathlib
 
 from django.test import TestCase
 
-from gbackup import models
+from backathon import models
 
 class TestBase(TestCase):
     def setUp(self):

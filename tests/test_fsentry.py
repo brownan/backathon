@@ -6,7 +6,7 @@ import pathlib
 import umsgpack
 from django.test import TestCase
 
-from gbackup import models, scan, backup, util, datastore
+from backathon import models, scan, backup, util, datastore
 from .base import TestBase
 
 class FSEntryTest(TestCase):

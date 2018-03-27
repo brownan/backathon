@@ -6,7 +6,7 @@ from django.db import IntegrityError
 from django.db.transaction import atomic
 from django.test import TransactionTestCase
 
-from gbackup import models
+from backathon import models
 
 class TestObject(TransactionTestCase):
     """Tests various functionality of the Object class"""

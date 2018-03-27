@@ -1,11 +1,11 @@
-# Gbackup
+# Backathon
 
 ***Note: This project is currently in the experiment phase. I'm trying out 
 some ideas and maybe it'll turn into something useful, maybe not. But for 
 now I wouldn't recommend using unless you're interested in development or 
 contributing ideas. Use at your own risk!***
 
-Gbackup is a personal file backup solution that has the following key selling
+Backathon is a personal file backup solution that has the following key selling
 points:
 
 * Runs as a daemon with built-in scheduler (no cobbling together wrapper 
@@ -14,7 +14,7 @@ points:
   without a password. Only restore operations will require the password
 * Repository format is a content-addressable object store for deduplication 
   and quick restores from any past snapshot (loosely based on Git's object 
-  format, hence Gbackup)
+  format)
 
 Additionally, these are the main design goals that are a priority for me:
 
@@ -28,10 +28,10 @@ Additionally, these are the main design goals that are a priority for me:
 * Keep the code and architecture simple. Complexity is avoided except when
   absolutely necessary
 
-No other backup programs I've found quite met these criteria. Gbackup takes 
+No other backup programs I've found quite met these criteria. Backathon takes 
 ideas from Borg, Restic, Duplicati, and others.
 
-GBackup runs on Linux using Python 3.5.3 or newer. At the moment, 
+Backathon runs on Linux using Python 3.5.3 or newer. At the moment, 
 compatability with any other platforms is coincidental.
 
 These features are not a priority and probably won't be implemented:
@@ -59,7 +59,7 @@ Snapshot - When a backup set is backed up, that forms a snapshot of all the
 Before a backup can be made, the backup set must be scanned. The scan
 determines which files have changed and therefore which files need backing 
 up. In many backup programs these two functions happen together: files are 
-scanned and backed up if needed in a single step. However, in Gbackup the scan 
+scanned and backed up if needed in a single step. However, in Backathon the scan 
 routine is decoupled from the backup routine. This has several advantages:
 
 * Scanning can easily be replaced with an inotify watcher. Scans can then 
@@ -68,7 +68,7 @@ and the backup routine only has to read in those files.
 * To report accurate info on the size and number of files to be backed up, 
 and show progress during backup.
 
-Gbackup keeps a local cache of all files in the backup set, and stores some 
+Backathon keeps a local cache of all files in the backup set, and stores some 
 metadata on each one. When a scan is performed, metadata from an `lstat()` 
 system call is compared with the information in the database, and if the 
 information differs, the file is marked as dirty and will be backed up next 
@@ -141,12 +141,12 @@ identical objects are shared between snapshots.
 
 In the local SQLite database, along with the filesystem cache table, there is
 an object cache table. This table keeps track of objects that exist in the 
-remote storage repository. This allows Gbackup to avoid uploading objects 
+remote storage repository. This allows Backathon to avoid uploading objects 
 that already exist by performing a quick query to the local database.
 
 Since objects hold references to each other, another local table of object 
 relationships is maintained. This forms a directed graph of objects, and 
-allows Gbackup to calculate which objects should be deleted when an old 
+allows Backathon to calculate which objects should be deleted when an old 
 snapshot is pruned. Since objects may be referenced by more than one 
 snapshot, only objects not reachable by any snapshot may be deleted.
 
@@ -186,7 +186,7 @@ in a chunk will cause the entire chunk to be re-uploaded). Smaller
 chunks give better deduplication, but mean more uploads, more network
 overhead, slower uploads, and more cache overhead.
 
-Right now Gbackup uses a fixed size chunking algorithm: files are simply 
+Right now Backathon uses a fixed size chunking algorithm: files are simply 
 split every fixed number of bytes. Fixed size chunkers are quick and simple 
 but don't provide good deduplication between files if it's unlikely similar 
 regions will align to the same chunk boundaries, or between the same file 
@@ -249,14 +249,14 @@ directory are below 1MB, and probably aren't worth chunking at all.
 plans, which are still shifting as I learn more and compare strategies from 
 existing projects***
 
-Gbackup uses encryption, like many backup programs, to protect your data 
-repository. With Gbackup, the threat model is an adversary with access to the
+Backathon uses encryption, like many backup programs, to protect your data 
+repository. With Backathon, the threat model is an adversary with access to the
 repository (read or write) while assuming a secure and trusted client. The 
 goal is to prevent leaking as much information as possible to adversaries 
 with read access, and detect modifications made by adversaries with write 
 access.
 
-Specifically, Gbackup's encryption has these properties:
+Specifically, Backathon's encryption has these properties:
 
 * All backed up file data and metadata is encrypted and authenticated, making 
 recovering plain text files, metadata, or directory structures impossible 
@@ -300,7 +300,7 @@ the repository from some other file. This is a consequence of the
 deduplication system, although there may be ways to make this sort of attack 
 more difficult.
 
-Another goal of Gbackup is to not require a password for backup and other
+Another goal of Backathon is to not require a password for backup and other
 write-only operations to the repository, as it's designed to run in the 
 background and start automatically at boot. The obvious way to achieve this is 
 with public/private key encryption. The public key is used for encrypting 
@@ -360,7 +360,7 @@ consider that setup equivalent to just storing the whole key unencrypted.
 
 If protecting the repository from a compromised client is a priority, then 
 it's theoretically possible to configure a storage backend to give write-only
-access to an API key. Since Gbackup only writes new objects during a backup 
+access to an API key. Since Backathon only writes new objects during a backup 
 operation, it doesn't need read or delete access at all. All this prevents, 
 however, is the attacker gaining the API key and using it to delete objects. 
 They already couldn't decrypt objects without the decrypted private key.
@@ -371,7 +371,7 @@ They already couldn't decrypt objects without the decrypted private key.
 plans, which are still shifting as I learn more and compare strategies from 
 existing projects***
 
-Gbackup uses [libsodium](https://download.libsodium.org/doc/) for all encryption
+Backathon uses [libsodium](https://download.libsodium.org/doc/) for all encryption
 operations via the [PyNaCl](https://pynacl.readthedocs.io) bindings to the
 library.
 

@@ -2,9 +2,9 @@
 from setuptools import setup
 
 setup(
-    name='gbackup',
+    name='backathon',
     version='1.0',
-    packages=['gbackup'],
+    packages=['backathon'],
     url='',
     license='',
     author='Andrew Brown',
@@ -12,7 +12,6 @@ setup(
     description='',
     entry_points={
         'console_scripts': [
-            'gbackup_makemigrations = gbackup.main:makemigrations',
         ]
     },
 )

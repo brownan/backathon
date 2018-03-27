@@ -4,8 +4,8 @@ from django.core.management.base import BaseCommand
 from django.db.models import Sum
 from django.template.defaultfilters import filesizeformat
 
-from gbackup import backup
-from gbackup import models
+from ... import backup
+from ... import models
 
 class Command(BaseCommand):
     help="Backs up changed files. Run a scan first to detect changes."

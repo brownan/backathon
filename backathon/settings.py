@@ -5,11 +5,11 @@ import os
 DATABASES = {
     'default': {
         #'ENGINE': 'django.db.backends.sqlite3',
-        'ENGINE': 'gbackup.sqlite3_backend',
+        'ENGINE': 'backathon.sqlite3_backend',
 
         # Default value is here for testing. All the normal entry points make
         # sure this environment variable is set before calling django.setup()
-        'NAME': os.environ.get('GBACKUP_CONFIG',"db.sqlite3"),
+        'NAME': os.environ.get('BACKATHON_CONFIG',"db.sqlite3"),
     }
 }
 
@@ -18,7 +18,7 @@ DEBUG = True
 USE_TZ = True
 
 INSTALLED_APPS = [
-    'gbackup',
+    'backathon',
 ]
 LOGGING = {
     "version": 1,
@@ -48,15 +48,15 @@ LOGGING = {
         },
     },
     "loggers": {
-        "gbackup": {
+        "backathon": {
             "level": "WARNING",
         },
-        "gbackup.restore": {
+        "backathon.restore": {
             "level": "INFO",
             "handlers": [],
             "propagate": False,
         },
-        "gbackup.scan": {
+        "backathon.scan": {
             "level": "INFO",
             "handlers": [],
             "propagate": False,

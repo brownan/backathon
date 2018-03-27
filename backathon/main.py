@@ -8,10 +8,10 @@ from django.core.management import load_command_class, find_commands, \
     BaseCommand, CommandError
 from django.apps import apps
 
-logger = logging.getLogger("gbackup.main")
+logger = logging.getLogger("backathon.main")
 
 def setup():
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "gbackup.settings")
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backathon.settings")
     django.setup()
 
 def main():
@@ -41,17 +41,17 @@ def main():
     # Set the path to the database from either the command line option or an
     # env var. It must be set one way or the other.
     if options.config:
-        os.environ['GBACKUP_CONFIG'] = options.config
-    if not "GBACKUP_CONFIG" in os.environ:
+        os.environ['BACKATHON_CONFIG'] = options.config
+    if not "BACKATHON_CONFIG" in os.environ:
         if subcommand == "help":
             # Just going to display some help... set an in-memory database so
             # we don't run into any errors if something tries to do database
             # access
-            os.environ['GBACKUP_CONFIG'] = ":memory:"
+            os.environ['BACKATHON_CONFIG'] = ":memory:"
         else:
             parser.error("You must use --config or set the environment variable "
-                         "GBACKUP_CONFIG")
-    dbpath = os.environ['GBACKUP_CONFIG']
+                         "BACKATHON_CONFIG")
+    dbpath = os.environ['BACKATHON_CONFIG']
 
     # Special exception, all commands except for 'init' require the database
     # to exist.
@@ -64,9 +64,9 @@ def main():
 
     # Now that we've configured Django, we can import the rest of the modules
     # and configure the real parser specific for the given subcommand
-    gbackup_config = apps.app_configs['gbackup']
+    backathon_config = apps.app_configs['backathon']
     commands = find_commands(
-        os.path.join(gbackup_config.path, 'management')
+        os.path.join(backathon_config.path, 'management')
     )
     if subcommand == "help":
         usage = [
@@ -84,7 +84,7 @@ def main():
                          .format(subcommand, os.path.basename(argv[0])))
         sys.exit(1)
 
-    command_class = load_command_class("gbackup", subcommand)
+    command_class = load_command_class("backathon", subcommand)
     assert isinstance(command_class, BaseCommand)
 
     # Reconfigure the parser and re-parse the arguments
@@ -108,7 +108,7 @@ def main():
         level = logging.INFO
     else:
         level = logging.DEBUG
-    logging.getLogger("gbackup").setLevel(level)
+    logging.getLogger("backathon").setLevel(level)
 
     logger.info("Using config database {}".format(
         dbpath

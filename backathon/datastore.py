@@ -16,10 +16,10 @@ import nacl.utils
 
 import umsgpack
 
-from gbackup import models
-from gbackup import util
-from gbackup.exceptions import CorruptedRepository
-from gbackup.signals import db_setting_changed
+from . import models
+from . import util
+from .exceptions import CorruptedRepository
+from .signals import db_setting_changed
 
 class KeyRequired(Exception):
     pass
@@ -94,7 +94,7 @@ class DataStore:
                     json.dumps(info).encode("UTF-8")
                 )
 
-                self.storage.save("gbackup.config", metadata)
+                self.storage.save("backathon.config", metadata)
 
     def get_remote_privatekey(self, password):
         """Retrieves the private key from the remote store, decrypts it,
@@ -104,7 +104,7 @@ class DataStore:
         :rtype: nacl.public.PrivateKey
 
         """
-        info = json.load(self.storage.open("gbackup.config"))
+        info = json.load(self.storage.open("backathon.config"))
         return self._decrypt_privkey(info, password)
 
     def get_local_privatekey(self, password):

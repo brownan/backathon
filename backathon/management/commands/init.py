@@ -46,7 +46,7 @@ class Command(BaseCommand):
             password = None
 
         # Now initialize things
-        from gbackup.datastore import default_datastore
+        from ...datastore import default_datastore
         self.stderr.write("Initializing database...")
         default_datastore.initialize(
             encryption=options['encryption'],

@@ -8,7 +8,7 @@ import hashlib
 
 from django.db import connection
 
-from gbackup import scan, backup, models, restore
+from backathon import scan, backup, models, restore
 from .base import TestBase
 
 class AssertionHandler(logging.Handler):
@@ -37,10 +37,10 @@ class TestRestore(TestBase):
 
         self.handler = AssertionHandler()
         self.handler.setLevel(logging.WARNING)
-        logging.getLogger("gbackup.restore").addHandler(self.handler)
+        logging.getLogger("backathon.restore").addHandler(self.handler)
 
     def tearDown(self):
-        logging.getLogger("gbackup.restore").removeHandler(self.handler)
+        logging.getLogger("backathon.restore").removeHandler(self.handler)
         super().tearDown()
 
     def assert_restored_file(self, path, contents):

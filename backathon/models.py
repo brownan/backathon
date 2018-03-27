@@ -12,12 +12,12 @@ from django.db import models, IntegrityError
 from django.db.transaction import atomic
 from django.db import connection
 
-from gbackup.fields import PathField
-from gbackup import chunker
-from gbackup import util
-from gbackup import signals
+from .fields import PathField
+from . import chunker
+from . import util
+from . import signals
 
-scanlogger = logging.getLogger("gbackup.scan")
+scanlogger = logging.getLogger("backathon.scan")
 
 class DependencyError(Exception):
     pass
@@ -179,7 +179,7 @@ class Object(models.Model):
 
         # One alternative is to perform a query for objects with no
         # references, which is quick due to indices on the
-        # gbackup_object_children table, but requires many queries in a loop
+        # object_relations table, but requires many queries in a loop
         # to collect all garbage. It's theoretically possible to do this with
         # a single recursive query, but that requires holding the entire
         # garbage set in memory, which could get big.

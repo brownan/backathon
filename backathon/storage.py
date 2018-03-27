@@ -6,7 +6,7 @@ import requests
 from django.utils.functional import cached_property
 
 extra_headers = {
-    'User-Agent': 'Gbackup+Python/3'
+    'User-Agent': 'Backathon+Python/3'
 }
 
 class B2Storage(Storage):
