@@ -70,7 +70,7 @@ and show progress during backup.
 
 Backathon keeps a local cache of all files in the backup set, and stores some 
 metadata on each one. When a scan is performed, metadata from an `lstat()` 
-system call is compared with the information in the database, and if the 
+system call is compared with the information in the cache, and if the 
 information differs, the file is marked as dirty and will be backed up next 
 backup.
 
@@ -379,8 +379,8 @@ A public-private key pair is generated at repository initialization time. The
 public part of the key is stored in plain text locally. The private part is 
 encrypted with a password and stored locally and in the remote repository.
 
-To do this, libsodium's
-[Argon2id](https://download.libsodium.org/doc/password_hashing/the_argon2i_function.html)-based
+To do this, libsodium's implementation of the
+[Argon2id](https://download.libsodium.org/doc/password_hashing/the_argon2i_function.html)
 key derivation function is used to generate a symmetric key from the password. 
 The salt, opslimit, and memlimit paramaters are stored unencrypted both 
 locally and in the remote repository. This symmetric key is then used to 
@@ -390,9 +390,9 @@ which encrypts and authenticates using XSalsa20-Poly1305. This symmetric key
 is not stored anywhere. It is re-derived from the password if access to the 
 private key is needed (e.g. for a restore operation)
 
-All files are encrypted using the libsodium
+During a backup, all objects are encrypted using the libsodium
 [Sealed Box](https://download.libsodium.org/doc/public-key_cryptography/sealed_boxes.html)
 construction, which is also implemented with XSalsa20-Poly1305.
 The encryption key is derived using an X25519 key exchange between the 
-user's public key and an ephemeral key generated for each call.
+user's public key and an ephemeral key generated for each object.
 
