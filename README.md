@@ -18,7 +18,8 @@ points:
 
 Additionally, these are the main design goals that are a priority for me:
 
-* Low runtime memory usage, designed to run in the background
+* Low runtime memory usage: memory usage doesn't depend on the size of the
+  backup set
 * Fast and efficient filesystem scans to discover changed files
 * Fast and efficient pruning of old backups to recover space
 * Fast and efficient local cache for browsing backed up file manifests,
@@ -34,12 +35,13 @@ ideas from Borg, Restic, Duplicati, and others.
 Backathon runs on Linux using Python 3.5.3 or newer. At the moment, 
 compatability with any other platforms is coincidental.
 
-These features are not a priority and probably won't be implemented:
+These features are not a priority and probably won't be implemented any time
+soon:
 
-* Multi-client support (meaning multiple machines backing up to the same 
-repository, with deduplication across all files. This would require 
-repository locking and synchronizing of metadata, which isn't a problem I 
-want to tackle)
+* Multi-client support, meaning multiple machines backing up to the same
+  repository, with deduplication across all files. This would require
+  repository locking and synchronizing of metadata, which isn't a problem I
+  want to tackle right now. (Read-only clients are planned, however)
 
 ## Architecture
 
@@ -358,12 +360,12 @@ wishes to schedule unattended backups e.g. from cron, they have to store the
 password in plaintext somewhere. For purposes of the above argument, I 
 consider that setup equivalent to just storing the whole key unencrypted.
 
-If protecting the repository from a compromised client is a priority, then 
-it's theoretically possible to configure a storage backend to give write-only
-access to an API key. Since Backathon only writes new objects during a backup 
-operation, it doesn't need read or delete access at all. All this prevents, 
-however, is the attacker gaining the API key and using it to delete objects. 
-They already couldn't decrypt objects without the decrypted private key.
+If protecting the repository from a compromised client is a priority, then it's
+theoretically possible (I haven't tested this) to configure a storage backend
+with write-only access to an API key. Since Backathon only writes *new* objects
+during a backup operation—it never deletes or rewrites objects—it doesn't need
+read, modify, or delete access at all. The client wouldn't be able to prune old
+snapshots, and a different client would have to perform restores however.
 
 ### Encryption Algorithms
 
