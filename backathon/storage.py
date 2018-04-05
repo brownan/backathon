@@ -4,7 +4,8 @@ import time
 import urllib.parse
 import weakref
 import hashlib
-from functools import wraps
+import hmac
+import tempfile
 
 from django.core.files import File
 from django.core.files.storage import Storage
@@ -203,12 +204,13 @@ class B2Storage(Storage):
         self.upload_url = data['uploadUrl']
         self.upload_token = data['authorizationToken']
 
-    def _upload_file(self, name, data):
+    def _upload_file(self, name, file):
         """Calls b2_upload_file to upload the given data to the given name
 
         If necessary, calls b2_get_upload_url to get a new upload url
 
-        :param data: is a byte-like object
+        :param file: a django File object of some sort
+        :type file: File
 
         :returns: the result from the upload call, a dictionary of object
         metadata
@@ -221,10 +223,16 @@ class B2Storage(Storage):
         response_data = None
 
         filename = urllib.parse.quote(name, encoding="utf-8")
-        sha_hash = hashlib.sha1(data).hexdump()
+        content_type = getattr(file, 'content_type', 'application/octet-stream')
+
+        digest = hashlib.sha1()
+        file.seek(0)
+        for chunk in file.chunks():
+            digest.update(chunk)
+        file.seek(0)
 
         # Don't use the backoff handler when uploading. For most problems
-        # we just call _get_upload_url() and try again
+        # we just call _get_upload_url() and try again immediately
         for _ in range(5):
             response = None
             response_data = None
@@ -235,12 +243,12 @@ class B2Storage(Storage):
                     headers = {
                         'Authorization': self.upload_token,
                         'X-Bz-File-Name': filename,
-                        'Content-Type': 'application/octet-stream',
-                        'Content-Length': len(data),
-                        'X-Bz-Content-Sha1': sha_hash,
+                        'Content-Type': content_type,
+                        'Content-Length': file.size,
+                        'X-Bz-Content-Sha1': digest.hexdigest(),
                     },
                     timeout=TIMEOUT,
-                    data=data,
+                    data=file,
                 )
             except (requests.exceptions.ConnectionError,
                     requests.exceptions.Timeout):
@@ -278,6 +286,8 @@ class B2Storage(Storage):
             raise IOError(response_data['message'])
         if response is not None:
             response.raise_for_status()
+        # This path could be hit if the last failure was due to a connection
+        # error or timeout
         raise IOError("Upload failed, unknown reason")
 
     def _save(self, name, content):
@@ -305,8 +315,8 @@ class B2File(File):
     def __init__(self, name, storage, data):
         """Initiate a new B2File, representing an object that exists in B2
 
-        name is a dictionary of data as returned by b2_get_file_info. It
-        should have these keys:
+        data is a dictionary as returned by b2_get_file_info. It
+        should have (at least) these keys:
 
         * fileId
         * fileName
@@ -316,6 +326,11 @@ class B2File(File):
         * fileInfo
         * action
         * uploadTimestamp
+
+        :type name: str
+        :type storage: B2Storage
+        :type data: dict
+
         """
         self.name = name
         self.storage = storage
@@ -327,8 +342,49 @@ class B2File(File):
     def size(self):
         return self.data['contentLength']
 
-
+    @property
+    def sha1(self):
+        return self.data['contentSha1']
 
     @cached_property
     def file(self):
-        pass # TODO
+        f = tempfile.SpooledTemporaryFile(
+            suffix=".b2tmp"
+        )
+
+        if not self.storage.download_url or not self.storage.authorization_token:
+            # Not sure how it would have created this object if it wasn't
+            # authorized, but some things may invalidate the authorization
+            # tokens
+            self.storage._authorize_account()
+
+        response = self.storage._session.get(
+            "{}/file/{}/{}".format(
+                self.storage.download_url,
+                self.storage.bucket_id,
+                self.name
+            ),
+            timeout=TIMEOUT,
+            headers={
+                'Authorization', self.storage.authorization_token,
+            },
+            stream=True,
+        )
+
+        digest = hashlib.sha1()
+
+        with response:
+            for chunk in response.iter_content(chunk_size=self.DEFAULT_CHUNK_SIZE):
+                digest.update(chunk)
+                f.write(chunk)
+
+        if not hmac.compare_digest(
+                digest.hexdigest(),
+                response.headers['X-Bz-Content-Sha1'],
+        ):
+            f.close()
+            raise IOError("Corrupt download: Sha1 doesn't match")
+
+        f.seek(0)
+        return f
+
