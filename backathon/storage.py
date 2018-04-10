@@ -229,13 +229,14 @@ class B2Storage(Storage):
         file.seek(0)
         for chunk in file.chunks():
             digest.update(chunk)
-        file.seek(0)
 
         # Don't use the backoff handler when uploading. For most problems
         # we just call _get_upload_url() and try again immediately
         for _ in range(5):
             response = None
             response_data = None
+            
+            file.seek(0)
 
             try:
                 response = self._session.post(
