@@ -3,6 +3,7 @@ import uuid
 import hashlib
 import hmac
 import json
+import urllib.parse
 
 import django.core.files.storage
 from django.core.exceptions import ImproperlyConfigured
@@ -35,8 +36,7 @@ class DataStore:
 
         db_setting_changed.connect(self._clear_cached_properties)
 
-    def initialize(self, encryption, compression, repo_backend,
-                   repo_path, password=None):
+    def initialize(self, encryption, compression, storage_uri, password=None):
         """Initializes a new repository.
 
         This sets local settings, and also uploads necessary metadata files
@@ -44,15 +44,14 @@ class DataStore:
 
         :param encryption: A string indicating what kind of encryption to use
         :param compression: A string indicating what kind of compression to use
-        :param repo_backend: A string indicating what storage backend to use
-        :param repo_path: A string specifying parameters to the storage backend
+        :param storage_uri: A URI indicating the storage backend and backend
+            parameters to use
         :param password: A string indicating the password securing the secret
         key, if encryption is used
 
         """
         with atomic():
-            models.Setting.set("REPO_BACKEND", repo_backend)
-            models.Setting.set("REPO_PATH", repo_path)
+            models.Setting.set("REPO_URI", storage_uri)
             models.Setting.set("COMPRESSION", compression)
             models.Setting.set("ENCRYPTION", encryption)
 
@@ -95,6 +94,26 @@ class DataStore:
                 )
 
                 self.storage.save("backathon.config", metadata)
+
+    @staticmethod
+    def get_storage_from_uri(uri):
+        """Returns a Storage instance given a storage uri"""
+        parsed = urllib.parse.urlparse(uri) # type: urllib.parse.ParseResult
+        if parsed.scheme == "file":
+            return django.core.files.storage.FileSystemStorage(
+                location=parsed.path
+            )
+        elif parsed.scheme == "b2":
+            from . import b2
+            bucket = parsed.netloc
+            query = dict(urllib.parse.parse_qsl(parsed.query))
+            account_id = query['auth-username']
+            application_key = query['auth-password']
+            return b2.B2Storage(account_id, application_key, bucket)
+        else:
+            raise ImproperlyConfigured("Invalid repository URI: {}".format(uri))
+
+
 
     def get_remote_privatekey(self, password):
         """Retrieves the private key from the remote store, decrypts it,
@@ -142,10 +161,7 @@ class DataStore:
         reconfigure when a setting is changed. This happens mostly when
         running tests."""
 
-        if setting == "REPO_BACKEND":
-            self.__dict__.pop('storage', None)
-
-        elif setting == "REPO_PATH":
+        if setting == "REPO_URI":
             self.__dict__.pop('storage', None)
 
         elif setting == "ENCRYPTION":
@@ -168,14 +184,7 @@ class DataStore:
 
     @cached_property
     def storage(self):
-        backend = models.Setting.get("REPO_BACKEND")
-        if backend == "local":
-            return django.core.files.storage.FileSystemStorage(
-                location=models.Setting.get("REPO_PATH")
-            )
-        else:
-            raise ImproperlyConfigured("Invalid repository backend defined in "
-                                       "settings: {}".format(backend))
+        return self.get_storage_from_uri(models.Setting.get("REPO_URI"))
 
     @cached_property
     def hasher(self):
