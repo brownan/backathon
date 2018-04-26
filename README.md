@@ -21,6 +21,8 @@ Additionally, these are the main design goals that are a priority for me:
 * Low runtime memory usage: memory usage doesn't depend on the size of the
   backup set
 * Fast and efficient filesystem scans to discover changed files
+* Decoupled scan and backup routines. This allows "continuous" style backups
+  with e.g. inotify.
 * Fast and efficient pruning of old backups to recover space
 * Fast and efficient local cache for browsing backed up file manifests,
   for easy restores of select files.
