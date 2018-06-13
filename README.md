@@ -22,7 +22,8 @@ Additionally, these are the main design goals that are a priority for me:
   backup set
 * Fast and efficient filesystem scans to discover changed files
 * Decoupled scan and backup routines. This allows "continuous" style backups
-  with e.g. inotify.
+  with e.g. inotify, where the scan routine runs more often or continuously,
+  and the backup routine happens less often (e.g. 15 minutes).
 * Fast and efficient pruning of old backups to recover space
 * Fast and efficient local cache for browsing backed up file manifests,
   for easy restores of select files.
@@ -30,6 +31,9 @@ Additionally, these are the main design goals that are a priority for me:
 * Client side encryption (currently using libsodium)
 * Keep the code and architecture simple. Complexity is avoided except when
   absolutely necessary
+* Backup operations are "write only" to support more secure setups where clients
+  have no read access to the storage backend. Prune operations similarly
+  only require delete permission,  and don't need read access.
 
 No other backup programs I've found quite met these criteria. Backathon takes 
 ideas from Borg, Restic, Duplicati, and others.
