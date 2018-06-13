@@ -46,8 +46,13 @@ soon:
 
 * Multi-client support, meaning multiple machines backing up to the same
   repository, with deduplication across all files. This would require
-  repository locking and synchronizing of metadata, which isn't a problem I
-  want to tackle right now. (Read-only clients are planned, however)
+  repository locking, and synchronizing of metadata, which isn't a
+  problem I want to tackle. It would also greatly complicate the encryption.
+  Omitting multi-client support is my compromise for the set of features
+  I want in a backup system.
+  
+  Note that I do plan on having read-only clients, and will possibly have to
+  implement some really simple metadata synchronization for that.
 
 ## Architecture
 
