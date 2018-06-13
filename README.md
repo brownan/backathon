@@ -53,6 +53,32 @@ soon:
   
   Note that I do plan on having read-only clients, and will possibly have to
   implement some really simple metadata synchronization for that.
+  
+## Roadmap
+What's done and not done?
+
+Main TODO list:
+* Scanning routine: Working
+* Backup routine: Working
+* Local filesystem storage backend: Working
+* Encryption functionality: Working
+* Compression functionality: Working
+* Prune routine: Partial
+* Restore routine: Partial
+* B2 Backend: Partial
+* Verify routine: Not started
+* Scheduler / Daemon: Not started
+* GUI: Not started
+* Inotify integration: Not started
+* Multi-client readers: Not started
+
+Components with status "Working" means that component is working in at
+least a minimal capacity, but there still may be work left to do.
+"Partial" means some work has been done but the component is not working yet.
+
+In addition to the above tasks, this is the status of the other components:
+* The database schema is not yet finalized and may change
+* The object format is not yet finalized and may change
 
 ## Architecture
 
