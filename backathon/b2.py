@@ -59,6 +59,7 @@ b2_get_download_authorization
 """
 import base64
 import io
+import os
 import time
 import urllib.parse
 import hashlib
@@ -177,7 +178,7 @@ class B2Bucket:
         once per thread at the start of the session, but extremely long
         sessions may need to refresh the authorization token.
         """
-        logger.info("Acquiring authorization token for thread id {}".format(
+        logger.debug("Acquiring authorization token for thread id {}".format(
             threading.get_ident()
         ))
         response = self._post_with_backoff_retry(
@@ -230,11 +231,10 @@ class B2Bucket:
             },
             json=data,
         )
-        logger.debug("{} {} {} {:.2f}s".format(
+        logger.debug("{} {} {:.2f}s".format(
             api_name,
             response.status_code,
-            response.reason,
-            response.elapsed,
+            response.elapsed.total_seconds(),
         ))
 
         try:
@@ -300,54 +300,67 @@ class B2Bucket:
         second for the call to b2_get_upload_url
 
         """
-        if (getattr(self._local, "upload_url", None) is None or
-            getattr(self._local, "upload_token", None) is None
-        ):
-            self._get_upload_url()
-
         logger.info("Uploading {!r}".format(name))
 
         response = None
         response_data = None
+        exc_str = None
 
         filename = urllib.parse.quote(name, encoding="utf-8")
 
-        # Django File objects may define a content type. Otherwise, use B2's
-        # automatic content type feature.
-        content_type = getattr(content, 'content_type', 'b2/x-auto')
+        content.seek(0, os.SEEK_END)
+        filesize = content.tell()
 
-        digest = hashlib.sha1()
         content.seek(0)
-        for chunk in content.chunks():
+        digest = hashlib.sha1()
+        while True:
+            chunk = content.read(io.DEFAULT_BUFFER_SIZE)
+            if not chunk:
+                break
             digest.update(chunk)
+
+        headers = {
+            'X-Bz-File-Name': filename,
+            'Content-Type': "b2/x-auto",
+            'Content-Length': str(filesize),
+            'X-Bz-Content-Sha1': digest.hexdigest(),
+        }
 
         # We don't use the usual backoff handler when uploading. As per the B2
         # documentation, for most problems we can just get a new upload URL
         # with b2_get_upload_url and try again immediately
         for _ in range(5):
+            if (getattr(self._local, "upload_url", None) is None or
+                getattr(self._local, "upload_token", None) is None
+            ):
+                self._get_upload_url()
+
+            headers['Authorization'] = self._local.upload_token
+
             response = None
             response_data = None
+            exc_str = None
             
             content.seek(0)
 
             try:
                 response = self.session.post(
                     self._local.upload_url,
-                    headers = {
-                        'Authorization': self._local.upload_token,
-                        'X-Bz-File-Name': filename,
-                        'Content-Type': content_type,
-                        'Content-Length': content.size,
-                        'X-Bz-Content-Sha1': digest.hexdigest(),
-                    },
+                    headers = headers,
                     timeout=TIMEOUT,
                     data=content,
                 )
             except (requests.exceptions.ConnectionError,
                     requests.exceptions.Timeout) as e:
-                logger.info("Error when uploading ({}). Trying again".format(e))
-                self._get_upload_url()
+                logger.info("Error when uploading ({})".format(e))
+                exc_str = str(e)
+                del self._local.upload_url
                 continue
+
+            logger.debug("b2_upload_file {} {:.2f}s".format(
+                response.status_code,
+                response.elapsed.total_seconds(),
+            ))
 
             try:
                 response_data = response.json()
@@ -355,20 +368,20 @@ class B2Bucket:
                 raise IOError("Invalid json returned from B2 API")
 
             if response.status_code == 401 and response_data['code'] == "expired_auth_token":
-                logger.info("Expired auth token when uploading. Trying again")
-                self._get_upload_url()
+                logger.info("Expired auth token when uploading")
+                del self._local.upload_url
                 continue
 
             if response.status_code == 408:
                 # Request timeout
-                logger.info("Request timeout when uploading. Trying again")
-                self._get_upload_url()
+                logger.info("Request timeout when uploading")
+                del self._local.upload_url
                 continue
 
             if 500 <= response.status_code <= 599:
                 # Any server errors
-                logger.info("Server error when uploading. Trying again")
-                self._get_upload_url()
+                logger.info("Server error when uploading")
+                del self._local.upload_url
                 continue
 
             # Any other errors indicate a permanent problem with the request
@@ -385,6 +398,8 @@ class B2Bucket:
             response.raise_for_status()
         # This path could be hit if the last failure was due to a connection
         # error or timeout
+        if exc_str:
+            raise IOError(exc_str)
         raise IOError("Upload failed, unknown reason")
 
     def download_file(self, name):
@@ -423,6 +438,11 @@ class B2Bucket:
             },
             stream=True,
         )
+
+        logger.debug("b2_download_file_by_name {} {:.2f}s".format(
+            response.status_code,
+            response.elapsed.total_seconds(),
+        ))
 
         with response:
             if response.status_code != 200:
