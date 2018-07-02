@@ -65,12 +65,12 @@ import hashlib
 import hmac
 import tempfile
 import threading
-import logging
+from logging import getLogger
 
 import requests.exceptions
 from django.utils.functional import cached_property
 
-logger = logging.getLogger("backathon.b2")
+logger = getLogger("backathon.b2")
 
 extra_headers = {
     'User-Agent': 'Backathon/Python3 <github.com/brownan/backathon>'
@@ -138,9 +138,9 @@ class B2Bucket:
                 # No response from server at all
                 if max_delay < delay:
                     # Give up
-                    logging.info("Timeout in B2 call. Giving up")
+                    logger.info("Timeout in B2 call. Giving up")
                     raise
-                logging.debug("Timeout in B2 call, retrying in {}s".format(
+                logger.debug("Timeout in B2 call, retrying in {}s".format(
                     delay))
                 time.sleep(delay)
                 delay *= 2
@@ -149,16 +149,16 @@ class B2Bucket:
                     # Service unavailable
                     if max_delay < delay:
                         # Give up
-                        logging.info("B2 service unavailable. Giving up")
+                        logger.info("B2 service unavailable. Giving up")
                         return response
-                    logging.debug("B2 service unavailable, retrying in "
+                    logger.debug("B2 service unavailable, retrying in "
                                  "{}s".format(delay))
                     time.sleep(delay)
                     delay *= 2
                 elif response.status_code == 429:
                     # Too many requests
                     delay = int(response.headers.get('Retry-After', 1))
-                    logging.debug("B2 returned 429 Too Many Requests. "
+                    logger.debug("B2 returned 429 Too Many Requests. "
                                   "Retrying in {}s".format(delay))
                     time.sleep(delay)
                     delay = 1
