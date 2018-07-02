@@ -1,49 +1,95 @@
+"""
+This is the interface to the Backblaze B2 API
+
+The methods in this module are written with efficiency in mind for our
+workload. Since some API calls cost real money, we have the goal of
+minimizing costs for common operations. Also since we may potentially have
+millions of objects stored, we also must be conscious of memory efficiency.
+
+The original plan was to make a Django Storage compatible class, but that
+quickly became difficult to do efficiently because of differences in the B2
+API and the Storage API.
+
+For example, there's no easy way to efficiently iterate over a huge
+number of objects with the Django storage API, since the listdir() call
+returns a 2-tuple of lists, the first is a list of directories and the second a
+list of files. Further, the B2 API gives a lot of metadata with the list
+call, but the Django Storage.listdir() call only returns names. A naïve
+implementation would require a B2 call to b2_get_file_info costing a class B
+transaction for each file. None of the problems are impossible, but would
+require complicated caching and would have fast and slow access patterns.
+
+Seeing as how my goal is not to make a generic Django B2 Storage backend,
+I chose to optimize the B2 interface for my needs and to keep it simple.
+
+
+Cost reference (accurate as of July 2 2018)
+
+Class A Transactions (Free)
+b2_delete_key
+b2_delete_bucket
+b2_delete_file_version
+b2_hide_file
+b2_get_upload_url
+b2_upload_file
+b2_start_large_file
+b2_get_upload_part_url
+b2_upload_part
+b2_cancel_large_file
+b2_finish_large_file
+
+Class B Transactions ($0.004 per 10,000)
+b2_download_file_by_id
+b2_download_file_by_name
+b2_get_file_info
+
+Class C Transactions ($0.004 per 1,000)
+b2_authorize_account
+b2_create_key
+b2_list_keys
+b2_create_bucket
+b2_list_buckets
+b2_list_file_names
+b2_list_file_versions
+b2_update_bucket
+b2_list_parts
+b2_list_unfinished_large_files
+b2_get_download_authorization
+
+"""
 import base64
-import json
+import io
 import time
 import urllib.parse
 import hashlib
 import hmac
 import tempfile
 import threading
-
-from django.core.files import File
-from django.core.files.storage import Storage
+import logging
 
 import requests.exceptions
 from django.utils.functional import cached_property
 
+logger = logging.getLogger("backathon.b2")
+
 extra_headers = {
-    'User-Agent': 'Backathon+Python/3 <github.com/brownan/backathon>'
+    'User-Agent': 'Backathon/Python3 <github.com/brownan/backathon>'
 }
 
 # Timeout used in HTTP calls
 TIMEOUT = 5
 
-class B2Storage(Storage):
-    """Django storage backend for Backblaze B2
+class B2ResponseError(IOError):
+    def __init__(self, data):
+        super().__init__(data['message'])
+        self.data = data
 
-    B2's object store doesn't fit perfectly into Django's storage abstraction
-    for our use case. B2 has three classes of transactions: class A are free,
-    class B cost a bit of money, and class C cost an order of magnitude more
-    per request. So this class and the calling code should access B2 in a
-    pattern that minimises unnecessary requests.
+class B2Bucket:
+    """Represents a B2 Bucket, a container for objects
 
-    This turns out to be tricky. A naïve implementation may implement file
-    metadata functions (Storage.size(), Storage.exists(), etc) as calls to
-    b2_get_file_info and downloads as a call to b2_download_file_by_name,
-    both class B transactions. But notice that B2 gives you quite a lot of
-    information along with a b2_list_file_names call, which can return file
-    metadata for up to 1000 files in bulk and therefore save on
-    transaction costs despite being a class C transaction. Unfortunately,
-    Django's Storage class doesn't have an equivalent call; the listdir()
-    call is expected to return names, not a data structure of information on
-    each file.
-
-    To support workflows that loop over results of listdir() and get metadata
-    on each one, we implement a metadata cache. Calls to get metadata on
-    files that have recently been iterated over will not incur another call
-    to a b2 API.
+    This object should be thread safe, as it keeps a thread-local
+    requests.Session object for API calls, as well as thread-local
+    authorization tokens.
 
     """
     def __init__(self,
@@ -59,48 +105,23 @@ class B2Storage(Storage):
         # various authorization tokens acquired from B2
         self._local = threading.local()
 
-    @cached_property
-    def bucket_id(self):
-        """The bucket ID
-
-        Some B2 API calls require the bucket ID, some require the name. Since
-        the name is part of our config, we have to query for the ID
-        """
-        data = self._call_api("b2_list_buckets", {'accountId': self.account_id})
-        for bucketinfo in data['buckets']:
-            if bucketinfo['bucketName'] == self.bucket_name:
-                return bucketinfo['bucketId']
-
-        raise IOError("No such bucket name {}".format(self.bucket_name))
-
     @property
-    def _session(self):
+    def session(self):
         # Initialize a new requests.Session for this thread if one doesn't
         # exist
         try:
             return self._local.session
         except AttributeError:
+            logger.debug("Initializing session for thread id {}".format(
+                threading.get_ident()
+            ))
             session = requests.Session()
             session.headers.update(extra_headers)
             self._local.session = session
             return session
 
-    @property
-    def _metadata_cache(self):
-        # Maps filenames to metadata dicts as returned by b2_get_file_info
-        # and several other calls. This is used to cache metadata between
-        # calls to Storage.listdir() and other Storage.* methods that get
-        # metadata, so the file doesn't have to be downloaded if calling code
-        # just wants to loop over file names and get some metadata about
-        # each one.
-        try:
-            return self._local.metadata_cache
-        except AttributeError:
-            self._local.metadata_cache = {}
-            return self._local.metadata_cache
-
     def _post_with_backoff_retry(self, *args, **kwargs):
-        """Calls self._session.post with the given arguments
+        """Calls self.session.post with the given arguments
 
         Implements automatic retries and backoffs as per the B2 documentation
         """
@@ -111,13 +132,16 @@ class B2Storage(Storage):
         max_delay = 64
         while True:
             try:
-                response = self._session.post(*args, **kwargs)
+                response = self.session.post(*args, **kwargs)
             except (requests.exceptions.ConnectionError,
                     requests.exceptions.Timeout):
                 # No response from server at all
                 if max_delay < delay:
                     # Give up
+                    logging.info("Timeout in B2 call. Giving up")
                     raise
+                logging.debug("Timeout in B2 call, retrying in {}s".format(
+                    delay))
                 time.sleep(delay)
                 delay *= 2
             else:
@@ -125,17 +149,22 @@ class B2Storage(Storage):
                     # Service unavailable
                     if max_delay < delay:
                         # Give up
+                        logging.info("B2 service unavailable. Giving up")
                         return response
+                    logging.debug("B2 service unavailable, retrying in "
+                                 "{}s".format(delay))
                     time.sleep(delay)
                     delay *= 2
                 elif response.status_code == 429:
                     # Too many requests
-                    time.sleep(int(response.headers.get('Retry-After', 1)))
+                    delay = int(response.headers.get('Retry-After', 1))
+                    logging.debug("B2 returned 429 Too Many Requests. "
+                                  "Retrying in {}s".format(delay))
+                    time.sleep(delay)
                     delay = 1
                 else:
                     # Success. Or at least, not a response that we want to retry
                     return response
-
 
     def _authorize_account(self):
         """Calls b2_authorize_account to get a session authorization token
@@ -143,7 +172,14 @@ class B2Storage(Storage):
         If successful, sets the authorization_token and api_url
 
         If unsuccessful, raises an IOError with a description of the error
+
+        This costs one class C transaction. This generally needs to be called
+        once per thread at the start of the session, but extremely long
+        sessions may need to refresh the authorization token.
         """
+        logger.info("Acquiring authorization token for thread id {}".format(
+            threading.get_ident()
+        ))
         response = self._post_with_backoff_retry(
             "https://api.backblazeb2.com/b2api/v1/b2_authorize_account",
             headers={
@@ -173,7 +209,7 @@ class B2Storage(Storage):
         self._local.download_url = data['downloadUrl']
 
     def _call_api(self, api_name, data):
-        """Calls the given API with the given data
+        """Calls the given API with the given json data
 
         If the account hasn't been authorized yet, calls b2_authorize_account
         first to obtain the authorization token
@@ -194,6 +230,12 @@ class B2Storage(Storage):
             },
             json=data,
         )
+        logger.debug("{} {} {} {:.2f}s".format(
+            api_name,
+            response.status_code,
+            response.reason,
+            response.elapsed,
+        ))
 
         try:
             data = response.json()
@@ -205,30 +247,57 @@ class B2Storage(Storage):
             # Auth token has expired. Retry after getting a new one.
             self._local.api_url = None
             self._local.authorization_token = None
+            logger.info("Auth token expired")
             return self._call_api(api_name, data)
 
         if response.status_code != 200:
-            raise IOError(data['message'])
+            raise B2ResponseError(data)
 
         return data
 
+    @cached_property
+    def bucket_id(self):
+        """The bucket ID
+
+        Some B2 API calls require the bucket ID, some require the name. Since
+        the name is part of our config, we have to query for the ID.
+
+        This costs one class C transaction, and the result is cached for the
+        lifetime of this B2Bucket instance.
+        """
+        data = self._call_api("b2_list_buckets", {'accountId': self.account_id})
+        for bucketinfo in data['buckets']:
+            if bucketinfo['bucketName'] == self.bucket_name:
+                return bucketinfo['bucketId']
+
+        raise IOError("No such bucket name {}".format(self.bucket_name))
+
     def _get_upload_url(self):
-        """Sets self.upload_url and self.upload_token or raises IOError"""
+        """Sets self.upload_url and self.upload_token or raises IOError
+
+        This costs one class A transaction
+        """
+        logger.debug("Getting a new upload url")
         data = self._call_api("b2_get_upload_url",
                               data={'bucketId': self.bucket_id})
         self._local.upload_url = data['uploadUrl']
         self._local.upload_token = data['authorizationToken']
 
-    def _upload_file(self, name, content):
+    def upload_file(self, name, content):
         """Calls b2_upload_file to upload the given data to the given name
 
         If necessary, calls b2_get_upload_url to get a new upload url
 
-        :param content: a django File object of some sort
-        :type content: File
+        :param name: The name of the object to upload.
+
+        :param content: A file-like object open for reading. Make sure the
+            file is opened in binary mode
 
         :returns: the result from the upload call, a dictionary of object
-        metadata
+            metadata
+
+        This costs one class A transaction for the upload, and possibly a
+        second for the call to b2_get_upload_url
 
         """
         if (getattr(self._local, "upload_url", None) is None or
@@ -236,10 +305,15 @@ class B2Storage(Storage):
         ):
             self._get_upload_url()
 
+        logger.info("Uploading {!r}".format(name))
+
         response = None
         response_data = None
 
         filename = urllib.parse.quote(name, encoding="utf-8")
+
+        # Django File objects may define a content type. Otherwise, use B2's
+        # automatic content type feature.
         content_type = getattr(content, 'content_type', 'b2/x-auto')
 
         digest = hashlib.sha1()
@@ -247,8 +321,9 @@ class B2Storage(Storage):
         for chunk in content.chunks():
             digest.update(chunk)
 
-        # Don't use the backoff handler when uploading. For most problems
-        # we just call _get_upload_url() and try again immediately
+        # We don't use the usual backoff handler when uploading. As per the B2
+        # documentation, for most problems we can just get a new upload URL
+        # with b2_get_upload_url and try again immediately
         for _ in range(5):
             response = None
             response_data = None
@@ -256,7 +331,7 @@ class B2Storage(Storage):
             content.seek(0)
 
             try:
-                response = self._session.post(
+                response = self.session.post(
                     self._local.upload_url,
                     headers = {
                         'Authorization': self._local.upload_token,
@@ -269,7 +344,8 @@ class B2Storage(Storage):
                     data=content,
                 )
             except (requests.exceptions.ConnectionError,
-                    requests.exceptions.Timeout):
+                    requests.exceptions.Timeout) as e:
+                logger.info("Error when uploading ({}). Trying again".format(e))
                 self._get_upload_url()
                 continue
 
@@ -279,16 +355,19 @@ class B2Storage(Storage):
                 raise IOError("Invalid json returned from B2 API")
 
             if response.status_code == 401 and response_data['code'] == "expired_auth_token":
+                logger.info("Expired auth token when uploading. Trying again")
                 self._get_upload_url()
                 continue
 
             if response.status_code == 408:
                 # Request timeout
+                logger.info("Request timeout when uploading. Trying again")
                 self._get_upload_url()
                 continue
 
             if 500 <= response.status_code <= 599:
                 # Any server errors
+                logger.info("Server error when uploading. Trying again")
                 self._get_upload_url()
                 continue
 
@@ -308,7 +387,7 @@ class B2Storage(Storage):
         # error or timeout
         raise IOError("Upload failed, unknown reason")
 
-    def _download_file(self, name):
+    def download_file(self, name):
         """Downloads a file by name
 
         Returns (metadata dict, file handle)
@@ -316,9 +395,13 @@ class B2Storage(Storage):
         file handle is open for reading in binary mode.
 
         Raises IOError if there was a problem downloading the file
+
+        This costs one class B transaction
         """
+        logger.debug("Downloading {}".format(name))
         f = tempfile.SpooledTemporaryFile(
-            suffix=".b2tmp"
+            suffix=".b2tmp",
+            max_size=2**21,
         )
 
         if (getattr(self._local, "download_url", None) is None or
@@ -328,7 +411,7 @@ class B2Storage(Storage):
 
         digest = hashlib.sha1()
 
-        response = self._session.get(
+        response = self.session.get(
             "{}/file/{}/{}".format(
                 self._local.download_url,
                 self.bucket_name,
@@ -351,7 +434,7 @@ class B2Storage(Storage):
                                   "request")
                 raise IOError(resp_json['message'])
 
-            for chunk in response.iter_content(chunk_size=B2File.DEFAULT_CHUNK_SIZE):
+            for chunk in response.iter_content(chunk_size=io.DEFAULT_BUFFER_SIZE):
                 digest.update(chunk)
                 f.write(chunk)
 
@@ -379,29 +462,21 @@ class B2Storage(Storage):
         f.seek(0)
         return data, f
 
-    def _save(self, name, content):
-        """Saves a file under the given name"""
-        metadata = self._upload_file(name, content)
-        return metadata['fileName']
+    def get_files_by_prefix(self, prefix):
+        """Calls b2_list_file_names to get a list of files in the bucket
 
-    def _open(self, name, mode="rb"):
-        """Opens a file for reading. Opening a file for writing is not
-        currently supported
+        :param prefix: A file name prefix. This is not a directory path,
+        but a string prefix. All objects in the bucket with the given prefix
+        will be returned.
 
+        :returns: An iterator over metadata dictionaries
+
+        Note: we fetch 1000 items at a time from the underlying API, so this
+        method is memory efficient over very large result sets.
+
+        This costs one class C transaction per 1000 objects returned (rounded
+        up)
         """
-        if "w" in mode:
-            raise NotImplementedError("Opening files for writing is not "
-                                      "supported")
-        if "b" not in mode:
-            raise NotImplementedError("Automatic encoding is not supported. "
-                                      "Open file in binary mode")
-
-        return B2File(name, self, data=self._metadata_cache.get(name, None))
-
-    def _get_files_by_prefix(self, prefix):
-        """Helper method for listdir(). See listdir() docstring"""
-        if prefix and not prefix.endswith("/"):
-            prefix = prefix + "/"
 
         start_filename = None
 
@@ -420,162 +495,33 @@ class B2Storage(Storage):
                     'startFileName': start_filename,
                 }
             )
-            self._metadata_cache.update(
-                (d['fileName'], d) for d in data['files']
-                if d['action'] == 'upload'
-            )
-            yield from (d['fileName'] for d in data['files'] if d['action'] == 'upload')
+            yield from data['files']
             start_filename = data['nextFileName']
             if start_filename is None:
                 break
-        self._metadata_cache.clear()
-
-    ############################
-    # Public Storage API methods
-    ############################
-
-    def get_available_name(self, name, max_length=None):
-        """Overwrite existing files with the same name"""
-        return name
-
-    def get_valid_name(self, name):
-        """No special filename adjustments are made
-
-        Instead we let the B2 api return an error on invalid filenames.
-        Because of our policy of overwriting existing files, the choice was
-        made to not adjust names automatically.
-        """
-        return name
 
     def delete(self, name):
         """Deletes the given file
 
         In B2 this calls the b2_hide_file API. If you want to recover the space
         taken by this file, make sure you have your bucket lifecycle policy
-        set to delete hidden files"""
-        self._call_api(
-            "b2_hide_file",
-            {
-                'bucketId': self.bucket_id,
-                'fileName': name,
-            }
-        )
+        set to delete hidden files
 
+        This costs one class A transaction
 
-    def exists(self, name):
-        """exists() call is not currently implemented
-
-        There's not an efficient way to check this. We could download the
-        file, incurring a class B transaction and the bandwidth costs,
-        or we could list all files in the bucket incurring a class C
-        transaction. Callers are advised to listdir() and use the
-        resulting list to check what they need.
+        This call ignores errors for the file not existing or the file being
+        already hidden
         """
-        raise NotImplementedError("Not currently implemented")
+        try:
+            self._call_api(
+                "b2_hide_file",
+                {
+                    'bucketId': self.bucket_id,
+                    'fileName': name,
+                }
+            )
+        except B2ResponseError as e:
+            if e.data['code'] in ('no_such_file', 'already_hidden'):
+                pass
+            raise
 
-    def listdir(self, path):
-        """List files with a given path prefix in the bucket
-
-        This method returns an iterator over filenames with the given prefix.
-        Note that this means it's effectively a recursive directory listing
-        as subdirectory contents are also listed.
-
-        Because B2 is an object store, the returned list of directories is
-        always empty. Only files are returned.
-
-        :returns: ([], filename_iterator)
-
-        For very large buckets, this method efficiently batches calls to the
-        API to return up to 1000 files per call. No more than 1000 entries
-        are held in memory at a time.
-
-        This method also caches the metadata for each file. Callers that
-        iterate over entries from this call may use the metadata methods such
-        as B2Storage.size(), B2Storage.get_modified_time(), or access
-        metadata properties on B2File objects returned from B2Storage.open()
-        without incurring additional B2 service API calls.
-        Any other usage pattern may require additional calls to the B2 API.
-
-        """
-        return [], self._get_files_by_prefix(path)
-
-    def size(self, name):
-        return self._open(name).size
-
-    def url(self, name):
-        # TODO
-        raise NotImplementedError("Not currently implemented")
-
-    def get_accessed_time(self, name):
-        raise NotImplementedError("Access time is not implemented for B2")
-
-    def get_created_time(self, name):
-        return self._open(name).modified_time
-
-    def get_modified_time(self, name):
-        return self._open(name).modified_time
-
-class B2File(File):
-    """An object in B2
-
-    Such objects hold metadata, and the contents are downloaded on demand
-    when requested.
-    """
-    def __init__(self, name, storage, data=None):
-        """Initiate a new B2File, representing an object that exists in B2
-
-        data is a dictionary as returned by b2_get_file_info. It
-        should have (at least) these keys:
-
-        * fileId
-        * fileName
-        * contentSha1
-        * contentLength
-        * contentType
-        * fileInfo
-        * uploadTimestamp
-
-        :type name: str
-        :type storage: B2Storage
-        :type data: dict
-
-        """
-        self.name = name
-        self.storage = storage
-        self.mode = "rb"
-
-        self.data = data
-        self._file = None
-
-    @property
-    def size(self):
-        if self.data is None:
-            self.load()
-        return self.data['contentLength']
-
-    @property
-    def sha1(self):
-        if self.data is None:
-            self.load()
-        return self.data['contentSha1']
-
-    @property
-    def content_type(self):
-        if self.data is None:
-            self.load()
-        return self.data['contentType']
-
-    @property
-    def modified_time(self):
-        if self.data is None:
-            self.load()
-        return self.data['uploadTimestamp']
-
-    @property
-    def file(self):
-        if self._file is None:
-            self.load()
-        return self._file
-
-    def load(self):
-        self.data, self._file = self.storage._download_file(self.name)
