@@ -4,11 +4,14 @@ import hashlib
 import hmac
 import json
 import urllib.parse
+import os.path
 
 import django.core.files.storage
+import django.db
 from django.core.exceptions import ImproperlyConfigured
 from django.db.transaction import atomic
 from django.utils.functional import SimpleLazyObject, cached_property
+from django.utils.text import slugify
 
 import nacl.public
 import nacl.pwhash.argon2id
@@ -25,14 +28,27 @@ from .signals import db_setting_changed
 class KeyRequired(Exception):
     pass
 
-class DataStore:
-    """This class acts as an interface to the storage backend
+class Repository:
+    """This class acts as an interface to the storage backend as well as all
+    operations that are performed on the repository. It also manages the
+    local cache database.
 
-    It has logic to keep the local cache in sync with the objects stored on
-    the backend.
+    Note: creating a new instance of this class registers a new database with
+    Django. There's not really a clean way to un-register databases and close
+    old connections, so avoid creating short lived Repository objects,
+    or database connections are likely to be left open.
 
     """
-    def __init__(self):
+    def __init__(self, dbfile):
+        # Create the database connection and register
+        dbfile = os.path.abspath(dbfile)
+        self.alias = slugify(dbfile)
+        config = {
+            'ENGINE': 'backathon.sqlite3_backend',
+            'NAME': dbfile,
+        }
+        if self.alias not in django.db.connections.databases:
+            django.db.connections.databases[self.alias] = config
 
         db_setting_changed.connect(self._clear_cached_properties)
 
@@ -112,7 +128,6 @@ class DataStore:
             return b2.B2Storage(account_id, application_key, bucket)
         else:
             raise ImproperlyConfigured("Invalid repository URI: {}".format(uri))
-
 
 
     def get_remote_privatekey(self, password):
@@ -438,4 +453,4 @@ class DataStore:
         """Gets a list of snapshots"""
 
 
-default_datastore = SimpleLazyObject(lambda: DataStore()) # type: DataStore
+default_datastore = SimpleLazyObject(lambda: Repository()) # type: Repository
