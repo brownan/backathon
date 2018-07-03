@@ -85,6 +85,13 @@ class B2ResponseError(IOError):
         super().__init__(data['message'])
         self.data = data
 
+    def __str__(self):
+        return "{} {}: \"{}\"".format(
+            self.data['status'],
+            self.data['code'],
+            self.data['message'],
+        )
+
 class B2Bucket:
     """Represents a B2 Bucket, a container for objects
 
@@ -393,7 +400,7 @@ class B2Bucket:
         # The loop exited, so all 5 tries failed. See if we can raise an
         # appropriate error from the last try
         if response_data is not None:
-            raise IOError(response_data['message'])
+            raise B2ResponseError(response_data)
         if response is not None:
             response.raise_for_status()
         # This path could be hit if the last failure was due to a connection
@@ -426,11 +433,13 @@ class B2Bucket:
 
         digest = hashlib.sha1()
 
+        filename = urllib.parse.quote(name, encoding="utf-8")
+
         response = self.session.get(
             "{}/file/{}/{}".format(
                 self._local.download_url,
                 self.bucket_name,
-                name
+                filename,
             ),
             timeout=TIMEOUT,
             headers={
@@ -452,7 +461,7 @@ class B2Bucket:
                     response.raise_for_status()
                     raise IOError("Non-200 status code returned for download "
                                   "request")
-                raise IOError(resp_json['message'])
+                raise B2ResponseError(resp_json)
 
             for chunk in response.iter_content(chunk_size=io.DEFAULT_BUFFER_SIZE):
                 digest.update(chunk)
@@ -467,7 +476,7 @@ class B2Bucket:
 
         data = {
             'fileId': response.headers['X-Bz-File-Id'],
-            'fileName': response.headers['X-Bz-File-Name'],
+            'fileName': urllib.parse.unquote(response.headers['X-Bz-File-Name']),
             'contentSha1': response.headers['X-Bz-Content-Sha1'],
             'contentLength': response.headers['Content-Length'],
             'contentType': response.headers['Content-Type'],
@@ -477,7 +486,9 @@ class B2Bucket:
 
         for h in response.headers:
             if h.startswith("X-Bz-Info-"):
-                data['fileInfo'][h[10:]] = response.headers[h]
+                data['fileInfo'][h[10:]] = urllib.parse.unquote(
+                        response.headers[h]
+                )
 
         f.seek(0)
         return data, f
