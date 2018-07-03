@@ -273,7 +273,7 @@ class B2Bucket:
         raise IOError("No such bucket name {}".format(self.bucket_name))
 
     def _get_upload_url(self):
-        """Sets self.upload_url and self.upload_token or raises IOError
+        """Sets the upload_url and upload_token or raises IOError
 
         This costs one class A transaction
         """
@@ -543,5 +543,6 @@ class B2Bucket:
         except B2ResponseError as e:
             if e.data['code'] in ('no_such_file', 'already_hidden'):
                 pass
-            raise
+            else:
+                raise
 
