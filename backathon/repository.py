@@ -23,7 +23,6 @@ import umsgpack
 from . import models
 from . import util
 from .exceptions import CorruptedRepository
-from .signals import db_setting_changed
 
 class KeyRequired(Exception):
     pass
@@ -50,7 +49,6 @@ class Repository:
         if self.alias not in django.db.connections.databases:
             django.db.connections.databases[self.alias] = config
 
-        db_setting_changed.connect(self._clear_cached_properties)
 
     def initialize(self, encryption, compression, storage_uri, password=None):
         """Initializes a new repository.
@@ -169,27 +167,6 @@ class Repository:
         decrypted_key_bytes = nacl.secret.SecretBox(symmetrickey).decrypt(encrypted_private_key)
 
         return nacl.public.PrivateKey(decrypted_key_bytes)
-
-
-    def _clear_cached_properties(self, setting, **kwargs):
-        """Since there is one instance of this object per process, we have to
-        reconfigure when a setting is changed. This happens mostly when
-        running tests."""
-
-        if setting == "REPO_URI":
-            self.__dict__.pop('storage', None)
-
-        elif setting == "ENCRYPTION":
-            self.__dict__.pop('encrypt_bytes', None)
-            self.__dict__.pop('decrypt_bytes', None)
-            self.__dict__.pop('hasher', None)
-
-        elif setting == "PUBKEY":
-            self.__dict__.pop('pubkey', None)
-
-        elif setting == "COMPRESSION":
-            self.__dict__.pop('compress_bytes', None)
-            self.__dict__.pop('decompress_bytes', None)
 
     @cached_property
     def pubkey(self):

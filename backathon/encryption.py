@@ -7,11 +7,6 @@ import nacl.secret
 import nacl.public
 import nacl.exceptions
 
-class PasswordRequired(Exception):
-    """Raised when None is passed to an encryption routine that requires a
-    password
-    """
-
 class DecryptionError(Exception):
     pass
 
@@ -24,6 +19,8 @@ class BaseEncryption:
     stored locally in what is presumed to be secure storage, and some info is
     stored remotely but encrypted and is used for recovery.
     """
+
+    password_required = True
 
     @classmethod
     def init_new(cls, password):
@@ -135,6 +132,8 @@ class NullEncryption(BaseEncryption):
     Use this for local repositories, trusted repositories, or where data is
     not sensitive
     """
+    password_required = False
+
     @classmethod
     def init_new(cls, password):
         return cls()
@@ -166,6 +165,8 @@ class NullEncryption(BaseEncryption):
         return hashlib.sha256(content).digest()
 
 class NaclSealedBox(BaseEncryption):
+    password_required = True
+
     def __init__(self, salt, ops, mem, pubkey, enc_privkey):
         self.salt = salt # type: bytes
         self.ops = ops # type: int
@@ -200,8 +201,6 @@ class NaclSealedBox(BaseEncryption):
 
     @classmethod
     def init_new(cls, password):
-        if not password:
-            raise PasswordRequired()
         self = cls(
             salt=nacl.utils.random(nacl.pwhash.argon2id.SALTBYTES),
             ops=nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE,
@@ -234,8 +233,6 @@ class NaclSealedBox(BaseEncryption):
 
     @classmethod
     def init_from_public(cls, params, password):
-        if not password:
-            raise PasswordRequired()
         self = cls(
             salt=bytes.fromhex(params['salt']),
             ops=params['ops'],
@@ -273,8 +270,6 @@ class NaclSealedBox(BaseEncryption):
         return nacl.public.SealedBox(self.pubkey).encrypt(plaintext)
 
     def get_decryption_key(self, password):
-        if not password:
-            raise PasswordRequired()
         return self._decrypt_privkey(password)
 
     def decrypt_bytes(self, cyphertext, key: nacl.public.PrivateKey):
