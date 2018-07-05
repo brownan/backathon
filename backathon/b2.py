@@ -133,8 +133,7 @@ class B2Bucket:
 
         Implements automatic retries and backoffs as per the B2 documentation
         """
-        if "timeout" not in kwargs:
-            kwargs['timeout'] = TIMEOUT
+        kwargs.setdefault('timeout', TIMEOUT)
 
         delay = 1
         max_delay = 64
@@ -209,8 +208,7 @@ class B2Bucket:
             raise IOError("Invalid json response from B2")
 
         if response.status_code != 200:
-            raise IOError("{}: {}".format(response.status_code,
-                                          data['message']))
+            raise B2ResponseError(data)
 
         self._local.authorization_token = data['authorizationToken']
         self._local.api_url = data['apiUrl']
@@ -393,7 +391,7 @@ class B2Bucket:
 
             # Any other errors indicate a permanent problem with the request
             if response.status_code != 200:
-                raise IOError(response_data['message'])
+                raise B2ResponseError(response_data)
 
             return response_data
 
