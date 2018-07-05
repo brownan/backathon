@@ -3,13 +3,12 @@ import uuid
 import os
 
 DATABASES = {
+    # Default database is used for process-wide configuration. Separate DB
+    # connections are used for the cache tables, initialized by the
+    # Repository class.
     'default': {
-        #'ENGINE': 'django.db.backends.sqlite3',
-        'ENGINE': 'backathon.sqlite3_backend',
-
-        # Default value is here for testing. All the normal entry points make
-        # sure this environment variable is set before calling django.setup()
-        'NAME': os.environ.get('BACKATHON_CONFIG',"db.sqlite3"),
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': ":memory:",
     }
 }
 
@@ -20,6 +19,11 @@ USE_TZ = True
 INSTALLED_APPS = [
     'backathon',
 ]
+
+DATABASE_ROUTERS = [
+    'backathon.dbrouter.BackathonRouter',
+]
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

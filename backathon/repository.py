@@ -39,9 +39,9 @@ class Repository:
 
     """
     def __init__(self, dbfile):
-        # Create the database connection and register
+        # Create the database connection and register it with Django
         dbfile = os.path.abspath(dbfile)
-        self.alias = slugify(dbfile)
+        self.alias = slugify(dbfile) # Something unique for this file
         config = {
             'ENGINE': 'backathon.sqlite3_backend',
             'NAME': dbfile,
@@ -49,6 +49,61 @@ class Repository:
         if self.alias not in django.db.connections.databases:
             django.db.connections.databases[self.alias] = config
 
+        # Make sure the database has all the migrations applied
+        self._migrate()
+
+        # Load encryption settings
+        self.encryption = None
+        try:
+            enc_class = models.Setting.get("ENCRYPTION", using=self.alias)
+            enc_settings = models.Setting.get("ENCRYPTION_SETTINGS",
+                                              using=self.alias)
+        except KeyError:
+            pass
+        else:
+            from . import encryption
+            cls = {
+                "none": encryption.NullEncryption,
+                "nacl": encryption.NaclSealedBox,
+            }[enc_class]
+            self.encryption = cls.init_from_private(json.loads(enc_settings))
+
+        # Load compression settings
+        self.compress = None
+        self.decompress = None
+        try:
+            comp_mode = models.Setting.get("COMPRESSION", using=self.alias)
+        except KeyError:
+            pass
+        else:
+            if comp_mode == "none":
+                self.compress = lambda b: b
+                self.decompress = lambda b: b
+            elif comp_mode == "zlib":
+                import zlib
+                self.compress = zlib.compress
+                self.decompress = zlib.decompress
+            else:
+                raise KeyError("Unknown compression scheme '{}'".format(comp_mode))
+
+    def _migrate(self):
+        """Runs migrate on the given database
+
+        If this is a new database, it's created and the tables are populated
+
+        If this is an existing database, makes sure all migrations are applied
+
+        """
+        # This workflow is simplified down to just what we need from the
+        # "migrate" management command
+        from django.db.migrations.executor import MigrationExecutor
+        conn = django.db.connections[self.alias]
+        executor = MigrationExecutor(conn)
+        executor.loader.check_consistent_history(conn)
+        if executor.loader.detect_conflicts():
+            raise RuntimeError("Migration conflict")
+        targets = executor.loader.graph.leaf_nodes("backathon")
+        executor.migrate(targets)
 
     def initialize(self, encryption, compression, storage_uri, password=None):
         """Initializes a new repository.

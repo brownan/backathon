@@ -55,7 +55,7 @@ def main():
 
     # Special exception, all commands except for 'init' require the database
     # to exist.
-    if (subcommand not in ['init', 'help'] and not os.path.exists(dbpath)):
+    if subcommand not in ['init', 'help'] and not os.path.exists(dbpath):
         sys.stderr.write("Could not find config database: {}\n".format(dbpath))
         sys.stderr.write("Check the path, or if this is a new config you must run 'init'\n")
         sys.exit(1)

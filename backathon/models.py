@@ -15,7 +15,6 @@ from django.db import connection
 from .fields import PathField
 from . import chunker
 from . import util
-from . import signals
 
 scanlogger = logging.getLogger("backathon.scan")
 
@@ -720,17 +719,15 @@ class Setting(models.Model):
 
     _empty = object()
     @classmethod
-    def get(cls, key, default=_empty):
+    def get(cls, key, default=_empty, using=None):
         try:
-            return cls.objects.get(key=key).value
+            return cls.objects.using(using).get(key=key).value
         except cls.DoesNotExist:
             if default is cls._empty:
                 raise KeyError("No such setting: {}".format(key))
             return default
 
     @classmethod
-    def set(cls, key, value):
+    def set(cls, key, value, using=None):
         s = cls(key=key, value=value)
-        s.save()
-        signals.db_setting_changed.send(sender=Setting, setting=key,
-                                        value=value)
+        s.save(using=using)
