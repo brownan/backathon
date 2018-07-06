@@ -71,6 +71,8 @@ from logging import getLogger
 import requests.exceptions
 from django.utils.functional import cached_property
 
+from .storage import StorageBase
+
 logger = getLogger("backathon.b2")
 
 extra_headers = {
@@ -92,7 +94,7 @@ class B2ResponseError(IOError):
             self.data['message'],
         )
 
-class B2Bucket:
+class B2Bucket(StorageBase):
     """Represents a B2 Bucket, a container for objects
 
     This object should be thread safe, as it keeps a thread-local
@@ -112,6 +114,13 @@ class B2Bucket:
         # Thread local variables hold the requests Session object, as well as
         # various authorization tokens acquired from B2
         self._local = threading.local()
+
+    def get_params(self):
+        return {
+            'account_id': self.account_id,
+            'application_key': self.application_key,
+            'bucket_name': self.bucket_name,
+        }
 
     @property
     def session(self):

@@ -1,31 +1,45 @@
 import io
 import uuid
-import hashlib
 import hmac
 import json
-import urllib.parse
 import os.path
+import zlib
 
 import django.core.files.storage
 import django.db
-from django.core.exceptions import ImproperlyConfigured
 from django.db.transaction import atomic
-from django.utils.functional import SimpleLazyObject, cached_property
+from django.utils.functional import cached_property
 from django.utils.text import slugify
-
-import nacl.public
-import nacl.pwhash.argon2id
-import nacl.secret
-import nacl.utils
 
 import umsgpack
 
 from . import models
 from . import util
 from .exceptions import CorruptedRepository
+from . import encryption
+from . import storage
 
 class KeyRequired(Exception):
     pass
+
+class Settings:
+    """A loose proxy for the Settings database model that does json
+    encoding/decoding
+
+    """
+    def __init__(self, alias):
+        self.alias = alias
+
+    def __getitem__(self, item):
+        value = models.Setting.get(item, using=self.alias)
+        return json.loads(value)
+
+    def __setitem__(self, key, value):
+        models.Setting.set(key, value, using=self.alias)
+
+
+###########################
+###########################
 
 class Repository:
     """This class acts as an interface to the storage backend as well as all
@@ -38,6 +52,7 @@ class Repository:
     or database connections are likely to be left open.
 
     """
+
     def __init__(self, dbfile):
         # Create the database connection and register it with Django
         dbfile = os.path.abspath(dbfile)
@@ -49,42 +64,80 @@ class Repository:
         if self.alias not in django.db.connections.databases:
             django.db.connections.databases[self.alias] = config
 
+        # Initialize our settings object
+        self.settings = Settings(self.alias)
+
         # Make sure the database has all the migrations applied
         self._migrate()
 
-        # Load encryption settings
-        self.encryption = None
-        try:
-            enc_class = models.Setting.get("ENCRYPTION", using=self.alias)
-            enc_settings = models.Setting.get("ENCRYPTION_SETTINGS",
-                                              using=self.alias)
-        except KeyError:
-            pass
-        else:
-            from . import encryption
-            cls = {
-                "none": encryption.NullEncryption,
-                "nacl": encryption.NaclSealedBox,
-            }[enc_class]
-            self.encryption = cls.init_from_private(json.loads(enc_settings))
+    ##########################
+    # The next set of properties and methods manipulate the utility classes
+    # that are used by this class
+    ##########################
 
-        # Load compression settings
-        self.compress = None
-        self.decompress = None
-        try:
-            comp_mode = models.Setting.get("COMPRESSION", using=self.alias)
-        except KeyError:
-            pass
+    @cached_property
+    def encrypter(self):
+        data = self.settings['ENCRYPTION_SETTINGS']
+        cls_name = data['class']
+        settings = data['settings']
+
+        cls = {
+            "none": encryption.NullEncryption,
+            "nacl": encryption.NaclSealedBox,
+        }[cls_name]
+
+        return cls.init_from_private(settings)
+
+    def set_encrypter(self, cls_name, settings):
+        # Save new settings
+        self.settings['ENCRYPTION_SETTINGS'] = {
+            'class': cls_name,
+            'settings': settings
+        }
+
+        # Re-initialize the encrypter object
+        self.__dict__.pop("encrypter", None)
+        return self.encrypter
+
+    @cached_property
+    def compression(self):
+        return self.settings['COMPRESSION_ENABLED']
+
+    def set_compression(self, enabled):
+        enabled = bool(enabled)
+        self.settings['COMPRESSION_ENABLED'] = enabled
+        self.__dict__['compression'] = enabled
+        return enabled
+
+    @cached_property
+    def storage(self):
+        data = self.settings['STORAGE_SETTINGS']
+
+        cls_name = data['class']
+        settings = data['settings']
+
+        if cls_name == "local":
+            cls = storage.FilesystemStorage
+        elif cls_name == "b2":
+            from .b2 import B2Bucket
+            cls = B2Bucket
         else:
-            if comp_mode == "none":
-                self.compress = lambda b: b
-                self.decompress = lambda b: b
-            elif comp_mode == "zlib":
-                import zlib
-                self.compress = zlib.compress
-                self.decompress = zlib.decompress
-            else:
-                raise KeyError("Unknown compression scheme '{}'".format(comp_mode))
+            raise KeyError("Unknown storage class {}".format(cls_name))
+
+        return cls(**settings)
+
+    def set_storage(self, cls_name, settings):
+        self.settings['STORAGE_SETTINGS'] = {
+            'class': cls_name,
+            'settings': settings,
+        }
+
+        self.__dict__.pop("storage", None)
+        return self.storage
+
+    ################
+    # Some private utility methods
+    ################
 
     def _migrate(self):
         """Runs migrate on the given database
@@ -105,214 +158,34 @@ class Repository:
         targets = executor.loader.graph.leaf_nodes("backathon")
         executor.migrate(targets)
 
-    def initialize(self, encryption, compression, storage_uri, password=None):
-        """Initializes a new repository.
-
-        This sets local settings, and also uploads necessary metadata files
-        to the remote repository
-
-        :param encryption: A string indicating what kind of encryption to use
-        :param compression: A string indicating what kind of compression to use
-        :param storage_uri: A URI indicating the storage backend and backend
-            parameters to use
-        :param password: A string indicating the password securing the secret
-        key, if encryption is used
-
-        """
-        with atomic():
-            models.Setting.set("REPO_URI", storage_uri)
-            models.Setting.set("COMPRESSION", compression)
-            models.Setting.set("ENCRYPTION", encryption)
-
-            if encryption == "nacl":
-                # Derive a secret key from the password
-                salt = nacl.utils.random(nacl.pwhash.argon2id.SALTBYTES)
-                ops = nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE
-                mem = nacl.pwhash.argon2id.MEMLIMIT_SENSITIVE
-
-                symmetrickey = nacl.pwhash.argon2id.kdf(
-                    nacl.secret.SecretBox.KEY_SIZE,
-                    password.encode("UTF-8"),
-                    salt=salt,
-                    opslimit=ops,
-                    memlimit=mem,
-                )
-
-                # Generate a new key pair
-                key = nacl.public.PrivateKey.generate()
-
-                # Encrypt the private key's bytes using the symmetric key
-                encrypted_private_key = nacl.secret.SecretBox(
-                    symmetrickey
-                ).encrypt(bytes(key))
-
-                # This info dict will be stored in plain text locally and
-                # remotely. It should not contain any secret parameters
-                info = {
-                    'salt': salt.hex(),
-                    'ops': ops,
-                    'mem': mem,
-                    'key': encrypted_private_key.hex()
-                }
-
-                models.Setting.set("KEY", json.dumps(info))
-                models.Setting.set("PUBKEY", bytes(key.public_key).hex())
-
-                metadata = io.BytesIO(
-                    json.dumps(info).encode("UTF-8")
-                )
-
-                self.storage.save("backathon.config", metadata)
-
-    @staticmethod
-    def get_storage_from_uri(uri):
-        """Returns a Storage instance given a storage uri"""
-        parsed = urllib.parse.urlparse(uri) # type: urllib.parse.ParseResult
-        if parsed.scheme == "file":
-            return django.core.files.storage.FileSystemStorage(
-                location=parsed.path
-            )
-        elif parsed.scheme == "b2":
-            from . import b2
-            bucket = parsed.netloc
-            query = dict(urllib.parse.parse_qsl(parsed.query))
-            account_id = query['auth-username']
-            application_key = query['auth-password']
-            return b2.B2Storage(account_id, application_key, bucket)
+    def compress_bytes(self, b):
+        if self.compression:
+            return zlib.compress(b)
         else:
-            raise ImproperlyConfigured("Invalid repository URI: {}".format(uri))
+            return b
 
+    def decompress_bytes(self, b):
+        # Detect the compression used.
+        # Zlib compression always starts with byte 0x78
+        # Since our messages always start with a msgpack'd string specifying
+        # the object type, messages always start with one of 0xd9, 0xda, 0xdb,
+        # or bytes 0xa0 through 0xbf.
+        # Therefore, we can unambiguously detect whether compression is used
+        if b[0] == 0x78:
+            return zlib.decompress(b)
+        return b
 
-    def get_remote_privatekey(self, password):
-        """Retrieves the private key from the remote store, decrypts it,
-        and returns the PrivateKey object for passing in to the decrypt_bytes()
-        routine
-
-        :rtype: nacl.public.PrivateKey
-
-        """
-        info = json.load(self.storage.open("backathon.config"))
-        return self._decrypt_privkey(info, password)
-
-    def get_local_privatekey(self, password):
-        """Retrieves the private key from the local cache, decrypting it with
-        the given password
-
-        :rtype: nacl.public.PrivateKey
-        """
-        info = json.loads(models.Setting.get("KEY"))
-        return self._decrypt_privkey(info, password)
-
-    def _decrypt_privkey(self, info, password):
-        salt = bytes.fromhex(info['salt'])
-        ops = info['ops']
-        mem = info['mem']
-        encrypted_private_key = bytes.fromhex(info['key'])
-
-        # Re-derive the symmetric key from the password
-        symmetrickey = nacl.pwhash.argon2id.kdf(
-            nacl.secret.SecretBox.KEY_SIZE,
-            password.encode("UTF-8"),
-            salt=salt,
-            opslimit=ops,
-            memlimit=mem,
+    def _get_path(self, objid):
+        """Returns the path for the given objid"""
+        objid_hex = objid.hex()
+        return "objects/{}/{}".format(
+            objid_hex[:3],
+            objid_hex,
         )
 
-        # Decrypt the key
-        decrypted_key_bytes = nacl.secret.SecretBox(symmetrickey).decrypt(encrypted_private_key)
-
-        return nacl.public.PrivateKey(decrypted_key_bytes)
-
-    @cached_property
-    def pubkey(self):
-        key_hex = models.Setting.get("PUBKEY")
-        key = bytes.fromhex(key_hex)
-        return nacl.public.PublicKey(key)
-
-    @cached_property
-    def storage(self):
-        return self.get_storage_from_uri(models.Setting.get("REPO_URI"))
-
-    @cached_property
-    def hasher(self):
-        """Returns a hasher used to hash bytes into a digest
-
-        If encryption is enabled, this is an hmac object partially evaluated
-        to include the key.
-        """
-        encryption = models.Setting.get("ENCRYPTION")
-        if encryption == "nacl":
-            return lambda b=None: hmac.new(bytes(self.pubkey), msg=b,
-                                           digestmod=hashlib.sha256)
-        elif encryption == "none":
-            return hashlib.sha256
-
-        else:
-            raise ImproperlyConfigured("Bad encryption type '{}'".format(encryption))
-
-    @cached_property
-    def encrypt_bytes(self):
-        """Returns a function that will encrypt the given bytes depending on
-        the encryption configuration"""
-        encryption = models.Setting.get("ENCRYPTION")
-        if encryption == "nacl":
-            # Call bytes() on the input. If it's a memoryview or other
-            # bytes-like object, pynacl will reject it.
-            return lambda b: nacl.public.SealedBox(self.pubkey).encrypt(bytes(b))
-
-        elif encryption == "none":
-            return lambda b: b
-
-        else:
-            raise ImproperlyConfigured("Bad encryption type '{}'".format(encryption))
-
-    @property
-    def key_required(self):
-        """True if decryption routines will require a key"""
-        return models.Setting.get("ENCRYPTION") == "nacl"
-
-    @cached_property
-    def decrypt_bytes(self):
-        """Returns a function that takes a bytes object and an optional key,
-        and returns the decrypted bytes
-
-        Raises a KeyRequired error if the key was not provided but is needed to
-        decrypt the contents
-        """
-        encryption = models.Setting.get("ENCRYPTION")
-        if encryption == "nacl":
-            def _decrypt(b, key=None):
-                if key is None:
-                    raise KeyRequired("An encryption key is required")
-                return nacl.public.SealedBox(key).decrypt(b)
-            return _decrypt
-
-        elif encryption == "none":
-            return lambda b, k=None: b
-
-        else:
-            raise ImproperlyConfigured("Bad encryption type '{}'".format(encryption))
-
-    def _get_compression_functions(self):
-        compression = models.Setting.get("COMPRESSION")
-        if compression == "zlib":
-            import zlib
-            pair = (zlib.compress, zlib.decompress)
-        elif compression == "none":
-            pair = (lambda b: b), (lambda b: b)
-        else:
-            raise ImproperlyConfigured("Bad compression type '{}'".format(
-                compression))
-
-        return pair
-
-    @cached_property
-    def compress_bytes(self):
-        return self._get_compression_functions()[0]
-
-    @cached_property
-    def decompress_bytes(self):
-        return self._get_compression_functions()[1]
+    ################################
+    # The next methods define the public interface to this class
+    ################################
 
     def push_object(self, payload, children):
         """Pushes the given payload as a new object into the object store.
@@ -335,7 +208,7 @@ class Repository:
         dependent objects to be in the database already.
         """
         view = payload.getbuffer()
-        objid = self.hasher(view).digest()
+        objid = self.encrypter.get_object_id(view)
 
         with atomic():
             try:
@@ -359,10 +232,10 @@ class Repository:
 
                 name = self._get_path(objid)
 
-                to_upload = self.encrypt_bytes(
+                to_upload = self.encrypter.encrypt_bytes(
                     self.compress_bytes(view)
                 )
-                self.storage.save(name, util.BytesReader(to_upload))
+                self.storage.upload_file(name, util.BytesReader(to_upload))
             else:
                 # It was already in the database
                 # Do a sanity check to make sure the object's payload is the
@@ -382,14 +255,6 @@ class Repository:
 
         return obj_instance
 
-    def _get_path(self, objid):
-        """Returns the path for the given objid"""
-        objid_hex = objid.hex()
-        return "objects/{}/{}".format(
-            objid_hex[:3],
-            objid_hex,
-        )
-
     def get_object(self, objid, key=None):
         """Retrieves the object from the remote datastore.
 
@@ -405,13 +270,13 @@ class Repository:
 
         A CorruptedRepository exception is raised if there is a problem
         retrieving this object's payload, such as the checksum not matching
-        or a problem decrypting the payload..
+        or a problem decrypting the payload.
 
         """
         try:
-            file = self.storage.open(self._get_path(objid))
+            _, file = self.storage.download_file(self._get_path(objid))
             contents = self.decompress_bytes(
-                self.decrypt_bytes(
+                self.encrypter.decrypt_bytes(
                     file.read(),
                     key
                 )
@@ -421,44 +286,12 @@ class Repository:
                 objid.hex(), e
             )) from e
 
-        digest = self.hasher(contents).digest()
+        digest = self.encrypter.get_object_id(contents)
         if not hmac.compare_digest(digest, objid):
             raise CorruptedRepository("Object payload does not "
                                       "match its hash for objid "
                                       "{}".format(objid))
         return contents
-
-    def exists(self, objname):
-        pass # TODO
-
-    def delete_object(self, objname):
-        pass # TODO
-
-    def rebuild_obj_cache(self):
-        """Rebuilds the entire local object cache from the remote data store
-
-        This is what you use if your local cache is missing or corrupt
-
-        Performs these steps:
-        1) Downloads all snapshot index files from the remote storage
-        2) Downloads the referenced object files from the remote store
-        3) Parses the object payloads, and recurses to each referenced object
-
-        """
-        pass # TODO
-
-    def verify_cache(self):
-        """Walks the local tree of objects and makes sure we have everything
-        we should. This performs a sanity check on the local database
-        consistency and integrity. If anything comes up wrong here, it could
-        indicate a bigger problem somewhere.
-
-        * Checks that all tree objects have objects for each child
-        * Checks that all tree and inode objects have a readable payload in
-          the cache
-        * Checks that all blob objects referenced by inodes exist in the cache
-        """
-        pass # TODO
 
     def put_snapshot(self, snapshot):
         """Adds a new snapshot index file to the storage backend
@@ -474,15 +307,10 @@ class Repository:
             "path": snapshot.path,
         }, contents)
         contents.seek(0)
-        to_upload = self.encrypt_bytes(
+        to_upload = self.encrypter.encrypt_bytes(
             self.compress_bytes(
                 contents.getbuffer()
             )
         )
-        self.storage.save(path, util.BytesReader(to_upload))
+        self.storage.upload_file(path, util.BytesReader(to_upload))
 
-    def get_snapshot_list(self):
-        """Gets a list of snapshots"""
-
-
-default_datastore = SimpleLazyObject(lambda: Repository()) # type: Repository
