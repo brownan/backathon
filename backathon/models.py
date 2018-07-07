@@ -10,7 +10,7 @@ import umsgpack
 
 from django.db import models, IntegrityError
 from django.db.transaction import atomic
-from django.db import connection
+from django.db import connections
 
 from .fields import PathField
 from . import chunker
@@ -334,8 +334,9 @@ class FSEntry(models.Model):
 
     # Note about the DO_NOTHING delete action: we create the SQLite tables
     # with ON DELETE CASCADE, so the database will perform cascading
-    # deletes instead of Django. For memory efficiency, we tell Django to do
-    # nothing and let SQLite take care of it.
+    # deletes instead of Django. Django tries to pull the entire deletion
+    # set into memory. For memory efficiency, we tell Django to do nothing
+    # and let SQLite take care of it.
     parent = models.ForeignKey(
         'self',
         related_name="children",
@@ -380,7 +381,7 @@ class FSEntry(models.Model):
         """Runs a query to invalidate this node and all parents up to the root
 
         """
-        with connection.cursor() as cursor:
+        with connections[self._state.db].cursor() as cursor:
             cursor.execute("""
             WITH RECURSIVE ancestors(id) AS (
               SELECT id FROM fsentry WHERE id=%s
@@ -429,7 +430,8 @@ class FSEntry(models.Model):
             # FileNotFound exception above, which will recursively cascade to
             # delete their children. But if a file is recreated with the same
             # name before a scan runs, it could leave orphaned children in
-            # the database.
+            # the database. (They would be cleaned up when those child entries
+            # are scanned, though, so this is probably unnecessary)
             scanlogger.info("No longer a directory: {}".format(self))
             self.children.all().delete()
 
@@ -461,7 +463,7 @@ class FSEntry(models.Model):
                 newpath = os.path.join(self.path, newname)
                 try:
                     with atomic():
-                        newentry = FSEntry.objects.create(
+                        newentry = FSEntry.objects.using(self._state.db).create(
                             path=newpath,
                             parent=self,
                             new=True,
@@ -472,17 +474,17 @@ class FSEntry(models.Model):
                     # the new root will re-discover the existing root. In
                     # this case, just re-parent the old root, merging the two
                     # trees.
-                    newentry = FSEntry.objects.get(path=newpath)
-                    scanlogger.warning("Trying to create path but already "
-                                       "exists. Reparenting: {}".format(
-                        newentry))
+                    newentry = FSEntry.objects.using(self._state.db).get(path=newpath)
+                    scanlogger.warning(
+                        "Trying to create path but already exists. "
+                        "Reparenting: {}".format(newentry))
                     # If this isn't a root, something is really wrong with
                     # our tree!
                     assert newentry.parent_id is None
                     newentry.parent = self
                     newentry.save(update_fields=['parent'])
                 else:
-                    scanlogger.info("New path: {}".format(newentry))
+                    scanlogger.info("New path     : {}".format(newentry))
 
             # Delete old entries
             for child in children:

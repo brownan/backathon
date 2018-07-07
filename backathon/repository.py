@@ -56,16 +56,16 @@ class Repository:
     def __init__(self, dbfile):
         # Create the database connection and register it with Django
         dbfile = os.path.abspath(dbfile)
-        self.alias = slugify(dbfile) # Something unique for this file
+        self.db = slugify(dbfile) # Something unique for this file
         config = {
             'ENGINE': 'backathon.sqlite3_backend',
             'NAME': dbfile,
         }
-        if self.alias not in django.db.connections.databases:
-            django.db.connections.databases[self.alias] = config
+        if self.db not in django.db.connections.databases:
+            django.db.connections.databases[self.db] = config
 
         # Initialize our settings object
-        self.settings = Settings(self.alias)
+        self.settings = Settings(self.db)
 
         # Make sure the database has all the migrations applied
         self._migrate()
@@ -150,7 +150,7 @@ class Repository:
         # This workflow is simplified down to just what we need from the
         # "migrate" management command
         from django.db.migrations.executor import MigrationExecutor
-        conn = django.db.connections[self.alias]
+        conn = django.db.connections[self.db]
         executor = MigrationExecutor(conn)
         executor.loader.check_consistent_history(conn)
         if executor.loader.detect_conflicts():
@@ -184,7 +184,7 @@ class Repository:
         )
 
     ################################
-    # The next methods define the public interface to this class
+    # These next methods are used in the scanning and backup routines
     ################################
 
     def push_object(self, payload, children):
@@ -314,3 +314,46 @@ class Repository:
         )
         self.storage.upload_file(path, util.BytesReader(to_upload))
 
+    ############################
+    # These next methods define the high level interface to this repository
+    ############################
+    def scan(self, skip_existing=False, progress=None):
+        """Scans the backup set
+
+        The backup set is the set of files and directories starting at the
+        root paths.
+        """
+        from . import scan
+        scan.scan(alias=self.db,
+                  progress=progress,
+                  skip_existing=skip_existing)
+
+    def add_root(self, root_path):
+        """Adds a new root path to the backup set
+
+        This just adds the root. The caller may want to call
+        scan(skip_existing=True) afterwards to update the local filesystem
+        cache.
+
+        If this entry is already a root or is a descendant of an existing
+        root, this call returns with no error.
+        """
+        from django.db import IntegrityError
+        root_path = os.path.abspath(root_path)
+        try:
+            models.FSEntry.objects.using(self.db).create(
+                path=root_path,
+            )
+        except IntegrityError:
+            pass
+
+    def del_root(self, root_path):
+        root_path = os.path.abspath(root_path)
+        entry = models.FSEntry.objects.using(self.db).get(path=root_path)
+        entry.delete()
+
+    def get_roots(self):
+        return [
+            entry.path for entry in
+            models.FSEntry.objects.using(self.db).filter(parent_isnull=True)
+            ]

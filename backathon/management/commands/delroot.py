@@ -1,11 +1,12 @@
 import os.path
 
-from django.core.management.base import BaseCommand, CommandError
-from django.db import IntegrityError
+from django.core.management.base import CommandError
 
+from ...util import atomic_immediate
 from ... import models
+from . import BackathonCommand
 
-class Command(BaseCommand):
+class Command(BackathonCommand):
     help="Adds the given filesystem path as a backup root"
 
     def add_arguments(self, parser):
@@ -13,9 +14,11 @@ class Command(BaseCommand):
 
     def handle(self, *args, **kwargs):
 
+        repo = kwargs['repo']
+
         root_path = os.path.abspath(kwargs.pop("root"))
         try:
-            entry = models.FSEntry.objects.get(
+            entry = models.FSEntry.objects.using(repo.db).get(
                 path=root_path,
             )
         except models.FSEntry.DoesNotExist:
@@ -24,5 +27,12 @@ class Command(BaseCommand):
         if entry.parent_id is not None:
             raise CommandError("Path not a backup root: {}".format(root_path))
 
-        entry.delete()
-        self.stdout.write("Path removed from backup set: {}".format(root_path))
+        with atomic_immediate():
+            before_count = models.FSEntry.objects.using(repo.db).count()
+
+            entry.delete()
+
+            after_count = models.FSEntry.objects.using(repo.db).count()
+        self.stdout.write("Root removed: {}".format(root_path))
+        self.stdout.write("{} files/directories removed from backup "
+                          "set".format(before_count - after_count))

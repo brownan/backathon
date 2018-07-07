@@ -3,7 +3,10 @@ This custom database backend inherits from the sqlite3 backend but adds
 a few customizations for this application.
 
 """
+from logging import getLogger
 from django.db.backends.sqlite3 import base, schema
+
+logger = getLogger("django.db")
 
 class DatabaseSchemaEditor(schema.DatabaseSchemaEditor):
     # This adds cascading deletes to foreign key relations. Foreign key
@@ -27,9 +30,19 @@ class DatabaseWrapper(base.DatabaseWrapper):
 
     def _start_transaction_under_autocommit(self):
         if self.begin_immediate:
+            logger.info("Beginning Transaction Immediate")
             self.cursor().execute("BEGIN IMMEDIATE")
         else:
+            logger.info("Beginning Transaction Deferred")
             self.cursor().execute("BEGIN")
+
+    def _commit(self):
+        logger.info("Commiting Transaction")
+        super()._commit()
+
+    def _rollback(self):
+        logger.info("Rolling back transaction")
+        super()._rollback()
 
     def get_new_connection(self, conn_params):
         """Enable some sqlite features that are disabled by the default"""
@@ -45,6 +58,12 @@ class DatabaseWrapper(base.DatabaseWrapper):
         # some performance improvements, but at the moment, tests show
         # performance is about the same.
         conn.execute("PRAGMA journal_mode=WAL").close()
+
+        # Limit the size of the WAL file. The file may grow larger than this
+        # during a transaction or heavy use, and normally SQLite doesn't
+        # truncate but merely overwrites unused space. This forces SQLite to
+        # truncate instead of overwrite if the file grows larger than this.
+        conn.execute("PRAGMA journal_size_limit=100000000").close()
 
         # The next two options can help improve performance for some kinds of
         # workloads, but according to some quick tests, performance is about

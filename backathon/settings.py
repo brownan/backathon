@@ -1,6 +1,5 @@
 import sys
 import uuid
-import os
 
 DATABASES = {
     # Default database is used for process-wide configuration. Separate DB
@@ -67,6 +66,9 @@ LOGGING = {
         },
         "django.db": {
             "level": "WARNING",
+        },
+        "django": {
+            "handlers": [],
         }
     },
     "root": {
