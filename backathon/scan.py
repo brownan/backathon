@@ -92,13 +92,14 @@ def scan(alias, progress=None, skip_existing=False):
     #  open. It checkpoints between outer loop iterations, but by default it
     #  doesn't truncate the WAL unless we set journal_size_limit.
     #
-    # 2. SQLite won't re-use pages in the WAL across transactions. So lots of
-    #  small write transactions in a situation where it can't checkpoint
-    #  causes the WAL to grow. I couldn't find details on this behavior in
-    #  the SQLite docs, but this is what I observed. When we do the same
-    #  operations in one big transaction, SQLite will re-use the pages in the
-    #  WAL when they're overwritten. This way the WAL never grows beyond a few
-    #  hundred KB.
+    # 2. SQLite won't re-use pages in the WAL across transactions, possibly
+    #  again because the SELECT statement is being held open across
+    #  transactions. So lots of small write transactions in a situation where
+    #  it can't checkpoint causes the WAL to grow. I couldn't find details
+    #  on this behavior in the SQLite docs, but this is what I observed. When
+    #  we do the same operations in one big transaction, SQLite will re-use
+    #  the pages in the WAL when they're overwritten and the WAL
+    #  never grows beyond a few hundred KB.
 
     scanned = 0
 

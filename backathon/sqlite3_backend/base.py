@@ -77,6 +77,9 @@ class DatabaseWrapper(base.DatabaseWrapper):
         # on a system crash or power failure, which feels acceptable for this
         # application. Writes to the database are still synced, and the WAL
         # is still synced before checkpoints.
+        # This probably doesn't help much because we do most of our
+        # write-heavy operations within a single transaction, and writes
+        # within a transaction aren't synced until commit.
         #conn.execute("PRAGMA synchronous=NORMAL").close()
 
         # Memory-mapped IO can help performance on read-heavy loads by
