@@ -217,18 +217,18 @@ class Repository:
 
         with atomic():
             try:
-                obj_instance = models.Object.objects.get(
+                obj_instance = models.Object.objects.using(self.db).get(
                     objid=objid
                 )
             except models.Object.DoesNotExist:
                 # Object wasn't in the database. Create it.
                 obj_instance = models.Object(objid=objid)
                 obj_instance.load_payload(view)
-                obj_instance.save()
+                obj_instance.save(using=self.db)
 
                 # Note, there could be duplicate children so we have to
                 # deduplicate to avoid a unique constraint violation
-                models.ObjectRelation.objects.bulk_create([
+                models.ObjectRelation.objects.using(self.db).bulk_create([
                     models.ObjectRelation(
                         parent=obj_instance,
                         child_id=c,
