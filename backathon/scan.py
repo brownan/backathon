@@ -78,8 +78,8 @@ def scan(alias, progress=None, skip_existing=False):
     # entry.scan() calls are grouped in the same transaction. Without
     # this, not only does performance suffer from lots of small
     # transactions and extra IO, but the SQLite Write-ahead Log (WAL) grows
-    # very large (gigabytes for less than 20,000 files, when the final DB
-    # size is less than 6 megabytes).
+    # very large (gigabytes for less than 20,000 files scanned, when the
+    # final DB size is less than 6 megabytes).
     # That last point actually puzzled me: why should the explicit
     # transaction make such a drastic difference in the WAL size?
     #
@@ -87,19 +87,21 @@ def scan(alias, progress=None, skip_existing=False):
     #
     # 1. The WAL cannot be checkpointed while a SELECT statement is still
     #  open. I'm guessing SQLite must keep a read lock on the database even
-    #  though the writes are still committing. This prevents SQLite from
-    #  autocheckpointing during the inner loop while qs.iterator() is still
-    #  open. It checkpoints between outer loop iterations, but by default it
-    #  doesn't truncate the WAL unless we set journal_size_limit.
+    #  though the writes are still committing. This must prevent SQLite from
+    #  auto-checkpointing during the inner loop while qs.iterator() is still
+    #  open. I wasn't able to confirm this from the SQLite docs, but without
+    #  the atomic block starting an explicit transaction, I observed it
+    #  auto-checkpoint between outer loop iterations when qs.iterator()
+    #  finishes.
     #
-    # 2. SQLite won't re-use pages in the WAL across transactions, possibly
-    #  again because the SELECT statement is being held open across
-    #  transactions. So lots of small write transactions in a situation where
-    #  it can't checkpoint causes the WAL to grow. I couldn't find details
-    #  on this behavior in the SQLite docs, but this is what I observed. When
-    #  we do the same operations in one big transaction, SQLite will re-use
-    #  the pages in the WAL when they're overwritten and the WAL
-    #  never grows beyond a few hundred KB.
+    # 2. SQLite won't re-use pages in the WAL across transactions; starting a
+    #  new transaction will append new entries to the WAL. So lots of small
+    #  write transactions in a situation where it can't checkpoint causes the
+    #  WAL to grow. In contrast, re-writing the DB page within a
+    #  transaction will re-write the same WAL page so the WAL stays small. I
+    #  couldn't find exact details on this behavior in the SQLite docs,
+    #  but it's consistent with what I observed. When we do the same operations
+    #  in one big transaction, the WAL never grows beyond a few hundred KB.
 
     scanned = 0
 
