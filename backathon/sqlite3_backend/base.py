@@ -45,25 +45,53 @@ class DatabaseWrapper(base.DatabaseWrapper):
         super()._rollback()
 
     def get_new_connection(self, conn_params):
-        """Enable some sqlite features that are disabled by the default"""
+        """Gets a new connection and sets our connection-wide settings
+
+        This enables some features we use that are disabled by default,
+        and tunes a few parameters for performance.
+
+        Note: make sure to explicitly close all cursors opened here.
+
+        """
         conn = super().get_new_connection(conn_params)
 
         # Set the page size. In SQLite version 3.12.0 this was changed to a
         # default of 4096, but some distros still use older versions of SQLite.
         conn.execute("PRAGMA page_size=4096").close()
-        conn.execute("PRAGMA page_cache=-2000").close()
 
-        # The write-ahead-log's main advantage is that it allows readers
-        # while another connection is in a write transaction. It also may add
-        # some performance improvements, but at the moment, tests show
-        # performance is about the same.
+        # Similarly, the cache size had a different default on older
+        # versions. The documentation currently recommends -2000, which sets
+        # it to 2,000KB. (negative numbers set KB, positive numbers set the
+        # number of pages)
+        conn.execute("PRAGMA cache_size=-2000").close()
+
+        # The write-ahead-log's main advantage is that connections in a write
+        # transaction don't block other connections from reading the database.
+        # It also may add some performance improvements, but as of writing
+        # this, tests show performance is about the same.
         conn.execute("PRAGMA journal_mode=WAL").close()
+
+        # The wal_autocheckpoint value is how many pages of data the WAL may
+        # contain before SQLite will attempt to run a checkpoint operation
+        # (copy pages from the WAL back to the database itself).
+        #
+        # 1000 is the default but it's set explicitly here as it's relevant
+        # and we may want to tune it later. Multiply this by the page size to
+        # get approximately how big the WAL will grow to before we incur the
+        # cost of a checkpoint. Currently set to approx. 4MB
+        #
+        # The WAL may grow larger for a variety of reasons (such as a lot of
+        # write transactions while a reader is blocking checkpoints),
+        # but after a checkpoint the WAL will be truncated to
+        # journal_size_limit (below). And of course after the last connection
+        # closes the WAL is deleted entirely.
+        conn.execute("PRAGMA wal_autocheckpoint=1000").close()
 
         # Limit the size of the WAL file. The file may grow larger than this
         # during a transaction or heavy use, and normally SQLite doesn't
         # truncate but merely overwrites unused space. This forces SQLite to
         # truncate instead of overwrite if the file grows larger than this.
-        conn.execute("PRAGMA journal_size_limit=100000000").close()
+        conn.execute("PRAGMA journal_size_limit=10000000").close()
 
         # The next two options can help improve performance for some kinds of
         # workloads, but according to some quick tests, performance is about
@@ -79,7 +107,8 @@ class DatabaseWrapper(base.DatabaseWrapper):
         # is still synced before checkpoints.
         # This probably doesn't help much because we do most of our
         # write-heavy operations within a single transaction, and writes
-        # within a transaction aren't synced until commit.
+        # within a transaction aren't synced until commit even under the
+        # default synchronous=FULL mode.
         #conn.execute("PRAGMA synchronous=NORMAL").close()
 
         # Memory-mapped IO can help performance on read-heavy loads by

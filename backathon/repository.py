@@ -70,6 +70,11 @@ class Repository:
         # Make sure the database has all the migrations applied
         self._migrate()
 
+    @property
+    def conn(self):
+        # Shortcut for this database connection
+        return django.db.connections[self.db]
+
     ##########################
     # The next set of properties and methods manipulate the utility classes
     # that are used by this class
