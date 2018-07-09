@@ -12,6 +12,7 @@ from django.db import models, IntegrityError
 from django.db.transaction import atomic
 from django.db import connections
 
+from .util import atomic_immediate
 from .fields import PathField
 from . import chunker
 from . import util
@@ -393,7 +394,6 @@ class FSEntry(models.Model):
               WHERE fsentry.id IN ancestors
             """, (self.id,))
 
-    @atomic()
     def scan(self):
         """Scans this entry for changes
 
@@ -411,92 +411,93 @@ class FSEntry(models.Model):
 
         """
         scanlogger.debug("Entering scan for {}".format(self))
-        try:
-            stat_result = os.lstat(self.path)
-        except (FileNotFoundError, NotADirectoryError):
-            # NotADirectoryError can happen if we're trying to scan a file,
-            # but one of its parent directories is no longer a directory.
-            scanlogger.info("Not found, deleting: {}".format(self))
-            self.delete()
-            return
-
-        if (
-                self.st_mode is not None and
-                stat.S_ISDIR(self.st_mode) and
-                not stat.S_ISDIR(stat_result.st_mode)
-        ):
-            # The type of entry has changed from directory to something else.
-            # Normally, directories when they are deleted will hit the
-            # FileNotFound exception above, which will recursively cascade to
-            # delete their children. But if a file is recreated with the same
-            # name before a scan runs, it could leave orphaned children in
-            # the database. (They would be cleaned up when those child entries
-            # are scanned, though, so this is probably unnecessary)
-            scanlogger.info("No longer a directory: {}".format(self))
-            self.children.all().delete()
-
-        if not self.new and self.compare_stat_info(stat_result):
-            scanlogger.debug("No change to {}".format(self))
-            return
-
-        self.obj = None
-        self.new = False
-
-        self.update_stat_info(stat_result)
-
-        if stat.S_ISDIR(self.st_mode):
-
-            children = list(self.children.all())
-
-            # Check the directory entries against the database.
-            # We need to do a listdir to compare the entries in the database
-            # against the actual entries in the directory
+        with atomic_immediate(using=self._state.db):
             try:
-                entries = set(os.listdir(self.path))
-            except PermissionError:
-                scanlogger.warning("Permission denied: {}".format(
-                    self))
-                entries = set()
+                stat_result = os.lstat(self.path)
+            except (FileNotFoundError, NotADirectoryError):
+                # NotADirectoryError can happen if we're trying to scan a file,
+                # but one of its parent directories is no longer a directory.
+                scanlogger.info("Not found, deleting: {}".format(self))
+                self.delete()
+                return
 
-            # Create new entries
-            for newname in entries.difference(c.name for c in children):
-                newpath = os.path.join(self.path, newname)
+            if (
+                    self.st_mode is not None and
+                    stat.S_ISDIR(self.st_mode) and
+                    not stat.S_ISDIR(stat_result.st_mode)
+            ):
+                # The type of entry has changed from directory to something else.
+                # Normally, directories when they are deleted will hit the
+                # FileNotFound exception above, which will recursively cascade to
+                # delete their children. But if a file is recreated with the same
+                # name before a scan runs, it could leave orphaned children in
+                # the database. (They would be cleaned up when those child entries
+                # are scanned, though, so this is probably unnecessary)
+                scanlogger.info("No longer a directory: {}".format(self))
+                self.children.all().delete()
+
+            if not self.new and self.compare_stat_info(stat_result):
+                scanlogger.debug("No change to {}".format(self))
+                return
+
+            self.obj = None
+            self.new = False
+
+            self.update_stat_info(stat_result)
+
+            if stat.S_ISDIR(self.st_mode):
+
+                children = list(self.children.all())
+
+                # Check the directory entries against the database.
+                # We need to do a listdir to compare the entries in the database
+                # against the actual entries in the directory
                 try:
-                    with atomic():
-                        newentry = FSEntry.objects.using(self._state.db).create(
-                            path=newpath,
-                            parent=self,
-                            new=True,
-                        )
-                except IntegrityError:
-                    # This can happen if a new root is added to the database
-                    # that is an ancestor of an existing root. Scanning from
-                    # the new root will re-discover the existing root. In
-                    # this case, just re-parent the old root, merging the two
-                    # trees.
-                    newentry = FSEntry.objects.using(self._state.db).get(path=newpath)
-                    scanlogger.warning(
-                        "Trying to create path but already exists. "
-                        "Reparenting: {}".format(newentry))
-                    # If this isn't a root, something is really wrong with
-                    # our tree!
-                    assert newentry.parent_id is None
-                    newentry.parent = self
-                    newentry.save(update_fields=['parent'])
-                else:
-                    scanlogger.info("New path     : {}".format(newentry))
+                    entries = set(os.listdir(self.path))
+                except PermissionError:
+                    scanlogger.warning("Permission denied: {}".format(
+                        self))
+                    entries = set()
 
-            # Delete old entries
-            for child in children:
-                if child.name not in entries:
-                    scanlogger.info("deleting from dir: {}".format(
-                        child))
-                    child.delete()
+                # Create new entries
+                for newname in entries.difference(c.name for c in children):
+                    newpath = os.path.join(self.path, newname)
+                    try:
+                        with atomic(using=self._state.db):
+                            newentry = FSEntry.objects.using(self._state.db).create(
+                                path=newpath,
+                                parent=self,
+                                new=True,
+                            )
+                    except IntegrityError:
+                        # This can happen if a new root is added to the database
+                        # that is an ancestor of an existing root. Scanning from
+                        # the new root will re-discover the existing root. In
+                        # this case, just re-parent the old root, merging the two
+                        # trees.
+                        newentry = FSEntry.objects.using(self._state.db).get(path=newpath)
+                        scanlogger.warning(
+                            "Trying to create path but already exists. "
+                            "Reparenting: {}".format(newentry))
+                        # If this isn't a root, something is really wrong with
+                        # our tree!
+                        assert newentry.parent_id is None
+                        newentry.parent = self
+                        newentry.save(update_fields=['parent'])
+                    else:
+                        scanlogger.info("New path     : {}".format(newentry))
 
-        scanlogger.info("Entry updated: {}".format(self))
-        self.save()
-        self.invalidate()
-        return
+                # Delete old entries
+                for child in children:
+                    if child.name not in entries:
+                        scanlogger.info("deleting from dir: {}".format(
+                            child))
+                        child.delete()
+
+            scanlogger.info("Entry updated: {}".format(self))
+            self.save()
+            self.invalidate()
+            return
 
     def _open_file(self):
         """Opens this file for reading"""

@@ -56,8 +56,10 @@ class Repository:
     """
 
     def __init__(self, dbfile):
-        # Create the database connection and register it with Django
-        dbfile = os.path.abspath(dbfile)
+        # Create the database connection and register it with Django.
+        # In-memory databases are used in unit tests
+        if dbfile != ":memory:":
+            dbfile = os.path.abspath(dbfile)
         self.db = slugify(dbfile) # Something unique for this file
         config = {
             'ENGINE': 'backathon.sqlite3_backend',

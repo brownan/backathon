@@ -6,6 +6,8 @@ import pathlib
 from django.test import TestCase
 
 from backathon import models
+from backathon.repository import Repository
+
 
 class TestBase(TestCase):
     def setUp(self):
@@ -16,19 +18,36 @@ class TestBase(TestCase):
         self.backupdir = self.stack.enter_context(
             tempfile.TemporaryDirectory(),
         )
-        models.FSEntry.objects.create(path=self.backupdir)
-
         # Directory to store the data files
         self.datadir = self.stack.enter_context(
             tempfile.TemporaryDirectory(),
         )
 
-        # Configure the settings in the database
-        models.Setting.set("REPO_BACKEND", "local")
-        models.Setting.set("REPO_PATH", self.datadir)
+        # Create a repo object with an in-memory database, and configure it
+        self.repo = Repository(":memory:")
 
-        models.Setting.set("ENCRYPTION", "none")
-        models.Setting.set("COMPRESSION", "none")
+        self.repo.set_storage("local", {"base_dir": self.datadir})
+        self.repo.set_compression(False)
+        self.repo.set_encrypter("none", None)
+
+        # Shortcut for a few managers to prevent lots of typing in the unit
+        # tests
+        self.db = self.repo.db
+        self.fsentry = models.FSEntry.objects.using(self.db)
+        self.object = models.Object.objects.using(self.db)
+        self.snapshot = models.Snapshot.objects.using(self.db)
+
+        # Create the root of the backup set
+        self.fsentry.create(path=self.backupdir)
+
+    def tearDown(self):
+        # You can't "close" an in-memory database in Django, so instead we
+        # just delete it from the connection handler. The garbage collector
+        # will hopefully free the resources, but the important thing is we get a
+        # fresh database for each test
+        import django.db
+        del django.db.connections[self.repo.db]
+        del django.db.connections.databases[self.repo.db]
 
     def path(self, *args):
         return os.path.join(self.backupdir, *args)

@@ -4,66 +4,67 @@ import os
 import pathlib
 
 import umsgpack
-from django.test import TestCase
 
-from backathon import models, scan, backup, util, datastore
+from backathon import models, util
 from .base import TestBase
 
-class FSEntryTest(TestCase):
+class FSEntryTest(TestBase):
     """Tests some misc functionality of the FSEntry class"""
 
     def test_invalidate(self):
         """Tests that the FSEntry.invalidate() method works"""
-        o = models.Object.objects.create(objid=b"a")
+        o = models.Object.objects.using(self.repo.db).create(objid=b"a")
 
-        root = models.FSEntry.objects.create(
+        self.fsentry.all().delete()
+
+        root = self.fsentry.create(
             path="/1",
             obj=o,
         )
-        e1 = models.FSEntry.objects.create(
+        e1 = self.fsentry.create(
             path="/1/2",
             parent=root,
             obj=o,
         )
-        e2 = models.FSEntry.objects.create(
+        e2 = self.fsentry.create(
             path="/1/2/3",
             parent=e1,
             obj=o,
         )
-        e3 = models.FSEntry.objects.create(
+        e3 = self.fsentry.create(
             path="/1/2/3/4",
             parent=e2,
             obj=None,
         )
 
         self.assertListEqual(
-            list(models.FSEntry.objects.filter(obj__isnull=True)),
+            list(self.fsentry.filter(obj__isnull=True)),
             [e3],
         )
         self.assertSetEqual(
-            set(models.FSEntry.objects.filter(obj__isnull=False)),
+            set(self.fsentry.filter(obj__isnull=False)),
             {root,e1,e2},
         )
 
         e3.invalidate()
 
         self.assertEqual(
-            models.FSEntry.objects.filter(obj__isnull=True).count(),
+            self.fsentry.filter(obj__isnull=True).count(),
             4
         )
 
-class FSEntryScan(TestBase):
+class TestScan(TestBase):
     """Tests the scan functionality of the FSEntry class"""
 
     def test_scan(self):
         self.create_file("dir/file1", "file contents")
         self.create_file("dir2/file2", "another file contents")
-        scan.scan()
+        self.repo.scan()
         self.assertEqual(
             5,
-            models.FSEntry.objects.count()
+            self.fsentry.count()
         )
-        entries = models.FSEntry.objects.all()
+        entries = self.fsentry.all()
 
         names = set(e.name for e in entries)
         for name in ['file1', 'file2', 'dir', 'dir2']:
@@ -74,48 +75,48 @@ class FSEntryScan(TestBase):
 
     def test_deleted_file(self):
         file = self.create_file("dir/file1", "file contents")
-        scan.scan()
+        self.repo.scan()
         self.assertTrue(
-            models.FSEntry.objects.filter(path=os.fspath(file)).exists()
+            self.fsentry.filter(path=os.fspath(file)).exists()
         )
         file.unlink()
-        scan.scan()
+        self.repo.scan()
         self.assertFalse(
-            models.FSEntry.objects.filter(path=os.fspath(file)).exists()
+            self.fsentry.filter(path=os.fspath(file)).exists()
         )
 
     def test_deleted_dir(self):
         file = self.create_file("dir/file1", "file contents")
-        scan.scan()
+        self.repo.scan()
         file.unlink()
         file.parent.rmdir()
-        scan.scan()
+        self.repo.scan()
         self.assertFalse(
-            models.FSEntry.objects.filter(path=os.fspath(file.parent)).exists()
+            self.fsentry.filter(path=os.fspath(file.parent)).exists()
         )
         self.assertFalse(
-            models.FSEntry.objects.filter(path=os.fspath(file)).exists()
+            self.fsentry.filter(path=os.fspath(file)).exists()
         )
 
     def test_replace_dir_with_file(self):
         file = self.create_file("dir/file1", "file contents")
-        scan.scan()
+        self.repo.scan()
         file.unlink()
         file.parent.rmdir()
         file.parent.write_text("another  file contents")
         # Scan the parent first
-        models.FSEntry.objects.get(path=os.fspath(file.parent)).scan()
-        scan.scan()
+        self.fsentry.get(path=os.fspath(file.parent)).scan()
+        self.repo.scan()
         self._replace_dir_with_file_asserts(file)
 
     def _replace_dir_with_file_asserts(self, file):
         self.assertTrue(
-            models.FSEntry.objects.filter(path=os.fspath(file.parent)).exists()
+            self.fsentry.filter(path=os.fspath(file.parent)).exists()
         )
         self.assertFalse(
-            models.FSEntry.objects.filter(path=os.fspath(file)).exists()
+            self.fsentry.filter(path=os.fspath(file)).exists()
         )
-        entry = models.FSEntry.objects.get(
+        entry = self.fsentry.get(
             path=os.fspath(file.parent)
         )
         self.assertEqual(
@@ -128,26 +129,26 @@ class FSEntryScan(TestBase):
 
     def test_replace_dir_with_file_2(self):
         file = self.create_file("dir/file1", "file contents")
-        scan.scan()
+        self.repo.scan()
         file.unlink()
         file.parent.rmdir()
         file.parent.write_text("another  file contents")
         # Scan the file first
-        models.FSEntry.objects.get(path=os.fspath(file)).scan()
-        scan.scan()
+        self.fsentry.get(path=os.fspath(file)).scan()
+        self.repo.scan()
         self._replace_dir_with_file_asserts(file)
 
     def test_dir_no_permission(self):
         file = self.create_file("dir/file1", "file contents")
 
         file.parent.chmod(0o000)
-        scan.scan()
+        self.repo.scan()
 
         self.assertTrue(
-            models.FSEntry.objects.filter(path=os.fspath(file.parent)).exists()
+            self.fsentry.filter(path=os.fspath(file.parent)).exists()
         )
         self.assertFalse(
-            models.FSEntry.objects.filter(path=os.fspath(file)).exists()
+            self.fsentry.filter(path=os.fspath(file)).exists()
         )
 
         # Set permission back so the tests can be cleaned up
@@ -155,23 +156,22 @@ class FSEntryScan(TestBase):
 
     def test_root_merge(self):
         file = self.create_file("dir1/dir2/file", "file contents")
-        models.FSEntry.objects.create(path=os.fspath(file.parent))
+        self.fsentry.create(path=os.fspath(file.parent))
         self.assertEqual(
             2,
-            models.FSEntry.objects.filter(parent__isnull=True).count()
+            self.fsentry.filter(parent__isnull=True).count()
         )
-        scan.scan()
+        self.repo.scan()
         self.assertEqual(
             1,
-            models.FSEntry.objects.filter(parent__isnull=True).count()
+            self.fsentry.filter(parent__isnull=True).count()
         )
 
-class FSEntryBackup(TestBase):
+class TestBackup(TestBase):
     """Tests the backup functionality of the FSEntry class"""
 
     def setUp(self):
         super().setUp()
-        self.ds = datastore.default_datastore
 
     def _assert_file_obj(self, obj, contents):
         """Asserts that the given object is a file object with the given
@@ -185,21 +185,21 @@ class FSEntryBackup(TestBase):
 
         buf = bytearray(info['size'])
         for pos, chunkid in chunks:
-            chunk = models.Object.objects.get(objid=chunkid)
+            chunk = self.object.get(objid=chunkid)
             # Blob object should not have payloads
             self.assertIs(
                 chunk.payload,
                 None
             )
             chunkpayload = chunk.unpack_payload(
-                self.ds.get_object(chunk.objid)
+                self.repo.get_object(chunk.objid)
             )
             self.assertEqual("blob", next(chunkpayload))
             chunkcontents = next(chunkpayload)
             self.assertRaises(StopIteration, next,chunkpayload)
             buf[pos:pos+len(chunkcontents)] = chunkcontents
 
-        self.assertEqual(buf.decode("UTF-8"), contents)
+        self.assertEqual(buf.decode("utf-8"), contents)
 
     def _assert_dir(self, obj, contents):
         """Asserts that the given object is a dir object with the given
@@ -212,7 +212,7 @@ class FSEntryBackup(TestBase):
         self.assertRaises(StopIteration, next,payload)
 
         children_objs = {
-            name: models.Object.objects.get(objid=objid)
+            name: self.object.get(objid=objid)
             for name, objid in children
         }
         self._assert_objects(contents, children_objs)
@@ -297,11 +297,10 @@ class FSEntryBackup(TestBase):
         """Do a backup and then assert the objects actually get committed to
         the backing store"""
         self.create_file("dir/file1", "file contents")
-        scan.scan()
-        backup.backup()
-        ds = datastore.default_datastore
+        self.repo.scan()
+        self.repo.backup()
 
-        for obj in models.Object.objects.all():
+        for obj in self.object.all():
             # Assert that an object file exists in the backing store and is
             # named properly. In particular, make sure we're naming them with
             # the hex representation of the objid
@@ -314,7 +313,7 @@ class FSEntryBackup(TestBase):
             self.assertTrue(obj_filepath.is_file())
 
             cached_payload = obj.payload
-            remote_payload = ds.get_object(obj.objid)
+            remote_payload = self.repo.get_object(obj.objid)
 
             if cached_payload is None:
                 # Only blob type objects don't have a cached payload
