@@ -7,12 +7,13 @@ import zlib
 
 import django.core.files.storage
 import django.db
-from django.db.transaction import atomic
+from django.core.exceptions import ImproperlyConfigured
 from django.utils.functional import cached_property
 from django.utils.text import slugify
 
 import umsgpack
 
+from .util import atomic_immediate
 from . import models
 from . import util
 from .exceptions import CorruptedRepository
@@ -35,6 +36,7 @@ class Settings:
         return json.loads(value)
 
     def __setitem__(self, key, value):
+        value = json.dumps(value)
         models.Setting.set(key, value, using=self.alias)
 
 
@@ -106,7 +108,10 @@ class Repository:
 
     @cached_property
     def compression(self):
-        return self.settings['COMPRESSION_ENABLED']
+        try:
+            return self.settings['COMPRESSION_ENABLED']
+        except KeyError:
+            return False
 
     def set_compression(self, enabled):
         enabled = bool(enabled)
@@ -215,7 +220,7 @@ class Repository:
         view = payload.getbuffer()
         objid = self.encrypter.get_object_id(view)
 
-        with atomic():
+        with atomic_immediate():
             try:
                 obj_instance = models.Object.objects.using(self.db).get(
                     objid=objid
@@ -327,6 +332,8 @@ class Repository:
 
         The backup set is the set of files and directories starting at the
         root paths.
+
+        See more info in the backathon.scan module
         """
         from . import scan
         scan.scan(alias=self.db,
@@ -360,5 +367,42 @@ class Repository:
     def get_roots(self):
         return [
             entry.path for entry in
-            models.FSEntry.objects.using(self.db).filter(parent_isnull=True)
+            models.FSEntry.objects.using(self.db).filter(parent__isnull=True)
             ]
+
+    def backup(self, progress=None):
+        """Perform a backup
+
+        See documentation in the backathon.backup module
+
+        """
+        try:
+            _ = self.encrypter
+        except KeyError:
+            raise ImproperlyConfigured("You must configure the encryption "
+                                       "first")
+
+        try:
+            _ = self.storage
+        except KeyError:
+            raise ImproperlyConfigured("You must configure the storage "
+                                       "backend first")
+
+        from . import backup
+        backup.backup(self, progress)
+
+    def save_metadata(self):
+        """Updates the metadata file in the remote repository
+
+        Callers should call this after changing any parameters such as the
+        encryption settings. Having up to date metadata in the remote
+        repository is essential for recovering from a complete loss of the
+        local cache
+        """
+        data = {
+            "encryption": self.encrypter.get_public_params()
+        }
+        buf = io.BytesIO(
+            json.dumps(data).encode("utf-8")
+        )
+        self.storage.upload_file("backathon.json", buf)

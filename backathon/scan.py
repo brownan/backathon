@@ -1,7 +1,6 @@
-from django.db.transaction import atomic
 from django.db import connections
 
-from backathon.util import atomic_immediate
+from .util import atomic_immediate
 from . import models
 
 def scan(alias, progress=None, skip_existing=False):
@@ -137,7 +136,6 @@ def scan(alias, progress=None, skip_existing=False):
 
 
     # This seems like as good a time as any to do this.
-    cursor = connections[alias].cursor()
-    cursor.execute("ANALYZE fsentry")
-    cursor.close()
+    with connections[alias].cursor() as cursor:
+        cursor.execute("ANALYZE fsentry")
 

@@ -1,17 +1,23 @@
 from django.db.transaction import atomic
-from django.db import connection
+from django.db import connections
 from django.utils import timezone
-from tqdm import tqdm
 
 from . import models
-from .datastore import default_datastore
 
-def backup(progress_enable=False):
-    if models.FSEntry.objects.filter(new=True).exists():
+def backup(repo, progress=None):
+    """Perform a backup
+
+    This is usually called from Repository.backup()
+
+    :type repo: backathon.repository.Repository
+    :param progress: A callback function that provides status updates on the
+        scan
+    """
+    if models.FSEntry.objects.using(repo.db).filter(new=True).exists():
         # This happens when a new root is added but hasn't been scanned yet.
         raise RuntimeError("You need to run a scan first")
 
-    to_backup = models.FSEntry.objects.filter(obj__isnull=True)
+    to_backup = models.FSEntry.objects.using(repo.db).filter(obj__isnull=True)
 
     # The ready_to_backup set is the set of all nodes whose children have all
     # already been backed up. In other words, these are the entries that we
@@ -20,24 +26,19 @@ def backup(progress_enable=False):
         id__in=to_backup.exclude(parent__isnull=True).values("parent_id")
     )
 
-    if progress_enable:
-        progress = tqdm(total=to_backup.count(), unit="")
-    else:
-        progress = None
-
-    datastore = default_datastore
+    backup_total = to_backup.count()
+    backup_count = 0
 
     while to_backup.exists():
 
         ct = 0
-        for entry in ready_to_backup.iterator():
+        for entry in ready_to_backup.iterator(): # type: models.FSEntry
             ct += 1
-            assert isinstance(entry, models.FSEntry)
 
             # This sanity check is just making sure that our query works
             # correctly by only selecting entries that haven't been backed up
             # yet. Because we're modifying entries and iterating over a
-            # result set at the same time, SQLite may return row twice,
+            # result set at the same time, SQLite may return a row twice,
             # but since the modified rows don't match our query,
             # they shouldn't re-appear in this same query. However,
             # the SQLite documentation on isolation isn't clear on this. If I
@@ -50,7 +51,7 @@ def backup(progress_enable=False):
                 obj_buf, obj_children = next(iterator)
                 while True:
                     obj_buf, obj_children = iterator.send(
-                        datastore.push_object(obj_buf, obj_children)
+                        repo.push_object(obj_buf, obj_children)
                     )
             except StopIteration:
                 pass
@@ -60,8 +61,9 @@ def backup(progress_enable=False):
             # causing an infinite loop
             assert entry.obj_id is not None or entry.id is None
 
+            backup_count += 1
             if progress is not None:
-                progress.update(1)
+                progress(backup_count, backup_total)
 
         # Sanity check: if we entered the outer loop but the inner loop's
         # query didn't select anything, then we're not making progress and
@@ -73,18 +75,17 @@ def backup(progress_enable=False):
 
     now = timezone.now()
 
-    for root in models.FSEntry.objects.filter(
+    for root in models.FSEntry.objects.using(repo.db).filter(
         parent__isnull=True
     ):
         assert root.obj_id is not None
         with atomic():
-            ss = models.Snapshot.objects.create(
+            ss = models.Snapshot.objects.using(repo.db).create(
                 path=root.path,
                 root_id=root.obj_id,
                 date=now,
             )
-            datastore.put_snapshot(ss)
+            repo.put_snapshot(ss)
 
-    cursor = connection.cursor()
-    cursor.execute("ANALYZE")
-    cursor.close()
+    with connections[repo.db].cursor() as cursor:
+        cursor.execute("ANALYZE")

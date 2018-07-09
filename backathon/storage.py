@@ -61,7 +61,7 @@ class FilesystemStorage(StorageBase):
     def upload_file(self, name, content):
         path = self.base_dir / name
 
-        path.parent.mkdir()
+        os.makedirs(path.parent, exist_ok=True)
         with path.open(mode="wb") as fileout:
             shutil.copyfileobj(content, fileout)
 
