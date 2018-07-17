@@ -561,38 +561,53 @@ class FSEntry(models.Model):
             self.delete()
             return
 
-        # If this entry is significantly different from what it looked like
-        # when it was scanned, then we shouldn't try to back it up. The logic
-        # for managing child references and such lives in the scan() method,
-        # so delete this entry and let it get re-created next scan.
-        if stat.S_IFMT(self.st_mode) != stat.S_IFMT(stat_result.st_mode):
-            scanlogger.warning("File changed type since scan, deleting: "
-                               "{}".format(self))
-            self.delete()
-            return
-
         self.update_stat_info(stat_result)
 
         if stat.S_ISREG(self.st_mode):
             # File
-            chunks = []
-            childobjs = []
 
+            inode_buf = io.BytesIO()
+            umsgpack.pack("inode", inode_buf)
+            info = dict(
+                size=stat_result.st_size,
+                inode=stat_result.st_ino,
+                uid=stat_result.st_uid,
+                gid=stat_result.st_gid,
+                mode=stat_result.st_mode,
+                mtime=stat_result.st_mtime_ns,
+                atime=stat_result.st_atime_ns,
+            )
+            umsgpack.pack(info, inode_buf)
+
+            childobjs = []
+            chunks = []
             try:
                 with self._open_file() as fobj:
-                    for pos, chunk in chunker.DefaultChunker(fobj):
-                        buf = io.BytesIO()
-                        umsgpack.pack("blob", buf)
-                        umsgpack.pack(chunk, buf)
-                        buf.seek(0)
-                        chunk_obj = yield (buf, [])
-                        childobjs.append(chunk_obj)
-                        chunks.append((pos, chunk_obj.objid))
+                    if stat_result.st_size < 2**21:
+                        # If the file size is below this threshold, put the contents
+                        # as a blob right in the inode object. Don't bother with
+                        # separate blob objects
+                        umsgpack.pack(("immediate", fobj.read()), inode_buf)
+
+                    else:
+                        # Break the file's contents into chunks and upload
+                        # each chunk individually
+                        for pos, chunk in chunker.FixedChunker(fobj):
+                            buf = io.BytesIO()
+                            umsgpack.pack("blob", buf)
+                            umsgpack.pack(chunk, buf)
+                            buf.seek(0)
+                            chunk_obj = yield (buf, [])
+                            childobjs.append(chunk_obj)
+                            chunks.append((pos, chunk_obj.objid))
+
+                        umsgpack.pack(("chunklist", chunks), inode_buf)
+
             except FileNotFoundError:
                 scanlogger.info("File disappeared: {}".format(self))
                 self.delete()
                 return
-            except OSError as e:
+            except OSError:
                 # This happens with permission denied errors
                 scanlogger.exception("Error in system call when reading file "
                                      "{}".format(self))
@@ -606,23 +621,9 @@ class FSEntry(models.Model):
                 self.delete()
                 return
 
-            # Now construct the payload for the inode
-            buf = io.BytesIO()
-            umsgpack.pack("inode", buf)
-            info = dict(
-                size=stat_result.st_size,
-                inode=stat_result.st_ino,
-                uid=stat_result.st_uid,
-                gid=stat_result.st_gid,
-                mode=stat_result.st_mode,
-                mtime=stat_result.st_mtime_ns,
-                atime=stat_result.st_atime_ns,
-            )
-            umsgpack.pack(info, buf)
-            umsgpack.pack(chunks, buf)
-            buf.seek(0)
+            inode_buf.seek(0)
 
-            self.obj = yield (buf, childobjs)
+            self.obj = yield (inode_buf, childobjs)
             scanlogger.info("Backed up file into {} objects: {}".format(
                 len(chunks)+1,
                 self

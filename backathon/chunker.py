@@ -20,4 +20,3 @@ class FixedChunker:
                 return
             yield pos, data
 
-DefaultChunker = FixedChunker
