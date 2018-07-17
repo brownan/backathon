@@ -519,7 +519,7 @@ class FSEntry(models.Model):
             pass
         return os.fdopen(os.open(self.path, flags), "rb")
 
-    def backup(self):
+    def backup(self, inline_threshold=2**21):
         """Back up this entry
 
         Reads this entry in from the file system, creates one or more object
@@ -583,7 +583,7 @@ class FSEntry(models.Model):
             chunks = []
             try:
                 with self._open_file() as fobj:
-                    if stat_result.st_size < 2**21:
+                    if stat_result.st_size < inline_threshold:
                         # If the file size is below this threshold, put the contents
                         # as a blob right in the inode object. Don't bother with
                         # separate blob objects

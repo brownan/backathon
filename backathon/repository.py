@@ -35,10 +35,37 @@ class Settings:
         value = models.Setting.get(item, using=self.alias)
         return json.loads(value)
 
+    def get(self, item, default=None):
+        value = models.Setting.get(item, using=self.alias, default=default)
+        return json.loads(value)
+
     def __setitem__(self, key, value):
         value = json.dumps(value)
         models.Setting.set(key, value, using=self.alias)
 
+class SimpleSetting:
+    """A descriptor class that is used to define a getter+setter on the
+    Repository class that reads/writes a simple (immutable) value from the
+    database
+
+    """
+    def __init__(self, name, default=None):
+        self.name = name
+        self.default = default
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        try:
+            return instance.__dict__[self.name]
+        except KeyError:
+            value = instance.settings.get(self.name, self.default)
+            instance.__dict__[self.name] = value
+            return value
+
+    def __set__(self, instance, value):
+        instance.__dict__[self.name] = value
+        instance.settings[self.name] = value
 
 ###########################
 ###########################
@@ -83,6 +110,7 @@ class Repository:
     # The next set of properties and methods manipulate the utility classes
     # that are used by this class
     ##########################
+    backup_inline_threshold = SimpleSetting("BACKUP_INLINE_THRESHOLD", 2**21)
 
     @cached_property
     def encrypter(self):

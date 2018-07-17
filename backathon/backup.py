@@ -7,7 +7,9 @@ from . import models
 def backup(repo, progress=None):
     """Perform a backup
 
-    This is usually called from Repository.backup()
+    This is usually called from Repository.backup() and is tightly integrated
+    with the Repository class. It lives in its own module for organizational
+    reasons.
 
     :type repo: backathon.repository.Repository
     :param progress: A callback function that provides status updates on the
@@ -46,7 +48,10 @@ def backup(repo, progress=None):
             # thing to do is to ignore the entry and move on.
             assert entry.obj_id is None
 
-            iterator = entry.backup()
+            iterator = entry.backup(
+                inline_threshold=repo.backup_inline_threshold,
+            )
+
             try:
                 obj_buf, obj_children = next(iterator)
                 while True:

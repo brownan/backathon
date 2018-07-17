@@ -6,6 +6,10 @@ from . import models
 def scan(alias, progress=None, skip_existing=False):
     """Scans all FSEntry objects for changes
 
+    This is usually called from Repository.scan() and is tightly integrated
+    with the Repository class. It lives in its own module for organizational
+    reasons.
+
     The scan works in multiple passes. The first pass calls FSEntry.scan() on
     each existing FSEntry object in the database. During the scan, new FSEntries
     are added to the database for new directory entries found. Subsequent
