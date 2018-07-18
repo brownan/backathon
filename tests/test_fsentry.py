@@ -180,7 +180,9 @@ class TestBackup(TestBase):
         self.assertEqual("inode", next(payload))
 
         info = next(payload)
-        chunks = next(payload)
+        datatype, chunks = next(payload)
+        # No inline files; the base class set the chunk threshold to 0
+        self.assertEqual(datatype, "chunklist")
         self.assertRaises(StopIteration, next,payload)
 
         buf = bytearray(info['size'])
@@ -278,8 +280,8 @@ class TestBackup(TestBase):
         test does two backups, then it should provide two structures
         describing the contents of each backup.
         """
-        backup_dates = models.Snapshot.objects.distinct().order_by(
-            "date").values_list("date", flat=True)
+        backup_dates = self.snapshot.all().distinct().order_by("date")\
+            .values_list("date", flat=True)
 
         self.assertEqual(
             len(structures),
@@ -289,7 +291,7 @@ class TestBackup(TestBase):
         for structure, date in zip(structures, backup_dates):
             roots = {
                 os.fsencode(s.path): s.root
-                for s in models.Snapshot.objects.filter(date=date)
+                for s in self.snapshot.filter(date=date)
             }
             self._assert_objects(structure, roots)
 
@@ -330,19 +332,19 @@ class TestBackup(TestBase):
     def test_backup(self):
         self.create_file("dir/file1", "file contents")
         self.create_file("dir/file2", "file contents 2")
-        scan.scan()
+        self.repo.scan()
         self.assertEqual(
             4,
-            models.FSEntry.objects.count()
+            self.fsentry.count()
         )
-        backup.backup()
+        self.repo.backup()
         self.assertTrue(
             all(entry.obj is not None for entry in
-                models.FSEntry.objects.all())
+                self.fsentry.all())
         )
         self.assertEqual(
             6,
-            models.Object.objects.count()
+            self.object.count()
         )
 
         self.assert_backupsets({
@@ -357,8 +359,8 @@ class TestBackup(TestBase):
     def test_backup_identical_files(self):
         self.create_file("file1", "file contents")
         self.create_file("file2", "file contents")
-        scan.scan()
-        backup.backup()
+        self.repo.scan()
+        self.repo.backup()
         self.assert_backupsets({
             self.backupdir: {
                 'file1': 'file contents',
@@ -368,7 +370,7 @@ class TestBackup(TestBase):
         # Inode objects differ, so 4 total objects uploaded
         self.assertEqual(
             4,
-            models.Object.objects.count()
+            self.object.count()
         )
 
     def test_backup_hardlinked_files(self):
@@ -377,8 +379,8 @@ class TestBackup(TestBase):
             file,
             file.parent / "file2"
         )
-        scan.scan()
-        backup.backup()
+        self.repo.scan()
+        self.repo.backup()
         self.assert_backupsets({
             self.backupdir: {
                 'file1': 'file contents',
@@ -388,51 +390,67 @@ class TestBackup(TestBase):
         # The inode objects should be identical, so 3 total objects uploaded
         self.assertEqual(
             3,
-            models.Object.objects.count()
+            self.object.count()
         )
 
     def test_file_disappeared(self):
         file = self.create_file("dir/file1", "file contents")
-        scan.scan()
+        self.repo.scan()
         self.assertEqual(
             3,
-            models.FSEntry.objects.count()
+            self.fsentry.count()
         )
         file.unlink()
-        backup.backup()
+        self.repo.backup()
         self.assertEqual(
             2,
-            models.FSEntry.objects.count()
+            self.fsentry.count()
         )
         self.assertEqual(
             2,
-            models.Object.objects.count(),
+            self.object.count(),
         )
         self.assert_backupsets({
             self.backupdir: {'dir': {}}
         })
 
-    def test_file_type_change(self):
+    def test_file_changes_to_dir(self):
+        """Tests if a file changes to a directory after scan before backup
+
+        Currently the behavior is to back up the directory and update the
+        fsentry in the process. The old behavior was to delete the entry and
+        not back it up, but that turned out not to be necessary.
+        """
         file = self.create_file("dir/file1", "file contents")
-        scan.scan()
+        self.repo.scan()
         self.assertEqual(
             3,
-            models.FSEntry.objects.count()
+            self.fsentry.count()
         )
+        self.assertTrue(
+            stat.S_ISREG(
+                self.fsentry.get(path=str(file)).st_mode
+            )
+        )
+
         file.unlink()
         file.mkdir()
-        backup.backup()
+        self.repo.backup()
+
         self.assertEqual(
-            2,
-            models.FSEntry.objects.count()
+            3,
+            self.fsentry.count()
         )
+        self.assertTrue(
+            stat.S_ISDIR(
+                self.fsentry.get(path=str(file)).st_mode
+            )
+        )
+
         self.assertEqual(
-            2,
-            models.Object.objects.count(),
+            3,
+            self.object.count(),
         )
-        self.assert_backupsets({
-            self.backupdir: {'dir': {}}
-        })
 
     def test_file_disappeared_2(self):
         # We want to delete the file after the initial lstat() call,
@@ -440,10 +458,10 @@ class TestBackup(TestBase):
         # race condition. So we patch os.lstat to delete the file right after
         # the lstat call.
         file = self.create_file("dir/file1", "file contents")
-        scan.scan()
+        self.repo.scan()
         self.assertEqual(
             3,
-            models.FSEntry.objects.count()
+            self.fsentry.count()
         )
 
         import os
@@ -460,14 +478,14 @@ class TestBackup(TestBase):
             )
         )
 
-        backup.backup()
+        self.repo.backup()
         self.assertEqual(
             2,
-            models.FSEntry.objects.count()
+            self.fsentry.count()
         )
         self.assertEqual(
             2,
-            models.Object.objects.count(),
+            self.object.count(),
         )
         self.assert_backupsets({
             self.backupdir: {'dir': {}}
@@ -475,22 +493,22 @@ class TestBackup(TestBase):
 
     def test_permission_denied_file(self):
         file = self.create_file("dir/file1", "file contents")
-        scan.scan()
+        self.repo.scan()
         self.assertEqual(
             3,
-            models.FSEntry.objects.count()
+            self.fsentry.count()
         )
 
         file.chmod(0o000)
 
-        backup.backup()
+        self.repo.backup()
         self.assertEqual(
             2,
-            models.FSEntry.objects.count()
+            self.fsentry.count()
         )
         self.assertEqual(
             2,
-            models.Object.objects.count(),
+            self.object.count(),
         )
         self.assert_backupsets({
             self.backupdir: {'dir': {}}
@@ -500,8 +518,8 @@ class TestBackup(TestBase):
         """Tests that a file with invalid utf-8 in the name can be backed up"""
         name = os.fsdecode(b"\xff\xffhello\xff\xff")
         self.create_file(name, "file contents")
-        scan.scan()
-        backup.backup()
+        self.repo.scan()
+        self.repo.backup()
 
         self.assert_backupsets({
             self.backupdir: {name: "file contents"}

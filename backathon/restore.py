@@ -5,7 +5,6 @@ import os
 from umsgpack import UnpackException
 
 from . import models
-from .datastore import default_datastore
 from .exceptions import CorruptedRepository
 
 logger = logging.getLogger("backathon.restore")

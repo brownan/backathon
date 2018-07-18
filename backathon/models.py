@@ -159,7 +159,7 @@ class Object(models.Model):
             buf.close()
 
     @classmethod
-    def collect_garbage(cls):
+    def collect_garbage(cls, using):
         """Yields garbage objects from the Object table.
 
         Callers should take care to atomically delete objects in the remote
@@ -189,7 +189,7 @@ class Object(models.Model):
         # row on the first pass, which is a lot more IO and would probably be
         # slower.
 
-        num_objects = cls.objects.all().count()
+        num_objects = cls.objects.using(using).all().count()
 
         # m - number of bits in the filter. Depends on num_objects
         # k - number of hash functions needed. Should be 4 for p=0.05
@@ -219,7 +219,7 @@ class Object(models.Model):
             INNER JOIN reachable ON reachable.id=parent_id
         ) SELECT id FROM reachable
         """
-        with connection.cursor() as c:
+        with connections[using].cursor() as c:
             c.execute(query)
             for row in c:
                 objid_int = int.from_bytes(row[0], 'little')
@@ -238,7 +238,7 @@ class Object(models.Model):
 
         # Now we can iterate over all objects. If an object does not appear
         # in the bloom filter, we can guarantee it's not reachable.
-        for obj in cls.objects.all().iterator():
+        for obj in cls.objects.using(using).all().iterator():
             objid = int.from_bytes(obj.objid, 'little')
 
             if not all(hash_match(h, objid) for h in hashes):

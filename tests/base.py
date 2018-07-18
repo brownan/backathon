@@ -29,6 +29,7 @@ class TestBase(TestCase):
         self.repo.set_storage("local", {"base_dir": self.datadir})
         self.repo.set_compression(False)
         self.repo.set_encrypter("none", None)
+        self.repo.backup_inline_threshold = 0
 
         # Shortcut for a few managers to prevent lots of typing in the unit
         # tests
@@ -36,6 +37,7 @@ class TestBase(TestCase):
         self.fsentry = models.FSEntry.objects.using(self.db)
         self.object = models.Object.objects.using(self.db)
         self.snapshot = models.Snapshot.objects.using(self.db)
+        self.obj_relation = models.ObjectRelation.objects.using(self.db)
 
         # Create the root of the backup set
         self.fsentry.create(path=self.backupdir)

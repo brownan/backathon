@@ -7,8 +7,9 @@ from django.db.transaction import atomic
 from django.test import TransactionTestCase
 
 from backathon import models
+from .base import TestBase
 
-class TestObject(TransactionTestCase):
+class TestObject(TestBase, TransactionTestCase):
     """Tests various functionality of the Object class"""
 
     def _insert_objects(self, *objects):
@@ -22,14 +23,14 @@ class TestObject(TransactionTestCase):
         # Since SQLite has deferrable foreign key constraints, we can insert
         # references to rows that don't exist yet as long as they exist when
         # the transaction is committed.
-        with atomic():
+        with atomic(using=self.db):
             for objid, children in objects:
                 if isinstance(objid, str):
                     objid = objid.encode("ASCII")
-                obj = models.Object.objects.create(
+                obj = self.object.create(
                     objid=objid,
                 )
-                models.ObjectRelation.objects.bulk_create([
+                self.obj_relation.bulk_create([
                     models.ObjectRelation(
                         parent=obj,
                         child_id=c.encode("ASCII") if isinstance(c,str) else c
@@ -42,7 +43,7 @@ class TestObject(TransactionTestCase):
 
         """
         if roots is None:
-            roots = models.Object.objects.filter(
+            roots = self.object.filter(
                 parents__isnull=True,
             )
 
@@ -93,16 +94,14 @@ class TestObject(TransactionTestCase):
             ("I", ["F"]),
             ("J", []),
         )
-        models.Snapshot.objects.create(root_id=b"A",
-                                       date=datetime.datetime(2018, 1,1,
-                                                              tzinfo=pytz.UTC))
-        models.Snapshot.objects.create(root_id=b"G",
-                                       date=datetime.datetime(2018, 1,1,
-                                                              tzinfo=pytz.UTC))
+        self.snapshot.create(root_id=b"A",
+                             date=datetime.datetime(2018, 1,1, tzinfo=pytz.UTC))
+        self.snapshot.create(root_id=b"G",
+                             date=datetime.datetime(2018, 1,1, tzinfo=pytz.UTC))
 
         self.assertEqual(
             10,
-            models.Object.objects.count()
+            self.object.count()
         )
         self.assert_objects({
             'A': {
@@ -126,14 +125,14 @@ class TestObject(TransactionTestCase):
 
         # No garbage expected yet
         self.assertSetEqual(
-            set(models.Object.collect_garbage()),
+            set(models.Object.collect_garbage(using=self.db)),
             set(),
         )
 
         # Remove snapshot A
-        models.Snapshot.objects.filter(root_id=b"A").delete()
+        self.snapshot.filter(root_id=b"A").delete()
 
-        garbage = list(models.Object.collect_garbage())
+        garbage = list(models.Object.collect_garbage(using=self.db))
         # Garbage collection is stochastic, but should never collect
         # non-garbage
         self.assertTrue(
@@ -162,39 +161,37 @@ class TestObject(TransactionTestCase):
     def test_collect_garbage_2(self):
         N = 100
         for root in ["A", "B"]:
-            obj = models.Object.objects.create(
+            obj = self.object.create(
                 objid="root_{}".format(root).encode("ASCII")
             )
             for i in range(N):
-                obj2 = models.Object.objects.create(
+                obj2 = self.object.create(
                     objid="obj_{}_{}".format(root,i).encode("ASCII")
                 )
-                models.ObjectRelation.objects.create(
+                self.obj_relation.create(
                     parent=obj,
                     child=obj2
                 )
                 obj = obj2
 
 
-        models.Snapshot.objects.create(root_id=b"root_A",
-                                       date=datetime.datetime(2018, 1,1,
-                                                              tzinfo=pytz.UTC))
-        models.Snapshot.objects.create(root_id=b"root_B",
-                                       date=datetime.datetime(2018, 1,1,
-                                                              tzinfo=pytz.UTC))
+        self.snapshot.create(root_id=b"root_A",
+                             date=datetime.datetime(2018, 1,1, tzinfo=pytz.UTC))
+        self.snapshot.create(root_id=b"root_B",
+                             date=datetime.datetime(2018, 1,1, tzinfo=pytz.UTC))
 
         self.assertEqual(
             N*2 + 2,
-            models.Object.objects.count(),
+            self.object.count(),
         )
-        garbage = list(models.Object.collect_garbage())
+        garbage = list(models.Object.collect_garbage(self.db))
         self.assertListEqual(
             [],
             garbage
         )
 
-        models.Snapshot.objects.get(root_id=b"root_B").delete()
-        garbage = list(models.Object.collect_garbage())
+        self.snapshot.get(root_id=b"root_B").delete()
+        garbage = list(models.Object.collect_garbage(self.db))
         self.assertLessEqual(
             len(garbage),
             N+1,
