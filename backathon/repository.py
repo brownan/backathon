@@ -436,3 +436,13 @@ class Repository:
             json.dumps(data).encode("utf-8")
         )
         self.storage.upload_file("backathon.json", buf)
+
+    def restore(self, obj, path, password):
+        """Restores the given object to the given path
+
+        See docstring on the restore.restore_item() function for more details.
+        """
+        key = self.encrypter.get_decryption_key(password)
+
+        from . import restore
+        restore.restore_item(self, obj, path, key)

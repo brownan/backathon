@@ -40,7 +40,7 @@ def pathstr(p):
     """Returns the path string suitable for printing or logging"""
     return os.fsencode(str(p)).decode("UTF-8", errors="replace")
 
-def restore_item(obj, path, key=None):
+def restore_item(repo, obj, path, key=None):
     """Restore the given object to the given path
 
     The last component of path is the item we're restoring. If it
@@ -48,6 +48,11 @@ def restore_item(obj, path, key=None):
     restored according to the obj's properties. If this is a tree object,
     all entries within it are also restored recursively.
 
+    This is usually called from Repository.restore() and is tightly integrated
+    with the Repository class. It lives in its own module for organizational
+    reasons.
+
+    :type repo: backathon.repository.Repository
     :type obj: models.Object
     :type path: str|pathlib.Path
     :param key: The key to decrypt files if decryption was enabled
@@ -78,7 +83,7 @@ def restore_item(obj, path, key=None):
     try:
         obj_type = next(payload_items)
         obj_info = next(payload_items)
-        obj_contents = next(payload_items)
+        obj_payload_type, obj_contents = next(payload_items)
     except UnpackException:
         logger.error("Can't restore {}: Object {} has invalid cached "
                      "data. Rebuilding the local cache may fix this "
@@ -96,42 +101,49 @@ def restore_item(obj, path, key=None):
 
         try:
             with path.open("wb") as fileout:
-                for pos, chunk_id in obj_contents:
+                if obj_payload_type == "chunklist":
+                    for pos, chunk_id in obj_contents:
 
-                    try:
-                        blob_payload = models.Object.unpack_payload(
-                            default_datastore.get_object(chunk_id, key)
-                        )
-                    except CorruptedRepository as e:
-                        logger.error("Could not restore chunk of {} at byte {}: "
-                                     "{}".format(
-                            pathstr(path), pos, e
-                        ))
-                        continue
-
-                    try:
-                        blob_type = next(blob_payload)
-                        blob_contents = next(blob_payload)
-                    except UnpackException:
-                        logger.error(
-                            "Could not restore chunk of {} at byte {}: "
-                            "invalid or corrupted data".format(
-                                pathstr(path), pos
+                        try:
+                            blob_payload = models.Object.unpack_payload(
+                                repo.get_object(chunk_id, key)
                             )
-                        )
-                        continue
+                        except CorruptedRepository as e:
+                            logger.error("Could not restore chunk of {} at byte {}: "
+                                         "{}".format(
+                                pathstr(path), pos, e
+                            ))
+                            continue
 
-                    if blob_type != "blob":
-                        logger.error(
-                            "Could not restore chunk of {} at byte {}: object of "
-                            "type blob expected".format(
-                                pathstr(path), pos
+                        try:
+                            blob_type = next(blob_payload)
+                            blob_contents = next(blob_payload)
+                        except UnpackException:
+                            logger.error(
+                                "Could not restore chunk of {} at byte {}: "
+                                "invalid or corrupted data".format(
+                                    pathstr(path), pos
+                                )
                             )
-                        )
-                        continue
+                            continue
 
-                    fileout.seek(pos)
-                    fileout.write(blob_contents)
+                        if blob_type != "blob":
+                            logger.error(
+                                "Could not restore chunk of {} at byte {}: object of "
+                                "type blob expected".format(
+                                    pathstr(path), pos
+                                )
+                            )
+                            continue
+
+                        fileout.seek(pos)
+                        fileout.write(blob_contents)
+                elif obj_payload_type == "immediate":
+                    assert isinstance(obj_contents, bytes)
+                    fileout.write(obj_contents)
+
+                else:
+                    raise AssertionError("Invalid inode payload type")
 
         except OSError as e:
             logger.error("Error writing {}: {}".format(
