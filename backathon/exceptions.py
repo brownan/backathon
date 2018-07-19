@@ -8,3 +8,6 @@ class CorruptedRepository(Exception):
     """
     pass
 
+
+class DependencyError(Exception):
+    pass
