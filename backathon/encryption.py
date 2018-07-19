@@ -285,4 +285,4 @@ class NaclSealedBox(BaseEncryption):
         # interactions between the Nacl SealedBox routines and hmac-sha256.
         # If someone is really worried about this, we could generate some
         # additional bytes from the KDF for the HMAC key.
-        hmac.new(bytes(self.pubkey), msg=content, digestmod=hashlib.sha256)
+        hmac.new(bytes(self.pubkey), msg=content, digestmod=hashlib.sha256).digest()
