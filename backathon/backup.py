@@ -108,7 +108,7 @@ def backup(repo, progress=None):
         cursor.execute("ANALYZE")
 
 def _backup_iterator(fsentry, inline_threshold=2 ** 21):
-    """Back up and FSEntry object
+    """Back up an FSEntry object
 
     Reads this entry in from the file system, creates one or more object
     payloads, and yields them to the caller for uploading to the backing

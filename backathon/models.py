@@ -1,4 +1,3 @@
-import io
 import os
 import os.path
 import stat
@@ -12,10 +11,8 @@ from django.db import models, IntegrityError
 from django.db.transaction import atomic
 from django.db import connections
 
-from .exceptions import DependencyError
 from .util import atomic_immediate
 from .fields import PathField
-from . import chunker
 from . import util
 
 scanlogger = logging.getLogger("backathon.scan")
