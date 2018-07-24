@@ -135,7 +135,7 @@ class NullEncryption(BaseEncryption):
     password_required = False
 
     @classmethod
-    def init_new(cls, password):
+    def init_new(cls, password=None):
         return cls()
 
     @classmethod
@@ -166,6 +166,9 @@ class NullEncryption(BaseEncryption):
 
 class NaclSealedBox(BaseEncryption):
     password_required = True
+
+    OPSLIMIT = nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE
+    MEMLIMIT = nacl.pwhash.argon2id.MEMLIMIT_SENSITIVE
 
     def __init__(self, salt, ops, mem, pubkey, enc_privkey):
         self.salt = salt # type: bytes
@@ -203,8 +206,8 @@ class NaclSealedBox(BaseEncryption):
     def init_new(cls, password):
         self = cls(
             salt=nacl.utils.random(nacl.pwhash.argon2id.SALTBYTES),
-            ops=nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE,
-            mem=nacl.pwhash.argon2id.MEMLIMIT_SENSITIVE,
+            ops=cls.OPSLIMIT,
+            mem=cls.MEMLIMIT,
             pubkey=None,
             enc_privkey=None,
         )
@@ -220,6 +223,8 @@ class NaclSealedBox(BaseEncryption):
         self.enc_privkey = nacl.secret.SecretBox(
             symmetric_key
         ).encrypt(bytes(key))
+
+        return self
 
     @classmethod
     def init_from_private(cls, params):
@@ -263,10 +268,11 @@ class NaclSealedBox(BaseEncryption):
         }
 
     def encrypt_bytes(self, plaintext):
-        # Note: for efficiency we don't call bytes() on the plaintext input,
-        # but pynacl currently cannot encrypt other byte-like objects such as
-        # memoryview objects. This is not a technical restriction as far as I
-        # can tell. Just a bug.
+        # Note: pynacl currently cannot encrypt byte-like objects like
+        # memoryviews, so we must read it into a proper bytes object. This is
+        # not a technical restriction as far as I can tell, just a bug.
+        if isinstance(plaintext, memoryview):
+            plaintext = bytes(plaintext)
         return nacl.public.SealedBox(self.pubkey).encrypt(plaintext)
 
     def get_decryption_key(self, password):
@@ -285,4 +291,5 @@ class NaclSealedBox(BaseEncryption):
         # interactions between the Nacl SealedBox routines and hmac-sha256.
         # If someone is really worried about this, we could generate some
         # additional bytes from the KDF for the HMAC key.
-        hmac.new(bytes(self.pubkey), msg=content, digestmod=hashlib.sha256).digest()
+        h = hmac.new(bytes(self.pubkey), msg=content, digestmod=hashlib.sha256)
+        return h.digest()

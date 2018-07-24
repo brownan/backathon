@@ -125,16 +125,24 @@ class Repository:
 
         return cls.init_from_private(settings)
 
-    def set_encrypter(self, cls_name, settings):
-        # Save new settings
+    def set_encrypter(self, encrypter):
+        """Sets this repo's encrypter instance
+
+        Saves the encrypter settings in the repo metadata
+
+        :type encrypter: encryption.BaseEncryption
+        """
+        cls_name = {
+            encryption.NullEncryption: "none",
+            encryption.NaclSealedBox: "nacl",
+        }[type(encrypter)]
+        settings = encrypter.get_private_params()
+
         self.settings['ENCRYPTION_SETTINGS'] = {
             'class': cls_name,
-            'settings': settings
+            'settings': settings,
         }
-
-        # Re-initialize the encrypter object
-        self.__dict__.pop("encrypter", None)
-        return self.encrypter
+        self.__dict__["encrypter"] = encrypter
 
     @cached_property
     def compression(self):

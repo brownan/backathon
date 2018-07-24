@@ -3,12 +3,12 @@ import pathlib
 import logging
 import stat
 import os
-import unittest
+import unittest.mock
 import hashlib
 
-from django.db import connection
+from django.db import connections
 
-from backathon import scan, backup, models, restore
+from backathon import models
 from .base import TestBase
 
 class AssertionHandler(logging.Handler):
@@ -27,7 +27,7 @@ class TestRestore(TestBase):
 
     """
     # Set by subclasses that test encryption
-    key = None
+    password = None
 
     def setUp(self):
         super().setUp()
@@ -53,12 +53,12 @@ class TestRestore(TestBase):
     def test_simple_restore(self):
         self.create_file("file1", "contents1")
         self.create_file("dir/file2", "contents2")
-        scan.scan()
-        backup.backup()
+        self.repo.scan()
+        self.repo.backup()
 
-        ss = models.Snapshot.objects.get()
+        ss = self.snapshot.get()
 
-        restore.restore_item(ss.root, self.restoredir, self.key)
+        self.repo.restore(ss.root, self.restoredir, self.password)
 
         self.assert_restored_file("file1", "contents1")
         self.assert_restored_file("dir/file2", "contents2")
@@ -67,10 +67,10 @@ class TestRestore(TestBase):
         file_a = self.create_file("file1", "contents")
         file_a.chmod(0o777)
 
-        scan.scan()
-        backup.backup()
-        ss = models.Snapshot.objects.get()
-        restore.restore_item(ss.root, self.restoredir, self.key)
+        self.repo.scan()
+        self.repo.backup()
+        ss = self.snapshot.get()
+        self.repo.restore(ss.root, self.restoredir, self.password)
 
         file_b = pathlib.Path(self.restoredir, "file1")
         stat_result = file_b.stat()
@@ -86,10 +86,10 @@ class TestRestore(TestBase):
         except PermissionError:
             raise unittest.SkipTest("Process doesn't have chown permission")
 
-        scan.scan()
-        backup.backup()
-        ss = models.Snapshot.objects.get()
-        restore.restore_item(ss.root, self.restoredir, self.key)
+        self.repo.scan()
+        self.repo.backup()
+        ss = self.snapshot.get()
+        self.repo.restore(ss.root, self.restoredir, self.password)
 
         file_b = pathlib.Path(self.restoredir, "file1")
         stat_result = file_b.stat()
@@ -106,10 +106,10 @@ class TestRestore(TestBase):
         file_a = self.create_file("file1", "contents")
         os.utime(file_a, ns=(123456789, 987654321))
 
-        scan.scan()
-        backup.backup()
-        ss = models.Snapshot.objects.get()
-        restore.restore_item(ss.root, self.restoredir, self.key)
+        self.repo.scan()
+        self.repo.backup()
+        ss = self.snapshot.get()
+        self.repo.restore(ss.root, self.restoredir, self.password)
 
         file_b = pathlib.Path(self.restoredir, "file1")
 
@@ -128,9 +128,9 @@ class TestRestore(TestBase):
         dir_a.mkdir()
         os.utime(dir_a, ns=(123456789, 987654321))
 
-        scan.scan()
-        backup.backup()
-        ss = models.Snapshot.objects.get()
+        self.repo.scan()
+        self.repo.backup()
+        ss = self.snapshot.get()
 
         # The directory atime gets reset before we back it up, so just check
         # that whatever value it had when it was backed up, that's what gets
@@ -139,7 +139,7 @@ class TestRestore(TestBase):
         info = list(models.Object.unpack_payload(tree.payload))[1]
         atime = info['atime']
 
-        restore.restore_item(ss.root, self.restoredir, self.key)
+        self.repo.restore(ss.root, self.restoredir, self.password)
 
         dir1 = pathlib.Path(self.restoredir, "dir1")
 
@@ -156,25 +156,25 @@ class TestRestore(TestBase):
     def test_restore_multiple_revisions(self):
         self.create_file("file", "contents A")
 
-        scan.scan()
-        backup.backup()
+        self.repo.scan()
+        self.repo.backup()
 
         self.create_file("file", "new contents")
 
-        scan.scan()
-        backup.backup()
+        self.repo.scan()
+        self.repo.backup()
 
-        snapshots = list(models.Snapshot.objects.order_by("date"))
+        snapshots = list(self.snapshot.order_by("date"))
 
         self.assertEqual(2, len(snapshots))
         self.assertEqual(
             6,
-            models.Object.objects.count()
+            self.object.count()
         )
 
         restoredir = pathlib.Path(self.restoredir)
-        restore.restore_item(snapshots[0].root, restoredir/"ss1", self.key)
-        restore.restore_item(snapshots[1].root, restoredir/"ss2", self.key)
+        self.repo.restore(snapshots[0].root, restoredir /"ss1", self.password)
+        self.repo.restore(snapshots[1].root, restoredir /"ss2", self.password)
 
         file1 = restoredir / "ss1" / "file"
         file2 = restoredir / "ss2" / "file"
@@ -191,16 +191,16 @@ class TestRestore(TestBase):
     def test_restore_single_file(self):
         self.create_file("file", "contents")
 
-        scan.scan()
-        backup.backup()
+        self.repo.scan()
+        self.repo.backup()
 
-        root = models.Snapshot.objects.get().root
+        root = self.snapshot.get().root
 
         # Should just be one child
         inode = root.children.get()
 
         filename = pathlib.Path(self.restoredir, "my_file")
-        restore.restore_item(inode, filename, self.key)
+        self.repo.restore(inode, filename, self.password)
 
         self.assertEqual(
             "contents",
@@ -218,13 +218,13 @@ class TestRestore(TestBase):
 
         self.create_file(name, "contents")
 
-        scan.scan()
-        backup.backup()
-        ss = models.Snapshot.objects.get()
+        self.repo.scan()
+        self.repo.backup()
+        ss = self.snapshot.get()
 
-        restore.restore_item(ss.root, self.restoredir, self.key)
+        self.repo.restore(ss.root, self.restoredir, self.password)
 
-        #self.assert_restored_file(name, "contents")
+        self.assert_restored_file(name, "contents")
 
     def test_calculate_children(self):
         """Checks that the Object.calculate_children() works as expected
@@ -236,24 +236,24 @@ class TestRestore(TestBase):
         self.create_file("dir2/file3", "aoeu")
         self.create_file("dir2/file4", "zzzz")
 
-        scan.scan()
-        backup.backup()
+        self.repo.scan()
+        self.repo.backup()
 
         self.assertEqual(
             11,
-            models.Object.objects.count()
+            self.object.count()
         )
 
         # Make sure the table is consistent, as the unit tests are run in a
         # transaction and so foreign key constraints are not enforced
-        c = connection.cursor()
-        c.execute("PRAGMA foreign_key_check")
-        self.assertEqual(
-            0,
-            len(list(c))
-        )
+        with connections[self.repo.db].cursor() as c:
+            c.execute("PRAGMA foreign_key_check")
+            self.assertEqual(
+                0,
+                len(list(c))
+            )
 
-        for obj in models.Object.objects.all():
+        for obj in self.object.all():
             self.assertSetEqual(
                 set(b.hex() for b in obj.calculate_children()),
                 {c.objid.hex() for c in obj.children.all()},
@@ -274,10 +274,10 @@ class TestRestore(TestBase):
                 h.update(block)
                 f.write(block)
 
-        scan.scan()
-        backup.backup()
-        ss = models.Snapshot.objects.get()
-        restore.restore_item(ss.root, self.restoredir, self.key)
+        self.repo.scan()
+        self.repo.backup()
+        ss = self.snapshot.get()
+        self.repo.restore(ss.root, self.restoredir, self.password)
 
         outfile = pathlib.Path(self.restoredir, "bigfile")
         h2 = hashlib.md5()
@@ -295,26 +295,42 @@ class TestRestore(TestBase):
 class TestRestoreWithCompression(TestRestore):
     def setUp(self):
         super().setUp()
-        models.Setting.set("COMPRESSION", "zlib")
+        self.repo.set_compression(True)
 
 class TestRestoreWithEncryption(TestRestore):
     def setUp(self):
         super().setUp()
 
-        import nacl.public
-        self.key = nacl.public.PrivateKey.generate()
-        models.Setting.set("ENCRYPTION", "nacl")
-        models.Setting.set("PUBKEY", bytes(self.key.public_key).hex())
+        from backathon import encryption
+
+        self.password = "This is my password!"
+
+        # Set the ops limit and mem limit low so the tests don't take forever
+        import nacl.pwhash.argon2id
+        self.stack.enter_context(
+            unittest.mock.patch.object(encryption.NaclSealedBox, "OPSLIMIT",
+                                       nacl.pwhash.argon2id.OPSLIMIT_MIN)
+        )
+        self.stack.enter_context(
+            unittest.mock.patch.object(encryption.NaclSealedBox, "MEMLIMIT",
+                                       nacl.pwhash.argon2id.MEMLIMIT_MIN)
+        )
+
+        # Initialize our encrypter
+        encrypter = encryption.NaclSealedBox.init_new(
+            self.password
+        )
+        self.repo.set_encrypter(encrypter)
 
     def test_not_plaintext(self):
         """Tests that the plaintext of a file doesn't appear in the object
         payload on disk"""
         self.create_file("secret_file", "super secret contents")
 
-        scan.scan()
-        backup.backup()
+        self.repo.scan()
+        self.repo.backup()
 
-        ss = models.Snapshot.objects.get()
+        ss = self.snapshot.get()
         tree = ss.root
         inode = tree.children.get()
         blob = inode.children.get()

@@ -122,10 +122,8 @@ class Object(models.Model):
                 children = [c[1] for c in next(payload_items)]
 
             elif objtype == "inode":
-                # By coincidence, tree and inode objects have identical
-                # routines for extracting the child objects
                 next(payload_items)
-                children = [c[1] for c in next(payload_items)]
+                children = [c[1] for c in next(payload_items)[1]]
 
             else:
                 children = []

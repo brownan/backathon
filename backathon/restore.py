@@ -74,6 +74,8 @@ def restore_item(repo, obj, path, key=None):
     couldn't be restored.
 
     """
+    assert repo.db == obj._state.db
+
     # Important: if you print or log an error involving the path, pass it
     # through pathstr() first to sanitize any undecodable unicode surrogates
     path = pathlib.Path(path)
@@ -83,7 +85,7 @@ def restore_item(repo, obj, path, key=None):
     try:
         obj_type = next(payload_items)
         obj_info = next(payload_items)
-        obj_payload_type, obj_contents = next(payload_items)
+        obj_contents = next(payload_items)
     except UnpackException:
         logger.error("Can't restore {}: Object {} has invalid cached "
                      "data. Rebuilding the local cache may fix this "
@@ -99,10 +101,12 @@ def restore_item(repo, obj, path, key=None):
             return
         logger.info("Restoring file {}".format(pathstr(path)))
 
+        obj_payload_type, obj_payload_contents = obj_contents
+
         try:
             with path.open("wb") as fileout:
                 if obj_payload_type == "chunklist":
-                    for pos, chunk_id in obj_contents:
+                    for pos, chunk_id in obj_payload_contents:
 
                         try:
                             blob_payload = models.Object.unpack_payload(
@@ -139,8 +143,8 @@ def restore_item(repo, obj, path, key=None):
                         fileout.seek(pos)
                         fileout.write(blob_contents)
                 elif obj_payload_type == "immediate":
-                    assert isinstance(obj_contents, bytes)
-                    fileout.write(obj_contents)
+                    assert isinstance(obj_payload_contents, bytes)
+                    fileout.write(obj_payload_contents)
 
                 else:
                     raise AssertionError("Invalid inode payload type")
@@ -173,7 +177,7 @@ def restore_item(repo, obj, path, key=None):
         for name, objid in obj_contents:
             name = os.fsdecode(name)
             try:
-                childobj = models.Object.objects.get(objid=objid)
+                childobj = models.Object.objects.using(repo.db).get(objid=objid)
             except models.Object.DoesNotExist:
                 logger.error("Could not restore {}: referenced object does "
                              "not exist in the local cache. Rebuilding the "
@@ -182,7 +186,7 @@ def restore_item(repo, obj, path, key=None):
                 ))
                 return
 
-            restore_item(childobj, path / name, key)
+            restore_item(repo, childobj, path / name, key)
 
     else:
         raise NotImplementedError("Restore not implemented for {} "
