@@ -110,6 +110,19 @@ class Repository:
     # The next set of properties and methods manipulate the utility classes
     # that are used by this class
     ##########################
+
+    # This sets the size threshold for inline file contents. Below this
+    # size, files and their metadata are backed up into a single object in
+    # the repository. Larger than this and the contents and metadata are
+    # separated.
+    #
+    # Currently set at 2 megabytes by default, this was chosen as a value
+    # that will catch a majority of small files. Small files probably won't
+    # have much deduplication potential and thus aren't worth the additional
+    # overhead of creating two objects in the repository for the one backed
+    # up file.
+    #
+    # Good values for this probably range from between 1 and 10 megabytes.
     backup_inline_threshold = SimpleSetting("BACKUP_INLINE_THRESHOLD", 2**21)
 
     @cached_property
@@ -207,24 +220,43 @@ class Repository:
         executor.migrate(targets)
 
     def compress_bytes(self, b):
+        """Compress a byte-like object
+
+        Returns the bytes unchanged if compression isn't enabled.
+
+        All outgoing data to be written to the repository is passed through
+        this method before being encrypted then uploaded.
+        """
         if self.compression:
             return zlib.compress(b)
         else:
             return b
 
     def decompress_bytes(self, b):
+        """Decompress a byte-like object
+
+        Detects whether compression was used by whether it starts with the
+        zlib magic byte 0x78.
+        """
         # Detect the compression used.
         # Zlib compression always starts with byte 0x78
         # Since our messages always start with a msgpack'd string specifying
         # the object type, messages always start with one of 0xd9, 0xda, 0xdb,
-        # or bytes 0xa0 through 0xbf.
+        # or bytes 0xa0 through 0xbf (see the msgpack specification).
         # Therefore, we can unambiguously detect whether compression is used
         if b[0] == 0x78:
             return zlib.decompress(b)
         return b
 
     def _get_path(self, objid):
-        """Returns the path for the given objid"""
+        """Returns the path to use in the remote repository for the given
+        objid
+
+        """
+        # A prefix of the first 3 hex digits will give 16^3=4096 possible
+        # object directories. This was chosen such that for a repository of
+        # ten million objects, each directory has on the order of 10^3
+        # objects per directory. Should be manageable for most filesystems.
         objid_hex = objid.hex()
         return "objects/{}/{}".format(
             objid_hex[:3],
@@ -232,7 +264,8 @@ class Repository:
         )
 
     ################################
-    # These next methods are used in the scanning and backup routines
+    # These next methods are the low level interface used by the scanning,
+    # backup, and restore routines.
     ################################
 
     def push_object(self, payload, children):
@@ -256,7 +289,7 @@ class Repository:
         dependent objects to be in the database already.
         """
         view = payload.getbuffer()
-        objid = self.encrypter.get_object_id(view)
+        objid = self.encrypter.calculate_objid(view)
 
         with atomic_immediate():
             try:
@@ -334,7 +367,7 @@ class Repository:
                 objid.hex(), e
             )) from e
 
-        digest = self.encrypter.get_object_id(contents)
+        digest = self.encrypter.calculate_objid(contents)
         if not hmac.compare_digest(digest, objid):
             raise CorruptedRepository("Object payload does not "
                                       "match its hash for objid "
@@ -363,7 +396,8 @@ class Repository:
         self.storage.upload_file(path, util.BytesReader(to_upload))
 
     ############################
-    # These next methods define the high level interface to this repository
+    # These next methods define the high level interface to this repository.
+    # These methods are meant to be called from the UI code.
     ############################
     def scan(self, skip_existing=False, progress=None):
         """Scans the backup set

@@ -111,7 +111,7 @@ class BaseEncryption:
         """
         raise NotImplementedError()
 
-    def get_object_id(self, content):
+    def calculate_objid(self, content):
         """Hash the given object contents into an object ID
 
         This must return a secure hash of the given byte-like object.
@@ -161,7 +161,7 @@ class NullEncryption(BaseEncryption):
     def decrypt_bytes(self, cyphertext, key):
         return cyphertext
 
-    def get_object_id(self, content):
+    def calculate_objid(self, content):
         return hashlib.sha256(content).digest()
 
 class NaclSealedBox(BaseEncryption):
@@ -284,7 +284,7 @@ class NaclSealedBox(BaseEncryption):
         except nacl.exceptions.CryptoError as e:
             raise DecryptionError(str(e)) from e
 
-    def get_object_id(self, content):
+    def calculate_objid(self, content):
         # Since the public key is not actually public, this should serve as a
         # good hmac key. While not usually a good idea to use an encryption
         # key for a different purpose like this, I doubt there are any odd
