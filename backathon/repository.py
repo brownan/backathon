@@ -345,6 +345,9 @@ class Repository:
         :param key: The key to decrypt files if decryption was enabled
         :type key: None | nacl.public.PrivateKey
 
+        :returns: The decrypted, decompressed payload
+        :rtype: bytes
+
         Returns a bytes-like object containing the Object's payload. This
         method takes care of decrypting and decompressing, if applicable. It
         also verifies the payload's hash matches the object id.
@@ -472,7 +475,8 @@ class Repository:
         local cache
         """
         data = {
-            "encryption": self.encrypter.get_public_params()
+            "encryption": self.encrypter.get_public_params(),
+            "compression": self.compression,
         }
         buf = io.BytesIO(
             json.dumps(data).encode("utf-8")

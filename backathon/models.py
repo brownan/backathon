@@ -19,10 +19,10 @@ scanlogger = logging.getLogger("backathon.scan")
 
 
 class Object(models.Model):
-    """This table keeps track of what objects exist in the remote data store
+    """This table keeps track of what objects exist in the remote repository
 
     The existence of an object in this table implies that an object has been
-    committed to the remote data store.
+    committed to the repository.
 
     The payload field is only filled in for tree and inode object types. Blob
     types are not stored locally. In other words, we only cache metadata type
@@ -43,6 +43,11 @@ class Object(models.Model):
     # To create a bytes representation from a hex representation,
     # use bytes.fromhex(hex_representation)
     objid = models.BinaryField(primary_key=True)
+
+    # For now we store the entire payload for metadata-type objects locally.
+    # Eventually I plan to do away with this and store just what we need in
+    # dedicated columns, both to save space and to allow indexes on those
+    # fields.
     payload = models.BinaryField(blank=True, null=True)
 
     children = models.ManyToManyField(

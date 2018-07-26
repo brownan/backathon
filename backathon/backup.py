@@ -36,8 +36,15 @@ def backup(repo, progress=None):
     # already been backed up. In other words, these are the entries that we
     # can back up right now.
     ready_to_backup = to_backup.exclude(
+        # The sub query selects the *parents* of entries that are not yet
+        # backed up. Therefore, we're excluding entries whose children are
+        # not yet backed up.
         id__in=to_backup.exclude(parent__isnull=True).values("parent_id")
     )
+
+    # The two above querysets remain unevaluated. We therefore get new results
+    # on each call to .exists() below. Calls to .iterator() always return new
+    # results.
 
     backup_total = to_backup.count()
     backup_count = 0
@@ -73,8 +80,8 @@ def backup(repo, progress=None):
             except StopIteration:
                 pass
 
-            # Sanity check: If a bug in the entry.backup() method doesn't set
-            # one of these, the entry will be selected next iteration,
+            # Sanity check: If a bug in the backup generator function doesn't
+            # set one of these, the entry will be selected next iteration,
             # causing an infinite loop
             assert entry.obj_id is not None or entry.id is None
 
@@ -110,10 +117,14 @@ def backup(repo, progress=None):
 def _backup_iterator(fsentry, inline_threshold=2 ** 21):
     """Back up an FSEntry object
 
+    :type fsentry: models.FSEntry
+    :param inline_threshold: Threshold in bytes below which file contents are
+        inlined into the inode payload.
+
     Reads this entry in from the file system, creates one or more object
-    payloads, and yields them to the caller for uploading to the backing
-    store. The caller is expected to send the Object instance
-    back into this iterator function.
+    payloads, and yields them to the caller for uploading to the repository.
+    The caller is expected to send the Object instance back into this
+    iterator function.
 
     Yields: (payload_buffer, list_of_child_Object_instances)
     Caller sends: models.Object instance of the last yielded payload
@@ -132,14 +143,14 @@ def _backup_iterator(fsentry, inline_threshold=2 ** 21):
 
     For directories: yields a single payload for the directory entry.
     Raises a DependencyError if one or more children do not have an
-    obj already. It's the caller's responsibility to call backup() on
+    obj already. It's the caller's responsibility to call this function on
     entries in an order to avoid dependency issues.
 
     For files: yields one or more payloads for the file's contents,
     then finally a payload for the inode entry.
 
     IMPORTANT: every exit point from this function must either update
-    this entry's obj to a non-null value, OR delete the entry before
+    this entry's obj field to a non-null value, OR delete the entry before
     returning.
     """
     try:
