@@ -50,9 +50,10 @@ class Command(CommandBase):
             print("Scan canceled")
             return
 
-        print("Scanned {} entries".format(
-            models.FSEntry.objects.using(repo.db).count(),
-            ))
+        if not options.skip_existing:
+            print("Scanned {} entries".format(
+                models.FSEntry.objects.using(repo.db).count(),
+                ))
 
         to_backup = models.FSEntry.objects.using(repo.db).filter(obj__isnull=True)
         print("Need to back up {} files and directories "
