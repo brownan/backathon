@@ -5,15 +5,12 @@ import logging
 import math
 import random
 
-import umsgpack
-
 from django.db import models, IntegrityError
 from django.db.transaction import atomic
 from django.db import connections
 
 from .util import atomic_immediate
 from .fields import PathField
-from . import util
 
 scanlogger = logging.getLogger("backathon.scan")
 
