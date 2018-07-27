@@ -16,6 +16,15 @@ class Command(CommandBase):
 
         pbar = None
 
+        roots = repo.get_roots()
+        print("Scanning {} root{}:".format(
+            len(roots),
+            "s" if len(roots) != 1 else "",
+        ))
+        for root in repo.get_roots():
+            print("* " + root.printablepath)
+        print()
+
         def progress(num, total):
             nonlocal pbar
             if pbar is None:
