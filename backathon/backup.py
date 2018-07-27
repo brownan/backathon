@@ -27,6 +27,9 @@ def backup(repo, progress=None):
     :type repo: backathon.repository.Repository
     :param progress: A callback function that provides status updates on the
         scan
+
+    The progress callable takes two parameters: the backup count and backup
+    total.
     """
     if models.FSEntry.objects.using(repo.db).filter(new=True).exists():
         # This happens when a new root is added but hasn't been scanned yet.

@@ -19,28 +19,17 @@ def setup():
 def main():
     """Main entry point for the command line interface
 
-    The workflow of this function follows a similar pattern as Django's
-    MangementUtility.execute() in that an initial "fake" parser is used to
-    parse a couple preliminary arguments, but we always force the very first
-    argument to be the subcommand, never an option.
-    It also only exports commands from this package.
     """
 
     argv = sys.argv
 
-    try:
-        subcommand = argv[1]
-    except IndexError:
+    if len(argv) < 3:
         subcommand = "help"
+    else:
+        subcommand = argv[2]
 
-    parser = argparse.ArgumentParser(
-        usage="%(prog)s subcommand CONF_DB [options] [args]",
-        add_help=False,
-    )
-    parser.add_argument("config")
-    options, args = parser.parse_known_args(argv)
-
-    dbpath = options.config
+    if len(argv) >= 2:
+        dbpath = argv[1]
 
     # Special exception, all commands except for 'help' and 'init' require the
     # database to exist.
@@ -55,7 +44,9 @@ def main():
 
     if subcommand == "help":
         usage = [
-            parser.usage % {'prog': parser.prog},
+            "Usage: {} CONFIG SUBCOMMAND [options] [args]".format(
+                os.path.basename(argv[0]),
+            ),
             "",
             "Available subcommands:"
         ]
@@ -70,20 +61,20 @@ def main():
         sys.exit(1)
 
     command_class = get_command_class(subcommand)
-    assert isinstance(command_class, CommandBase)
+    assert issubclass(command_class, CommandBase)
 
-    # Reconfigure the parser and re-parse the arguments
+    command = command_class(dbpath)
+
+    # Configure the parser and re-parse the arguments
     parser = argparse.ArgumentParser(
-        prog="{} {}".format(os.path.basename(argv[0]), subcommand),
-        description=command_class.help or None,
+        prog="{} {} {}".format(os.path.basename(argv[0]), dbpath, subcommand),
+        description=command.help or None,
     )
-    parser.add_argument("config", help="Path to the config database",
-                        metavar="CONF_DB")
     parser.add_argument("-v", "--verbose", action="count", default=0)
     parser.add_argument("-q", "--quiet", action="store_true")
-    command_class.add_arguments(parser)
+    command.add_arguments(parser)
 
-    options = parser.parse_args(argv[2:])
+    options = parser.parse_args(argv[3:])
 
     # Set log level
     if options.quiet:
@@ -101,7 +92,7 @@ def main():
     ))
 
     try:
-        command_class.handle(options)
+        command.handle(options)
     except CommandError as e:
         logger.error(str(e))
         sys.exit(1)
@@ -114,7 +105,7 @@ def find_commands():
 
 def get_command_class(cmd_name):
     module = import_module('backathon.commands.{}'.format(cmd_name))
-    return module.Command()
+    return module.Command
 
 
 if __name__ == "__main__":

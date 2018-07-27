@@ -1,26 +1,26 @@
 import os.path
 
 import tqdm
-from django.core.management.base import CommandError
 from django.db import IntegrityError
 from django.db.models import Sum
 from django.template.defaultfilters import filesizeformat
 
-from ... import models
-from . import BackathonCommand
+from .. import models
+from . import CommandBase, CommandError
 
 
-class Command(BackathonCommand):
+class Command(CommandBase):
     help="Adds the given filesystem path as a backup root"
 
     def add_arguments(self, parser):
         parser.add_argument("root", type=str)
+        parser.add_argument("--skip-scan", action='store_true')
 
-    def handle(self, *args, **kwargs):
+    def handle(self, options):
 
-        repo = kwargs['repo']
+        repo = self.get_repo()
 
-        root_path = os.path.abspath(kwargs.pop("root"))
+        root_path = os.path.abspath(options.root)
         if not os.path.isdir(root_path):
             raise CommandError("Not a directory: {}".format(root_path))
 
@@ -33,13 +33,16 @@ class Command(BackathonCommand):
             size_before = 0
 
         try:
-            models.FSEntry.objects.using(repo.db).create(
-                path=root_path,
-            )
+            repo.add_root(root_path)
         except IntegrityError:
             raise CommandError("Path is already being backed up")
-        self.stdout.write("Path added: {}".format(root_path))
-        self.stdout.write("Performing scan")
+        print("Backup root added: {}".format(root_path))
+
+        if options.skip_scan:
+            print("Skipping scan. Make sure you run a scan before a backup")
+            return
+
+        print("Performing scan")
 
         pbar = None
 
@@ -60,7 +63,7 @@ class Command(BackathonCommand):
         size_after = models.FSEntry.objects.using(repo.db)\
             .aggregate(size=Sum("st_size"))['size']
 
-        self.stderr.write("{} new entries (totaling {}) added to backup "
+        print("{} new entries (totaling {}) added to backup "
                           "set".format(
             num_files_after - num_files_before,
             filesizeformat(size_after-size_before)

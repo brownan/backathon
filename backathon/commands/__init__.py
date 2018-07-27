@@ -8,15 +8,18 @@ class CommandBase:
 
     help = ""
 
+    def __init__(self, config):
+        self.config = config
+
     def add_arguments(self, parser):
         return parser
 
     def handle(self, options):
         raise NotImplementedError()
 
-    def get_repo(self, options):
+    def get_repo(self):
         from .. import repository
-        return repository.Repository(options.config)
+        return repository.Repository(self.config)
 
     def input_yn(self, prompt, default=None):
         if default is None:

@@ -5,14 +5,14 @@ from django.template.defaultfilters import filesizeformat
 
 import tqdm
 
-from ... import models
-from . import BackathonCommand
+from .. import models
+from . import CommandBase
 
-class Command(BackathonCommand):
+class Command(CommandBase):
     help="Scan the filesystem for changes and update the cache database"
 
-    def handle(self, *args, **options):
-        repo = self.get_repository(options)
+    def handle(self, options):
+        repo = self.get_repo()
 
         pbar = None
 
@@ -31,13 +31,13 @@ class Command(BackathonCommand):
             if pbar is not None:
                 pbar.close()
 
-        self.stderr.write("Scanned {} entries in {:.2f} seconds".format(
+        print("Scanned {} entries in {:.2f} seconds".format(
             models.FSEntry.objects.using(repo.db).count(),
             t2-t1,
             ))
 
         to_backup = models.FSEntry.objects.using(repo.db).filter(obj__isnull=True)
-        self.stderr.write("Need to back up {} files and directories "
+        print("Need to back up {} files and directories "
                           "totaling {}".format(
             to_backup.count(),
             filesizeformat(
@@ -46,7 +46,7 @@ class Command(BackathonCommand):
         ))
 
         clean = models.FSEntry.objects.using(repo.db).filter(obj__isnull=False)
-        self.stderr.write("{} files ({}) unchanged".format(
+        print("{} files ({}) clean".format(
             clean.count(),
             filesizeformat(
                 clean.aggregate(size=Sum("st_size"))['size']

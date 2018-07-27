@@ -39,9 +39,12 @@ class Command(CommandBase):
         else:
             print("Storage settings are alreay configured. Skipping...")
 
-        repo.set_compression(
-            self.input_yn("Would you like to enable compression?", default=True)
-        )
+        if "COMPRESSION_ENABLED" not in repo.settings:
+            repo.set_compression(
+                self.input_yn("Would you like to enable compression?", default=True)
+            )
+        else:
+            print("Compression already configured. Skipping...")
 
         if "ENCRYPTION_SETTINGS" not in repo.settings:
             if self.input_yn("Would you like to enable encryption?", default=True):

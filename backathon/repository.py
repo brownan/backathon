@@ -64,10 +64,15 @@ class SimpleSetting:
     def __get__(self, instance, owner):
         if instance is None:
             return self
+
         try:
             return instance.__dict__[self.name]
         except KeyError:
-            value = instance.settings.get(self.name, self.default)
+            try:
+                value = instance.settings[self.name]
+            except KeyError:
+                value = self.default
+
             instance.__dict__[self.name] = value
             return value
 
@@ -397,24 +402,20 @@ class Repository:
         cache.
 
         If this entry is already a root or is a descendant of an existing
-        root, this call returns with no error.
+        root, this call raises an IntegrityError
         """
-        from django.db import IntegrityError
         root_path = os.path.abspath(root_path)
-        try:
-            models.FSEntry.objects.using(self.db).create(path=root_path, )
-        except IntegrityError:
-            pass
+        models.FSEntry.objects.using(self.db).create(path=root_path)
 
     def del_root(self, root_path):
         root_path = os.path.abspath(root_path)
-        entry = models.FSEntry.objects.using(self.db).get(path=root_path)
+        entry = models.FSEntry.objects.using(self.db)\
+            .filter(parent__isnull=True)\
+            .get(path=root_path)
         entry.delete()
 
     def get_roots(self):
-        return [entry.path for entry in
-                models.FSEntry.objects.using(self.db).filter(
-                    parent__isnull=True)]
+        return models.FSEntry.objects.using(self.db).filter(parent__isnull=True)
 
     def backup(self, progress=None):
         """Perform a backup
