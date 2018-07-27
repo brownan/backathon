@@ -543,12 +543,12 @@ class B2Bucket(StorageBase):
 
         In B2 this calls the b2_hide_file API. If you want to recover the space
         taken by this file, make sure you have your bucket lifecycle policy
-        set to delete hidden files
+        set to delete hidden files.
 
-        This costs one class A transaction
+        This costs one class A transaction.
 
         This call ignores errors for the file not existing or the file being
-        already hidden
+        already hidden.
         """
         try:
             self._call_api(

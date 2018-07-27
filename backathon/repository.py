@@ -264,7 +264,7 @@ class Repository:
         """Pushes the given payload to the remote repository.
 
         Atomically commits the given models.Object and related ObjectRelation
-        instances to the database.
+        instances to the database if the upload was successful.
 
         The payload is hashed to determine the object ID. If an ID
         already exists in the Object table, implying it already exists in the
