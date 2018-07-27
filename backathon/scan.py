@@ -1,3 +1,5 @@
+import time
+
 from django.db import connections
 
 from .util import atomic_immediate
@@ -109,8 +111,8 @@ def scan(alias, progress=None, skip_existing=False):
     scanned = 0
 
     if not skip_existing:
-        # First pass, scan all existing entries
-        qs = models.FSEntry.objects.using(alias).all()
+        # First pass, scan all existing non-new entries
+        qs = models.FSEntry.objects.using(alias).filter(new=False)
         total = qs.count()
         with atomic_immediate(using=alias):
             for entry in qs.iterator():
@@ -125,6 +127,7 @@ def scan(alias, progress=None, skip_existing=False):
     # because neither .exists() nor .iterator() cache their results.
     qs = models.FSEntry.objects.using(alias).filter(new=True)
     while qs.exists():
+        last_checkpoint = time.time()
         with atomic_immediate(using=alias):
             for entry in qs.iterator():
                 entry.scan()
@@ -137,6 +140,12 @@ def scan(alias, progress=None, skip_existing=False):
                 # item wasn't either deleted or marked new=False, then it would be
                 # selected next pass
                 assert entry.new is False or entry.id is None
+
+                if time.time() - last_checkpoint > 30:
+                    # Checkpoint every once in a while to commit what we have so
+                    # far to the database. This saves progress and provides a
+                    # chance for other writers to write to the database.
+                    break
 
 
     # This seems like as good a time as any to do this.

@@ -1,7 +1,6 @@
 import getpass
-import os.path
 
-from . import CommandBase, CommandError
+from . import CommandBase
 from .. import repository
 from .. import encryption
 
@@ -10,7 +9,7 @@ class Command(CommandBase):
 
     def handle(self, options):
 
-        path = options.config
+        path = self.config
 
         print("Initializing a new database at {}...".format(path))
 

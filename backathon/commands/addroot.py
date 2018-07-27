@@ -42,7 +42,9 @@ class Command(CommandBase):
             print("Skipping scan. Make sure you run a scan before a backup")
             return
 
-        print("Performing scan")
+        print("Scanning for new files. This may take a while.")
+        print("The initial scan has to build a local cache of file metadata;")
+        print("re-scans will be faster")
 
         pbar = None
 
@@ -54,10 +56,16 @@ class Command(CommandBase):
             pbar.update(0)
 
         try:
-            repo.scan(progress=progress, skip_existing=True)
-        finally:
-            if pbar is not None:
-                pbar.close()
+            try:
+                repo.scan(progress=progress, skip_existing=True)
+            finally:
+                if pbar is not None:
+                    pbar.close()
+        except KeyboardInterrupt:
+            print("Scan canceled. Make sure to run a scan operation before a "
+                  "backup")
+            print("or not all your files will be backed up")
+            return
 
         num_files_after = models.FSEntry.objects.using(repo.db).count()
         size_after = models.FSEntry.objects.using(repo.db)\

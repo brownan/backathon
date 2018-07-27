@@ -30,19 +30,21 @@ class Command(CommandBase):
             if pbar is None:
                 pbar = tqdm.tqdm(total=total, unit=" files")
             pbar.n = num
+            pbar.total = total
             pbar.update(0)
 
-        t1 = time.time()
         try:
-            repo.scan(progress=progress)
-            t2 = time.time()
-        finally:
-            if pbar is not None:
-                pbar.close()
+            try:
+                repo.scan(progress=progress)
+            finally:
+                if pbar is not None:
+                    pbar.close()
+        except KeyboardInterrupt:
+            print("Scan canceled")
+            return
 
-        print("Scanned {} entries in {:.2f} seconds".format(
+        print("Scanned {} entries".format(
             models.FSEntry.objects.using(repo.db).count(),
-            t2-t1,
             ))
 
         to_backup = models.FSEntry.objects.using(repo.db).filter(obj__isnull=True)
