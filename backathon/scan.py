@@ -127,7 +127,7 @@ def scan(alias, progress=None, skip_existing=False):
     # because neither .exists() nor .iterator() cache their results.
     qs = models.FSEntry.objects.using(alias).filter(new=True)
     while qs.exists():
-        last_checkpoint = time.time()
+        last_checkpoint = time.monotonic()
         with atomic_immediate(using=alias):
             for entry in qs.iterator():
                 entry.scan()
@@ -141,7 +141,7 @@ def scan(alias, progress=None, skip_existing=False):
                 # selected next pass
                 assert entry.new is False or entry.id is None
 
-                if time.time() - last_checkpoint > 30:
+                if time.monotonic() - last_checkpoint > 30:
                     # Checkpoint every once in a while to commit what we have so
                     # far to the database. This saves progress and provides a
                     # chance for other writers to write to the database.

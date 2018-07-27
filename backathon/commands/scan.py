@@ -11,15 +11,21 @@ from . import CommandBase
 class Command(CommandBase):
     help="Scan the filesystem for changes and update the cache database"
 
+    def add_arguments(self, parser):
+        parser.add_argument("--skip-existing", action='store_true',
+                            default=False,
+                            help="Resumes an initial scan from an 'addroot'")
+
     def handle(self, options):
         repo = self.get_repo()
 
         pbar = None
 
         roots = repo.get_roots()
-        print("Scanning {} root{}:".format(
+        print("Scanning {} root{}{}:".format(
             len(roots),
             "s" if len(roots) != 1 else "",
+            " for newly added files" if options.skip_existing else ""
         ))
         for root in repo.get_roots():
             print("* " + root.printablepath)
@@ -35,7 +41,8 @@ class Command(CommandBase):
 
         try:
             try:
-                repo.scan(progress=progress)
+                repo.scan(progress=progress,
+                          skip_existing=options.skip_existing)
             finally:
                 if pbar is not None:
                     pbar.close()
