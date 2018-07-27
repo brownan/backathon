@@ -2,10 +2,12 @@ from logging import getLogger
 import os
 import stat
 import io
+import datetime
 
 from django.db.transaction import atomic
 from django.db import connections
 from django.utils import timezone
+import pytz
 
 import umsgpack
 
@@ -66,17 +68,16 @@ def backup(repo, progress=None):
             # thing to do is to ignore the entry and move on.
             assert entry.obj_id is None
 
-            iterator = _backup_iterator(
+            iterator = backup_iterator(
                 entry,
                 inline_threshold=repo.backup_inline_threshold,
             )
 
             try:
-                obj_buf, obj_children = next(iterator)
+                yielded = next(iterator)
                 while True:
-                    obj_buf, obj_children = iterator.send(
-                        repo.push_object(obj_buf, obj_children)
-                    )
+                    obj = repo.push_object(*yielded)
+                    yielded = iterator.send(obj)
             except StopIteration:
                 pass
 
@@ -114,32 +115,41 @@ def backup(repo, progress=None):
     with connections[repo.db].cursor() as cursor:
         cursor.execute("ANALYZE")
 
-def _backup_iterator(fsentry, inline_threshold=2 ** 21):
+def backup_iterator(fsentry, inline_threshold=2 ** 21):
     """Back up an FSEntry object
 
     :type fsentry: models.FSEntry
     :param inline_threshold: Threshold in bytes below which file contents are
         inlined into the inode payload.
 
-    Reads this entry in from the file system, creates one or more object
-    payloads, and yields them to the caller for uploading to the repository.
-    The caller is expected to send the Object instance back into this
-    iterator function.
+    This is a generator function. Its job is to take the given models.FSEntry
+    object and create the models.Object object for the local cache database
+    and corresponding payload to upload to the remote repository. Since some
+    types of filesystem entries may be split across multiple objects (e.g.
+    large files), this function may yield more than one Object and payload
+    for a single FSEntry.
 
-    Yields: (payload_buffer, list_of_child_Object_instances)
-    Caller sends: models.Object instance of the last yielded payload
+    This function's created Object and ObjectRelation instances are not saved to
+    the database, as this function is not responsible for determining the
+    object ids. Once yielded, the caller will generate the object id from the
+    payload, and will do one of two things:
 
-    The payload_buffer is a file-like object ready for reading.
-    Usually a BytesIO instance.
+    1. If the objid does not yet exist in the Object table: Update the Object
+    and ObjectRelation instances with the generated object id and save them
+    to the database, atomically with uploading the payload to the repository.
+    2. If the objid *does* exist in the Object table: do nothing
 
-    Note: this sequence of operations was chosen over having this
-    method upload the objects itself so that the caller may choose to
-    buffer and upload objects in batch. It's also more flexible in
-    several ways. E.g. while a recursive algorithm would
-    have to upload items in a post-order traversal of the tree, here
-    the caller is free to do a SQL query to get items ordered by any
-    criteria. Like, say, all small files first and pack them together into
-    a single upload.
+    Either way, the (saved or fetched) Object is sent back into this
+    generator function so it can be used in a subsequent ObjectRelation entry.
+
+    This function is responsible for updating the FSEntry.obj foreign key field
+    with the sent object after yielding a payload.
+
+    Yields: (payload, Object, [ObjectRelation list])
+    Caller sends: The saved models.Object instance
+
+    The payload is a file-like object ready for reading. Usually a BytesIO
+    instance.
 
     For directories: yields a single payload for the directory entry.
     Raises a DependencyError if one or more children do not have an
@@ -151,7 +161,8 @@ def _backup_iterator(fsentry, inline_threshold=2 ** 21):
 
     IMPORTANT: every exit point from this function must either update
     this entry's obj field to a non-null value, OR delete the entry before
-    returning.
+    returning. It is an error to leave an entry in the database with the
+    obj field still null.
     """
     try:
         stat_result = os.lstat(fsentry.path)
@@ -162,9 +173,21 @@ def _backup_iterator(fsentry, inline_threshold=2 ** 21):
 
     fsentry.update_stat_info(stat_result)
 
-    if stat.S_ISREG(fsentry.st_mode):
-        # File
+    obj = models.Object()
+    relations = [] # type: list[models.ObjectRelation]
 
+    if stat.S_ISREG(fsentry.st_mode):
+        # Regular File
+
+        # Fill in the Object
+        obj.type = "inode"
+        obj.file_size = stat_result.st_size
+        obj.last_modified_time = datetime.datetime.fromtimestamp(
+            stat_result.st_mtime,
+            tz=pytz.UTC,
+        )
+
+        # Construct the payload
         inode_buf = io.BytesIO()
         umsgpack.pack("inode", inode_buf)
         info = dict(
@@ -178,8 +201,6 @@ def _backup_iterator(fsentry, inline_threshold=2 ** 21):
         )
         umsgpack.pack(info, inode_buf)
 
-        childobjs = []
-        chunks = []
         try:
             with _open_file(fsentry.path) as fobj:
                 if stat_result.st_size < inline_threshold:
@@ -191,16 +212,18 @@ def _backup_iterator(fsentry, inline_threshold=2 ** 21):
                 else:
                     # Break the file's contents into chunks and upload
                     # each chunk individually
+                    chunk_list = []
                     for pos, chunk in chunker.FixedChunker(fobj):
                         buf = io.BytesIO()
                         umsgpack.pack("blob", buf)
                         umsgpack.pack(chunk, buf)
                         buf.seek(0)
-                        chunk_obj = yield (buf, [])
-                        childobjs.append(chunk_obj)
-                        chunks.append((pos, chunk_obj.objid))
-
-                    umsgpack.pack(("chunklist", chunks), inode_buf)
+                        chunk_obj = yield (buf, models.Object(type="blob"), [])
+                        chunk_list.append((pos, chunk_obj.objid))
+                        relations.append(
+                            models.ObjectRelation(child=chunk_obj)
+                        )
+                    umsgpack.pack(("chunklist", chunk_list), inode_buf)
 
         except FileNotFoundError:
             logger.info("File disappeared: {}".format(fsentry))
@@ -222,9 +245,10 @@ def _backup_iterator(fsentry, inline_threshold=2 ** 21):
 
         inode_buf.seek(0)
 
-        fsentry.obj = yield (inode_buf, childobjs)
+        # Pass the object and payload to the caller for uploading
+        fsentry.obj = yield (inode_buf, obj, relations)
         logger.info("Backed up file into {} objects: {}".format(
-            len(chunks)+1,
+            len(relations)+1,
             fsentry
         ))
 
@@ -256,6 +280,24 @@ def _backup_iterator(fsentry, inline_threshold=2 ** 21):
                 )
             )
 
+        obj.type = "tree"
+        obj.last_modified_time = datetime.datetime.fromtimestamp(
+            stat_result.st_mtime,
+            tz=pytz.UTC,
+        )
+        relations = [
+            models.ObjectRelation(
+                child=c.obj,
+                # Names are stored in the object relation model for
+                # purposes of searching and directory listing. It's stored in
+                # a utf-8 encoding with invalid bytes removed to make
+                # searching and indexing possible, but the payload has the
+                # original filename in it.
+                name=os.fsencode(c.name).decode("utf-8", errors="ignore"),
+            )
+            for c in children
+        ]
+
         buf = io.BytesIO()
         umsgpack.pack("tree", buf)
         info = dict(
@@ -275,7 +317,7 @@ def _backup_iterator(fsentry, inline_threshold=2 ** 21):
         )
         buf.seek(0)
 
-        fsentry.obj = yield (buf, (c.obj for c in children))
+        fsentry.obj = yield (buf, obj, relations)
 
         logger.info("Backed up dir: {}".format(
             fsentry

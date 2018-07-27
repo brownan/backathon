@@ -2,43 +2,13 @@ import pathlib
 import logging
 import os
 
-from umsgpack import UnpackException
+import umsgpack
 
 from . import models
 from .exceptions import CorruptedRepository
+from . import util
 
 logger = logging.getLogger("backathon.restore")
-
-def _set_file_properties(path, obj_info):
-    """Sets the file properties of the given path
-
-    :type path: pathlib.Path
-    :type obj_info: dict
-
-    Sets: owner, group, mode, atime, mtime
-    """
-    try:
-        os.chown(str(path), obj_info['uid'], obj_info['gid'])
-    except OSError as e:
-        logger.warning("Could not chown {}: {}".format(
-            pathstr(path), e
-        ))
-    try:
-        os.chmod(str(path), obj_info['mode'])
-    except OSError as e:
-        logger.warning("Could not chmod {}: {}".format(
-            pathstr(path), e
-        ))
-    try:
-        os.utime(str(path), ns=(obj_info['atime'], obj_info['mtime']))
-    except OSError as e:
-        logger.warning("Could not set mtime on {}: {}".format(
-            pathstr(path), e
-        ))
-
-def pathstr(p):
-    """Returns the path string suitable for printing or logging"""
-    return os.fsencode(str(p)).decode("UTF-8", errors="replace")
 
 def restore_item(repo, obj, path, key=None):
     """Restore the given object to the given path
@@ -80,13 +50,14 @@ def restore_item(repo, obj, path, key=None):
     # through pathstr() first to sanitize any undecodable unicode surrogates
     path = pathlib.Path(path)
 
-    payload_items = models.Object.unpack_payload(obj.payload)
+    payload = repo.get_object(obj.objid, key)
+    payload_items = unpack_payload(payload)
 
     try:
         obj_type = next(payload_items)
         obj_info = next(payload_items)
         obj_contents = next(payload_items)
-    except UnpackException:
+    except umsgpack.UnpackException:
         logger.error("Can't restore {}: Object {} has invalid cached "
                      "data. Rebuilding the local cache may fix this "
                      "problem.".format(
@@ -109,7 +80,7 @@ def restore_item(repo, obj, path, key=None):
                     for pos, chunk_id in obj_payload_contents:
 
                         try:
-                            blob_payload = models.Object.unpack_payload(
+                            blob_payload = unpack_payload(
                                 repo.get_object(chunk_id, key)
                             )
                         except CorruptedRepository as e:
@@ -122,7 +93,7 @@ def restore_item(repo, obj, path, key=None):
                         try:
                             blob_type = next(blob_payload)
                             blob_contents = next(blob_payload)
-                        except UnpackException:
+                        except umsgpack.UnpackException:
                             logger.error(
                                 "Could not restore chunk of {} at byte {}: "
                                 "invalid or corrupted data".format(
@@ -192,3 +163,50 @@ def restore_item(repo, obj, path, key=None):
         raise NotImplementedError("Restore not implemented for {} "
                                   "object type".format(obj_type))
 
+def _set_file_properties(path, obj_info):
+    """Sets the file properties of the given path
+
+    :type path: pathlib.Path
+    :type obj_info: dict
+
+    Sets: owner, group, mode, atime, mtime
+    """
+    try:
+        os.chown(str(path), obj_info['uid'], obj_info['gid'])
+    except OSError as e:
+        logger.warning("Could not chown {}: {}".format(
+            pathstr(path), e
+        ))
+    try:
+        os.chmod(str(path), obj_info['mode'])
+    except OSError as e:
+        logger.warning("Could not chmod {}: {}".format(
+            pathstr(path), e
+        ))
+    try:
+        os.utime(str(path), ns=(obj_info['atime'], obj_info['mtime']))
+    except OSError as e:
+        logger.warning("Could not set mtime on {}: {}".format(
+            pathstr(path), e
+        ))
+
+def pathstr(p):
+    """Returns the path string suitable for printing or logging"""
+    return os.fsencode(str(p)).decode("UTF-8", errors="replace")
+
+def unpack_payload(payload):
+    """Returns an iterator over a payload, iterating over the msgpacked
+    objects within
+
+    :param payload: A file-like object open for reading
+
+    """
+    buf = util.BytesReader(payload)
+    try:
+        while True:
+            try:
+                yield umsgpack.unpack(buf)
+            except umsgpack.InsufficientDataException:
+                return
+    finally:
+        buf.close()

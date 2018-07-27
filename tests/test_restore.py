@@ -135,8 +135,11 @@ class TestRestore(TestBase):
         # The directory atime gets reset before we back it up, so just check
         # that whatever value it had when it was backed up, that's what gets
         # restored.
+        key = self.repo.encrypter.get_decryption_key(self.password)
         tree = ss.root.children.get()
-        info = list(models.Object.unpack_payload(tree.payload))[1]
+        payload = self.repo.get_object(tree.objid, key)
+        from backathon.restore import unpack_payload
+        info = list(unpack_payload(payload))[1]
         atime = info['atime']
 
         self.repo.restore(ss.root, self.restoredir, self.password)
@@ -226,40 +229,6 @@ class TestRestore(TestBase):
 
         self.assert_restored_file(name, "contents")
 
-    def test_calculate_children(self):
-        """Checks that the Object.calculate_children() works as expected
-
-        Doesn't actually call restore()
-        """
-        self.create_file("dir1/file1", "contents")
-        self.create_file("dir1/file2", "asdf")
-        self.create_file("dir2/file3", "aoeu")
-        self.create_file("dir2/file4", "zzzz")
-
-        self.repo.scan()
-        self.repo.backup()
-
-        self.assertEqual(
-            11,
-            self.object.count()
-        )
-
-        # Make sure the table is consistent, as the unit tests are run in a
-        # transaction and so foreign key constraints are not enforced
-        with connections[self.repo.db].cursor() as c:
-            c.execute("PRAGMA foreign_key_check")
-            self.assertEqual(
-                0,
-                len(list(c))
-            )
-
-        for obj in self.object.all():
-            self.assertSetEqual(
-                set(b.hex() for b in obj.calculate_children()),
-                {c.objid.hex() for c in obj.children.all()},
-                "Object {}'s children don't match".format(obj)
-            )
-
     def test_restore_large_file(self):
         """This file should take more than one block to save, so it tests
         routines that must operate on multiple blocks.
@@ -334,7 +303,6 @@ class TestRestoreWithEncryption(TestRestore):
         tree = ss.root
         inode = tree.children.get()
         blob = inode.children.get()
-        self.assertIs(None, blob.payload)
 
         path = pathlib.Path(self.datadir, "objects",
                             blob.objid.hex()[:3],

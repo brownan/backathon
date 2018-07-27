@@ -7,6 +7,7 @@ import umsgpack
 
 from backathon import models, util
 from .base import TestBase
+from backathon.restore import unpack_payload
 
 class FSEntryTest(TestBase):
     """Tests some misc functionality of the FSEntry class"""
@@ -176,7 +177,7 @@ class TestBackup(TestBase):
     def _assert_file_obj(self, obj, contents):
         """Asserts that the given object is a file object with the given
         contents"""
-        payload = obj.unpack_payload(obj.payload)
+        payload = unpack_payload(self.repo.get_object(obj.objid))
         self.assertEqual("inode", next(payload))
 
         info = next(payload)
@@ -188,12 +189,7 @@ class TestBackup(TestBase):
         buf = bytearray(info['size'])
         for pos, chunkid in chunks:
             chunk = self.object.get(objid=chunkid)
-            # Blob object should not have payloads
-            self.assertIs(
-                chunk.payload,
-                None
-            )
-            chunkpayload = chunk.unpack_payload(
+            chunkpayload = unpack_payload(
                 self.repo.get_object(chunk.objid)
             )
             self.assertEqual("blob", next(chunkpayload))
@@ -206,7 +202,7 @@ class TestBackup(TestBase):
     def _assert_dir(self, obj, contents):
         """Asserts that the given object is a dir object with the given
         contents"""
-        payload = obj.unpack_payload(obj.payload)
+        payload = unpack_payload(self.repo.get_object(obj.objid))
         self.assertEqual("tree", next(payload))
 
         info = next(payload)
@@ -314,20 +310,12 @@ class TestBackup(TestBase):
             )
             self.assertTrue(obj_filepath.is_file())
 
-            cached_payload = obj.payload
             remote_payload = self.repo.get_object(obj.objid)
 
-            if cached_payload is None:
-                # Only blob type objects don't have a cached payload
-                self.assertEqual(
-                    "blob",
-                    umsgpack.unpack(util.BytesReader(remote_payload))
-                )
-            else:
-                self.assertEqual(
-                    cached_payload,
-                    remote_payload,
-                )
+            self.assertEqual(
+                obj.type,
+                umsgpack.unpack(util.BytesReader(remote_payload))
+            )
 
     def test_backup(self):
         self.create_file("dir/file1", "file contents")

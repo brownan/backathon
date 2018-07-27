@@ -20,14 +20,17 @@ from .exceptions import CorruptedRepository
 from . import encryption
 from . import storage
 
+
 class KeyRequired(Exception):
     pass
+
 
 class Settings:
     """A loose proxy for the Settings database model that does json
     encoding/decoding
 
     """
+
     def __init__(self, alias):
         self.alias = alias
 
@@ -43,12 +46,14 @@ class Settings:
         value = json.dumps(value)
         models.Setting.set(key, value, using=self.alias)
 
+
 class SimpleSetting:
     """A descriptor class that is used to define a getter+setter on the
     Repository class that reads/writes a simple (immutable) value from the
     database
 
     """
+
     def __init__(self, name, default=None):
         self.name = name
         self.default = default
@@ -66,6 +71,7 @@ class SimpleSetting:
     def __set__(self, instance, value):
         instance.__dict__[self.name] = value
         instance.settings[self.name] = value
+
 
 ###########################
 ###########################
@@ -87,11 +93,8 @@ class Repository:
         # In-memory databases are used in unit tests
         if dbfile != ":memory:":
             dbfile = os.path.abspath(dbfile)
-        self.db = slugify(dbfile) # Something unique for this file
-        config = {
-            'ENGINE': 'backathon.sqlite3_backend',
-            'NAME': dbfile,
-        }
+        self.db = slugify(dbfile)  # Something unique for this file
+        config = {'ENGINE': 'backathon.sqlite3_backend', 'NAME': dbfile, }
         if self.db not in django.db.connections.databases:
             django.db.connections.databases[self.db] = config
 
@@ -123,7 +126,7 @@ class Repository:
     # up file.
     #
     # Good values for this probably range from between 1 and 10 megabytes.
-    backup_inline_threshold = SimpleSetting("BACKUP_INLINE_THRESHOLD", 2**21)
+    backup_inline_threshold = SimpleSetting("BACKUP_INLINE_THRESHOLD", 2 ** 21)
 
     @cached_property
     def encrypter(self):
@@ -131,10 +134,8 @@ class Repository:
         cls_name = data['class']
         settings = data['settings']
 
-        cls = {
-            "none": encryption.NullEncryption,
-            "nacl": encryption.NaclSealedBox,
-        }[cls_name]
+        cls = {"none": encryption.NullEncryption,
+               "nacl": encryption.NaclSealedBox, }[cls_name]
 
         return cls.init_from_private(settings)
 
@@ -145,16 +146,12 @@ class Repository:
 
         :type encrypter: encryption.BaseEncryption
         """
-        cls_name = {
-            encryption.NullEncryption: "none",
-            encryption.NaclSealedBox: "nacl",
-        }[type(encrypter)]
+        cls_name = {encryption.NullEncryption: "none",
+                    encryption.NaclSealedBox: "nacl", }[type(encrypter)]
         settings = encrypter.get_private_params()
 
-        self.settings['ENCRYPTION_SETTINGS'] = {
-            'class': cls_name,
-            'settings': settings,
-        }
+        self.settings['ENCRYPTION_SETTINGS'] = {'class': cls_name,
+                                                'settings': settings, }
         self.__dict__["encrypter"] = encrypter
 
     @cached_property
@@ -188,10 +185,8 @@ class Repository:
         return cls(**settings)
 
     def set_storage(self, cls_name, settings):
-        self.settings['STORAGE_SETTINGS'] = {
-            'class': cls_name,
-            'settings': settings,
-        }
+        self.settings['STORAGE_SETTINGS'] = {'class': cls_name,
+                                             'settings': settings, }
 
         self.__dict__.pop("storage", None)
         return self.storage
@@ -258,83 +253,71 @@ class Repository:
         # ten million objects, each directory has on the order of 10^3
         # objects per directory. Should be manageable for most filesystems.
         objid_hex = objid.hex()
-        return "objects/{}/{}".format(
-            objid_hex[:3],
-            objid_hex,
-        )
+        return "objects/{}/{}".format(objid_hex[:3], objid_hex, )
 
     ################################
     # These next methods are the low level interface used by the scanning,
     # backup, and restore routines.
     ################################
 
-    def push_object(self, payload, children):
-        """Pushes the given payload as a new object into the object store.
+    def push_object(self, payload, obj, relations):
+        """Pushes the given payload to the remote repository.
 
-        Returns the newly created models.Object instance.
+        Atomically commits the given models.Object and related ObjectRelation
+        instances to the database.
 
-        If the payload already exists in the remote data store, then it is
-        not uploaded, and the existing object is returned instead.
+        The payload is hashed to determine the object ID. If an ID
+        already exists in the Object table, implying it already exists in the
+        remote repository, then it is not uploaded, and the existing object
+        is returned instead.
+
+        Otherwise, the payload is uploaded, the obj and relation
+        instances are saved, and the newly saved models.Object
+        instance is returned.
 
         :param payload: The file-like object to push to the remote data store
         :type payload: io.BytesIO
 
-        :param children: A list of Objects that should be added as children
-        of this object if we have to create the object.
+        :param obj: An unsaved Object that corresponds to the given payload
+        :type obj: models.Object
+
+        :param relations: A list of obj relations that should be saved along
+        with the given Object instance
+        :type relations: list[models.ObjectRelations]
 
         :returns: The new or existing Object
         :rtype: models.Object
 
-        Note that since this routine is called during backup, we expect all
-        dependent objects to be in the database already.
         """
         view = payload.getbuffer()
         objid = self.encrypter.calculate_objid(view)
 
         with atomic_immediate():
             try:
-                obj_instance = models.Object.objects.using(self.db).get(
-                    objid=objid
-                )
+                obj = models.Object.objects.using(self.db).get(objid=objid)
             except models.Object.DoesNotExist:
-                # Object wasn't in the database. Create it.
-                obj_instance = models.Object(objid=objid)
-                obj_instance.load_payload(view)
-                obj_instance.save(using=self.db)
-
-                # Note, there could be duplicate children so we have to
-                # deduplicate to avoid a unique constraint violation
-                models.ObjectRelation.objects.using(self.db).bulk_create([
-                    models.ObjectRelation(
-                        parent=obj_instance,
-                        child_id=c,
-                    ) for c in set(child.objid for child in children)
-                ])
-
-                name = self._get_path(objid)
+                # Object wasn't in the database.
+                obj.objid = objid
+                obj.uploaded_size = len(view)
+                obj.save(using=self.db, force_insert=True)
+                for r in relations:
+                    r.parent = obj
+                models.ObjectRelation.objects.using(self.db).bulk_create(
+                    relations
+                )
 
                 to_upload = self.encrypter.encrypt_bytes(
-                    self.compress_bytes(view)
+                    self.compress_bytes(
+                        view
+                    )
                 )
-                self.storage.upload_file(name, util.BytesReader(to_upload))
-            else:
-                # It was already in the database
-                # Do a sanity check to make sure the object's payload is the
-                # same as the one we found in the database. They should be
-                # since the objects are addressed by the hash of their
-                # payload, so this would only happen if there's a bug or
-                # someone mucked with the database manually (by changing the
-                # payload).
-                assert view == obj_instance.payload \
-                       or obj_instance.payload is None
-                # At the cost of another database query, also check the
-                # children match. The set of children passed in comes from
-                # FSEntry.backup(), as the FSEntry's children's objects. The
-                # the Object keeps its own list of children which should be the
-                # same.
-                assert set(children) == set(obj_instance.children.all())
 
-        return obj_instance
+                self.storage.upload_file(
+                    self._get_path(objid),
+                    util.BytesReader(to_upload),
+                )
+
+        return obj
 
     def get_object(self, objid, key=None):
         """Retrieves the object from the remote datastore.
@@ -360,15 +343,10 @@ class Repository:
         try:
             _, file = self.storage.download_file(self._get_path(objid))
             contents = self.decompress_bytes(
-                self.encrypter.decrypt_bytes(
-                    file.read(),
-                    key
-                )
-            )
+                self.encrypter.decrypt_bytes(file.read(), key))
         except Exception as e:
-            raise CorruptedRepository("Failed to read object {}: {}".format(
-                objid.hex(), e
-            )) from e
+            raise CorruptedRepository(
+                "Failed to read object {}: {}".format(objid.hex(), e)) from e
 
         digest = self.encrypter.calculate_objid(contents)
         if not hmac.compare_digest(digest, objid):
@@ -385,17 +363,12 @@ class Repository:
         path = "snapshots/" + str(uuid.uuid4())
         contents = io.BytesIO()
         umsgpack.pack("snapshot", contents)
-        umsgpack.pack({
-            "date": snapshot.date.timestamp(),
-            "root": snapshot.root_id,
-            "path": snapshot.path,
-        }, contents)
+        umsgpack.pack(
+            {"date": snapshot.date.timestamp(), "root": snapshot.root_id,
+             "path": snapshot.path, }, contents)
         contents.seek(0)
         to_upload = self.encrypter.encrypt_bytes(
-            self.compress_bytes(
-                contents.getbuffer()
-            )
-        )
+            self.compress_bytes(contents.getbuffer()))
         self.storage.upload_file(path, util.BytesReader(to_upload))
 
     ############################
@@ -411,9 +384,7 @@ class Repository:
         See more info in the backathon.scan module
         """
         from . import scan
-        scan.scan(alias=self.db,
-                  progress=progress,
-                  skip_existing=skip_existing)
+        scan.scan(alias=self.db, progress=progress, skip_existing=skip_existing)
 
     def add_root(self, root_path):
         """Adds a new root path to the backup set
@@ -428,9 +399,7 @@ class Repository:
         from django.db import IntegrityError
         root_path = os.path.abspath(root_path)
         try:
-            models.FSEntry.objects.using(self.db).create(
-                path=root_path,
-            )
+            models.FSEntry.objects.using(self.db).create(path=root_path, )
         except IntegrityError:
             pass
 
@@ -440,10 +409,9 @@ class Repository:
         entry.delete()
 
     def get_roots(self):
-        return [
-            entry.path for entry in
-            models.FSEntry.objects.using(self.db).filter(parent__isnull=True)
-            ]
+        return [entry.path for entry in
+                models.FSEntry.objects.using(self.db).filter(
+                    parent__isnull=True)]
 
     def backup(self, progress=None):
         """Perform a backup
@@ -474,13 +442,9 @@ class Repository:
         repository is essential for recovering from a complete loss of the
         local cache
         """
-        data = {
-            "encryption": self.encrypter.get_public_params(),
-            "compression": self.compression,
-        }
-        buf = io.BytesIO(
-            json.dumps(data).encode("utf-8")
-        )
+        data = {"encryption": self.encrypter.get_public_params(),
+                "compression": self.compression, }
+        buf = io.BytesIO(json.dumps(data).encode("utf-8"))
         self.storage.upload_file("backathon.json", buf)
 
     def restore(self, obj, path, password):

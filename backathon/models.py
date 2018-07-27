@@ -44,12 +44,6 @@ class Object(models.Model):
     # use bytes.fromhex(hex_representation)
     objid = models.BinaryField(primary_key=True)
 
-    # For now we store the entire payload for metadata-type objects locally.
-    # Eventually I plan to do away with this and store just what we need in
-    # dedicated columns, both to save space and to allow indexes on those
-    # fields.
-    payload = models.BinaryField(blank=True, null=True)
-
     children = models.ManyToManyField(
         "self",
         symmetrical=False,
@@ -58,103 +52,32 @@ class Object(models.Model):
         through_fields=('parent', 'child'),
     )
 
+    # These fields are cached about the object. They may or may not have
+    # values depending on the object type
+    type = models.CharField(
+        max_length=16,
+        blank=True, null=True, default=None,
+    )
+    uploaded_size = models.PositiveIntegerField(
+        blank=True,
+        null=True,
+        help_text="Size of the uploaded payload, after compression and "
+                  "encryption",
+    )
+    file_size = models.PositiveIntegerField(
+        blank=True, null=True,
+        help_text="For inode objects, this is the file's size",
+    )
+    last_modified_time = models.DateTimeField(
+        blank=True, null=True,
+        help_text="For inode and tree objects, this is the last modified time",
+    )
+
     def __repr__(self):
         return "<Object {}>".format(self.objid.hex())
 
     def __str__(self):
         return self.objid.hex()
-
-    def load_payload(self, payload):
-        """Loads a payload of data into this Object entry
-
-        When an object is created or an object is being downloaded from a
-        remote data store, the blob contents get stored locally. This method
-        takes the blob and stores it, but also does any deeper processing
-        needed to build indices to make searching the backups easier and faster.
-
-        :type payload: bytes
-
-        Which indices are populated is configurable, and not all indices may
-        be used depending on the settings. For example, caching filenames of
-        tree and inode objects enables file searching, but it takes up quite
-        a bit of disk space for those fields and indices on those fields.
-
-        This method is idempotent.
-
-        If settings related to the indices change, then you'll need to
-        iterate through all Objects and call obj.load_payload(obj.payload) to
-        recompute fields that may not have been populated.
-        """
-        payload_items = Object.unpack_payload(payload)
-        objtype = next(payload_items)
-        payload_items.close()
-
-        if objtype != "blob":
-            self.payload = payload
-
-        # TODO: further processing and indexing of the contents of the payload.
-        # (no other indices are currently implemented)
-
-    def calculate_children(self):
-        """Gets the set of children from the cached payload
-
-        Callers can use this to rebuild the children relation table. It's
-        mostly useful when re-building the cache from remote repository data.
-
-        Callers should take care to not just pass the result to
-        obj.children.set(), because the objects may not exist in the
-        database, either because it's missing from the repository, or it just
-        hasn't been inserted yet.
-
-        Further, due to SQLite's deferrable foreign keys, an integrity error
-        won't be raised until the end of the transaction.
-
-        A caller will probably want to check each child object for existence
-        manually before inserting it as a child reference. Alternately,
-        it can use SQLite's foreign_key_check pragma to insert children
-        references in bulk, and then clean them up before committing the
-        transaction.
-
-        """
-        if not self.payload:
-            return []
-
-        payload_items = Object.unpack_payload(self.payload)
-        objtype = next(payload_items)
-        try:
-            if objtype == "tree":
-                next(payload_items)
-                children = [c[1] for c in next(payload_items)]
-
-            elif objtype == "inode":
-                next(payload_items)
-                children = [c[1] for c in next(payload_items)[1]]
-
-            else:
-                children = []
-
-        finally:
-            payload_items.close()
-
-        return children
-
-    @staticmethod
-    def unpack_payload(payload):
-        """Returns an iterator over a payload, iterating over the msgpacked
-        objects within
-
-        This exists as a static method since callers may need to call it
-        without wanting to load in into an Object instance
-        """
-        buf = util.BytesReader(payload)
-        try:
-            while True:
-                try:
-                    yield umsgpack.unpack(buf)
-                except umsgpack.InsufficientDataException:
-                    return
-        finally:
-            buf.close()
 
     @classmethod
     def collect_garbage(cls, using):
@@ -242,41 +165,10 @@ class Object(models.Model):
             if not all(hash_match(h, objid) for h in hashes):
                 yield obj
 
-    def get_child_by_name(self, name):
-        """For tree objects, this gets the child object of the given name
-
-        Raises ValueError if the current object is not a tree.
-        Raises Object.DoesNotExist if a child with the given name is not found
-
-        :param name: The name to search for. If a string is given,
-        it's encoded with the default filesystem encoding.
-        :type name: str|bytes
-        """
-        # Currently implemented by parsing the metadata. When a directory
-        # index is implemented, this method should be rewritten to check that
-        if isinstance(name, str):
-            name = os.fsencode(name)
-
-        if not self.payload:
-            raise self.DoesNotExist("No payload")
-
-        payload_items = Object.unpack_payload(self.payload)
-        if next(payload_items) != "tree":
-            raise ValueError("Object is not a tree")
-
-        next(payload_items)
-        for n, objid in next(payload_items):
-            if n == name:
-                return self.children.get(id=objid)
-        raise Object.DoesNotExist("Object has no child named {!r}".format(name))
-
 class ObjectRelation(models.Model):
     """Keeps track of the dependency graph between objects"""
     class Meta:
         db_table = "object_relations"
-        unique_together = [
-            ('parent', 'child'),
-        ]
 
     parent = models.ForeignKey(
         "Object",
@@ -288,6 +180,20 @@ class ObjectRelation(models.Model):
         on_delete=models.CASCADE,
         related_name="+",
     )
+
+    name = models.CharField(
+        max_length=4096,
+        help_text="The decoded name of this directory entry if parent is a "
+                  "tree object. Names are decoded using the 'ignore' error "
+                  "handler",
+        blank=True, null=True, default=None,
+    )
+
+    def __repr__(self):
+        return "<ObjectRelation {}→{}>".format(
+            self.parent_id.hex()[:7],
+            self.child_id.hex()[:7],
+        )
 
 class FSEntry(models.Model):
     """Keeps track of an entry in the local filesystem, either a directory,
