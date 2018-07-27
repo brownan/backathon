@@ -1,12 +1,14 @@
 import argparse
 import os.path
 import logging
+import pkgutil
 import sys
+from importlib import import_module
 
 import django
-from django.core.management import load_command_class, find_commands, \
-    BaseCommand, CommandError
 from django.apps import apps
+
+from .commands import CommandError, CommandBase
 
 logger = logging.getLogger("backathon.main")
 
@@ -18,7 +20,7 @@ def main():
     """Main entry point for the command line interface
 
     The workflow of this function follows a similar pattern as Django's
-    MangementUtility.execute() in that an inital "fake" parser is used to
+    MangementUtility.execute() in that an initial "fake" parser is used to
     parse a couple preliminary arguments, but we always force the very first
     argument to be the subcommand, never an option.
     It also only exports commands from this package.
@@ -32,29 +34,16 @@ def main():
         subcommand = "help"
 
     parser = argparse.ArgumentParser(
-        usage="%(prog)s subcommand --config CONFIG [options] [args]",
+        usage="%(prog)s subcommand CONF_DB [options] [args]",
         add_help=False,
     )
-    parser.add_argument("--config")
+    parser.add_argument("config")
     options, args = parser.parse_known_args(argv)
 
-    # Set the path to the database from either the command line option or an
-    # env var. It must be set one way or the other.
-    if options.config:
-        os.environ['BACKATHON_CONFIG'] = options.config
-    if not "BACKATHON_CONFIG" in os.environ:
-        if subcommand == "help":
-            # Just going to display some help... set an in-memory database so
-            # we don't run into any errors if something tries to do database
-            # access
-            os.environ['BACKATHON_CONFIG'] = ":memory:"
-        else:
-            parser.error("You must use --config or set the environment variable "
-                         "BACKATHON_CONFIG")
-    dbpath = os.environ['BACKATHON_CONFIG']
+    dbpath = options.config
 
-    # Special exception, all commands except for 'init' require the database
-    # to exist.
+    # Special exception, all commands except for 'help' and 'init' require the
+    # database to exist.
     if subcommand not in ['init', 'help'] and not os.path.exists(dbpath):
         sys.stderr.write("Could not find config database: {}\n".format(dbpath))
         sys.stderr.write("Check the path, or if this is a new config you must run 'init'\n")
@@ -62,12 +51,8 @@ def main():
 
     setup()
 
-    # Now that we've configured Django, we can import the rest of the modules
-    # and configure the real parser specific for the given subcommand
-    backathon_config = apps.app_configs['backathon']
-    commands = find_commands(
-        os.path.join(backathon_config.path, 'management')
-    )
+    commands = find_commands()
+
     if subcommand == "help":
         usage = [
             parser.usage % {'prog': parser.prog},
@@ -84,17 +69,18 @@ def main():
                          .format(subcommand, os.path.basename(argv[0])))
         sys.exit(1)
 
-    command_class = load_command_class("backathon", subcommand)
-    assert isinstance(command_class, BaseCommand)
+    command_class = get_command_class(subcommand)
+    assert isinstance(command_class, CommandBase)
 
     # Reconfigure the parser and re-parse the arguments
     parser = argparse.ArgumentParser(
         prog="{} {}".format(os.path.basename(argv[0]), subcommand),
         description=command_class.help or None,
     )
+    parser.add_argument("config", help="Path to the config database",
+                        metavar="CONF_DB")
     parser.add_argument("-v", "--verbose", action="count", default=0)
     parser.add_argument("-q", "--quiet", action="store_true")
-    parser.add_argument("--config", help="Path to the config database")
     command_class.add_arguments(parser)
 
     options = parser.parse_args(argv[2:])
@@ -115,10 +101,21 @@ def main():
     ))
 
     try:
-        command_class.handle(**vars(options))
+        command_class.handle(options)
     except CommandError as e:
-        command_class.stderr.write(str(e))
+        logger.error(str(e))
         sys.exit(1)
+
+def find_commands():
+    backathon_config = apps.app_configs['backathon']
+    path = os.path.join(backathon_config.path, "commands")
+    return [name for _, name, is_pkg in pkgutil.iter_modules([path])
+            if not is_pkg and not name.startswith("_")]
+
+def get_command_class(cmd_name):
+    module = import_module('backathon.commands.{}'.format(cmd_name))
+    return module.Command()
+
 
 if __name__ == "__main__":
     main()

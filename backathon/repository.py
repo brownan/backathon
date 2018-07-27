@@ -46,6 +46,9 @@ class Settings:
         value = json.dumps(value)
         models.Setting.set(key, value, using=self.alias)
 
+    def __contains__(self, item):
+        return models.Setting.objects.using(self.alias).filter(key=item).exists()
+
 
 class SimpleSetting:
     """A descriptor class that is used to define a getter+setter on the
