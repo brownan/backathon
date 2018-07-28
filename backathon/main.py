@@ -8,7 +8,7 @@ from importlib import import_module
 import django
 from django.apps import apps
 
-from .commands import CommandError, CommandBase
+from backathon.commands import CommandError, CommandBase
 
 logger = logging.getLogger("backathon.main")
 

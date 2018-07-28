@@ -3,6 +3,7 @@ import os
 import stat
 import io
 import datetime
+import concurrent.futures
 
 from django.db.transaction import atomic
 from django.db import connections
@@ -57,25 +58,51 @@ def backup(repo, progress=None):
     while to_backup.exists():
 
         ct = 0
-        for entry in ready_to_backup.iterator(): # type: models.FSEntry
-            ct += 1
 
-            # This sanity check is just making sure that our query works
-            # correctly by only selecting entries that haven't been backed up
-            # yet. Because we're modifying entries and iterating over a
-            # result set at the same time, SQLite may return a row twice,
-            # but since the modified rows don't match our query,
-            # they shouldn't re-appear in this same query. However,
-            # the SQLite documentation on isolation isn't clear on this. If I
-            # see this assert statement getting hit in practice, then the
-            # thing to do is to ignore the entry and move on.
-            assert entry.obj_id is None
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            tasks = set()
 
-            backup_entry(repo, entry)
+            for entry in ready_to_backup.iterator(): # type: models.FSEntry
+                ct += 1
 
-            backup_count += 1
-            if progress is not None:
-                progress(backup_count, backup_total)
+                # This sanity check is just making sure that our query works
+                # correctly by only selecting entries that haven't been backed up
+                # yet. Because we're modifying entries and iterating over a
+                # result set at the same time, SQLite may return a row twice,
+                # but since the modified rows don't match our query,
+                # they shouldn't re-appear in this same query. However,
+                # the SQLite documentation on isolation isn't clear on this. If I
+                # see this assert statement getting hit in practice, then the
+                # thing to do is to ignore the entry and move on.
+                assert entry.obj_id is None
+
+                tasks.add(
+                    executor.submit(backup_entry, repo, entry)
+                )
+
+                # Check if any are done yet. If all workers are busy,
+                # don't submit any more just yet. If too many items are in
+                # the task queue, then workers won't get a shutdown signal
+                # in a timely manner, interfering with shutdown requests from
+                # e.g. ctrl-C.
+                if len(tasks) < executor._max_workers+1:
+                    timeout = 0
+                else:
+                    timeout = None
+
+                try:
+                    done, tasks = concurrent.futures.wait(tasks, timeout=timeout)
+                except KeyboardInterrupt:
+                    print()
+                    print("Ctrl-C received. Finishing current uploads, "
+                          "please wait...")
+                    import sys
+                    sys.exit(1)
+
+                for _ in done:
+                    backup_count += 1
+                    if progress is not None:
+                        progress(backup_count, backup_total)
 
         # Sanity check: if we entered the outer loop but the inner loop's
         # query didn't select anything, then we're not making progress and
