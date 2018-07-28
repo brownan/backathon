@@ -24,8 +24,13 @@ class TestBase(TestCase):
             tempfile.TemporaryDirectory(),
         )
 
-        # Create a repo object with an in-memory database, and configure it
-        self.repo = Repository(":memory:")
+        # Create a repo object with a temporary database. We can't use sqlite
+        # in-memory databases because the backup routine is multi-threaded
+        # and all threads access the same database.
+        tmpdb = tempfile.NamedTemporaryFile(delete=False)
+        tmpdb.close()
+        self.stack.callback(os.unlink, tmpdb.name)
+        self.repo = Repository(tmpdb.name)
 
         self.repo.set_storage("local", {"base_dir": self.datadir})
         self.repo.set_compression(False)

@@ -56,11 +56,10 @@ def backup(repo, progress=None):
     backup_count = 0
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        tasks = set()
 
         while to_backup.exists():
             ct = 0
-
-            tasks = set()
 
             for entry in ready_to_backup.iterator(): # type: models.FSEntry
                 ct += 1
@@ -105,13 +104,13 @@ def backup(repo, progress=None):
                     if progress is not None:
                         progress(backup_count, backup_total)
 
-        # Sanity check: if we entered the outer loop but the inner loop's
-        # query didn't select anything, then we're not making progress and
-        # may be caught in an infinite loop. In particular, this could happen
-        # if we somehow got a cycle in the FSEntry objects in the database.
-        # There would be entries needing backing up, but none of them have
-        # all their dependent children backed up.
-        assert ct > 0
+            # Sanity check: if we entered the outer loop but the inner loop's
+            # query didn't select anything, then we're not making progress and
+            # may be caught in an infinite loop. In particular, this could happen
+            # if we somehow got a cycle in the FSEntry objects in the database.
+            # There would be entries needing backing up, but none of them have
+            # all their dependent children backed up.
+            assert ct > 0
 
     now = timezone.now()
 

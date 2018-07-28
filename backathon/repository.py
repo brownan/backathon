@@ -98,7 +98,8 @@ class Repository:
 
     def __init__(self, dbfile):
         # Create the database connection and register it with Django.
-        # In-memory databases are used in unit tests
+        # In-memory databases are not recommended because separate threads
+        # will not share the same in-memory database.
         if dbfile != ":memory:":
             dbfile = os.path.abspath(dbfile)
         self.db = slugify(dbfile)  # Something unique for this file
