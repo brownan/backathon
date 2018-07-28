@@ -71,23 +71,7 @@ def backup(repo, progress=None):
             # thing to do is to ignore the entry and move on.
             assert entry.obj_id is None
 
-            iterator = backup_iterator(
-                entry,
-                inline_threshold=repo.backup_inline_threshold,
-            )
-
-            try:
-                yielded = next(iterator)
-                while True:
-                    obj = repo.push_object(*yielded)
-                    yielded = iterator.send(obj)
-            except StopIteration:
-                pass
-
-            # Sanity check: If a bug in the backup generator function doesn't
-            # set one of these, the entry will be selected next iteration,
-            # causing an infinite loop
-            assert entry.obj_id is not None or entry.id is None
+            backup_entry(repo, entry)
 
             backup_count += 1
             if progress is not None:
@@ -117,6 +101,26 @@ def backup(repo, progress=None):
 
     with connections[repo.db].cursor() as cursor:
         cursor.execute("ANALYZE")
+
+def backup_entry(repo, entry):
+    iterator = backup_iterator(
+        entry,
+        inline_threshold=repo.backup_inline_threshold,
+    )
+
+    try:
+        yielded = next(iterator)
+        while True:
+            obj = repo.push_object(*yielded)
+            yielded = iterator.send(obj)
+    except StopIteration:
+        pass
+
+    # Sanity check: If a bug in the backup generator function doesn't
+    # set one of these, the entry will be selected next iteration,
+    # causing an infinite loop
+    assert entry.obj_id is not None or entry.id is None
+
 
 def backup_iterator(fsentry, inline_threshold=2 ** 21):
     """Back up an FSEntry object
