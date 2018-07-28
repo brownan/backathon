@@ -93,23 +93,22 @@ class DatabaseWrapper(base.DatabaseWrapper):
         # truncate instead of overwrite if the file grows larger than this.
         conn.execute("PRAGMA journal_size_limit=10000000").close()
 
-        # The next two options can help improve performance for some kinds of
+        # Setting the synchronous mode to NORMAL sacrifices durability for
+        # performance. Writes to the WAL are not synced, so writes may be lost
+        # on a system crash or power failure, which feels acceptable for this
+        # application. Writes to the database are still synced, and the WAL
+        # is still synced before checkpoints. This can really help
+        # performance on workloads with lots of small transactions.
+        # This doesn't help with writes within a transaction because those
+        # writes aren't synced even under the default synchronous=FULL mode.
+        conn.execute("PRAGMA synchronous=NORMAL").close()
+
+        # The following options can help improve performance for some kinds of
         # workloads, but according to some quick tests, performance is about
         # the same for this application. My guess is that performance is
         # limited by other IO and the database is not the main bottleneck.
         # I'm leaving these settings in the code but commented out so it's
         # easy to uncomment them for performance tests in the future.
-
-        # Setting the synchronous mode to NORMAL sacrifices durability for
-        # performance. Writes to the WAL are not synced, so writes may be lost
-        # on a system crash or power failure, which feels acceptable for this
-        # application. Writes to the database are still synced, and the WAL
-        # is still synced before checkpoints.
-        # This probably doesn't help much because we do most of our
-        # write-heavy operations within a single transaction, and writes
-        # within a transaction aren't synced until commit even under the
-        # default synchronous=FULL mode.
-        #conn.execute("PRAGMA synchronous=NORMAL").close()
 
         # Memory-mapped IO can help performance on read-heavy loads by
         # avoiding a lot of read() system calls, but according to some quick
