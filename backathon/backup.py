@@ -55,11 +55,11 @@ def backup(repo, progress=None):
     backup_total = to_backup.count()
     backup_count = 0
 
-    while to_backup.exists():
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
 
-        ct = 0
+        while to_backup.exists():
+            ct = 0
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             tasks = set()
 
             for entry in ready_to_backup.iterator(): # type: models.FSEntry
@@ -99,7 +99,8 @@ def backup(repo, progress=None):
                     import sys
                     sys.exit(1)
 
-                for _ in done:
+                for f in done:
+                    f.result()
                     backup_count += 1
                     if progress is not None:
                         progress(backup_count, backup_total)
