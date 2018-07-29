@@ -1,3 +1,4 @@
+import time
 from logging import getLogger
 import os
 import stat
@@ -61,7 +62,10 @@ def backup(repo, progress=None):
         while to_backup.exists():
             ct = 0
 
-            for entry in ready_to_backup.iterator(): # type: models.FSEntry
+            last_checkpoint = time.monotonic()
+
+            iterator = ready_to_backup.iterator()
+            for entry in iterator: # type: models.FSEntry
                 ct += 1
 
                 # This sanity check is just making sure that our query works
@@ -103,6 +107,20 @@ def backup(repo, progress=None):
                     backup_count += 1
                     if progress is not None:
                         progress(backup_count, backup_total)
+
+                # SQLite won't auto-checkpoint the write-ahead log while we
+                # have the iterator still open. So we exit this loop every
+                # once in a while and force a WAL checkpoint to keep the WAL
+                # from growing unbounded.
+                if time.monotonic() - last_checkpoint > 30:
+                    # Note: closing the iterator should close the cursor
+                    # within it, but I think this is relying on reference
+                    # counted garbage collection.
+                    # If we run into problems, we'll have to find a different
+                    # strategy to run checkpoints
+                    iterator.close()
+                    with connections[repo.db].cursor() as cursor:
+                        cursor.execute("PRAGMA wal_checkpoint=RESTART")
 
             # Sanity check: if we entered the outer loop but the inner loop's
             # query didn't select anything, then we're not making progress and
