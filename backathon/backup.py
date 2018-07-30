@@ -130,8 +130,24 @@ def backup(repo, progress=None):
             # all their dependent children backed up.
             assert ct > 0
 
-    now = timezone.now()
+        # Collect results for the rest of the tasks
+        try:
+            for f in concurrent.futures.as_completed(tasks):
+                f.result()
+            backup_count += 1
+            if progress is not None:
+                progress(backup_count, backup_total)
+        except KeyboardInterrupt:
+            print()
+            print("Ctrl-C received. Finishing current uploads, "
+                  "please wait...")
+            import sys
+            sys.exit(1)
 
+    # Now add the Snapshot object(s) to the database representing this backup
+    # run. There's one snapshot per root, but they all have the same datetime
+    # so they can still be grouped together in queries.
+    now = timezone.now()
     for root in models.FSEntry.objects.using(repo.db).filter(
         parent__isnull=True
     ):
