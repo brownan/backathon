@@ -1,5 +1,10 @@
+import json
+
 from django.db import DEFAULT_DB_ALIAS
 from django.db.transaction import Atomic, get_connection
+
+from backathon import models
+
 
 class BytesReader:
     """A file-like object that reads from a bytes-like object
@@ -116,3 +121,59 @@ def atomic_immediate(using=None, savepoint=True):
         return AtomicImmediate(DEFAULT_DB_ALIAS, savepoint)(using)
     else:
         return AtomicImmediate(using, savepoint)
+
+
+class Settings:
+    """A loose proxy for the Settings database model that does json
+    encoding/decoding
+
+    """
+
+    def __init__(self, alias):
+        self.alias = alias
+
+    def __getitem__(self, item):
+        value = models.Setting.get(item, using=self.alias)
+        return json.loads(value)
+
+    def get(self, item, default=None):
+        value = models.Setting.get(item, using=self.alias, default=default)
+        return json.loads(value)
+
+    def __setitem__(self, key, value):
+        value = json.dumps(value)
+        models.Setting.set(key, value, using=self.alias)
+
+    def __contains__(self, item):
+        return models.Setting.objects.using(self.alias).filter(key=item).exists()
+
+
+class SimpleSetting:
+    """A descriptor class that is used to define a getter+setter on the
+    Repository class that reads/writes a simple (immutable) value from the
+    database
+
+    """
+
+    def __init__(self, name, default=None):
+        self.name = name
+        self.default = default
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+
+        try:
+            return instance.__dict__[self.name]
+        except KeyError:
+            try:
+                value = instance.settings[self.name]
+            except KeyError:
+                value = self.default
+
+            instance.__dict__[self.name] = value
+            return value
+
+    def __set__(self, instance, value):
+        instance.__dict__[self.name] = value
+        instance.settings[self.name] = value

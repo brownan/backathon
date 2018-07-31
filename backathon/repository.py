@@ -13,7 +13,7 @@ from django.utils.text import slugify
 
 import umsgpack
 
-from .util import atomic_immediate
+from .util import Settings, SimpleSetting, atomic_immediate
 from . import models
 from . import util
 from .exceptions import CorruptedRepository
@@ -21,78 +21,18 @@ from . import encryption
 from . import storage
 
 
-class KeyRequired(Exception):
-    pass
-
-
-class Settings:
-    """A loose proxy for the Settings database model that does json
-    encoding/decoding
-
-    """
-
-    def __init__(self, alias):
-        self.alias = alias
-
-    def __getitem__(self, item):
-        value = models.Setting.get(item, using=self.alias)
-        return json.loads(value)
-
-    def get(self, item, default=None):
-        value = models.Setting.get(item, using=self.alias, default=default)
-        return json.loads(value)
-
-    def __setitem__(self, key, value):
-        value = json.dumps(value)
-        models.Setting.set(key, value, using=self.alias)
-
-    def __contains__(self, item):
-        return models.Setting.objects.using(self.alias).filter(key=item).exists()
-
-
-class SimpleSetting:
-    """A descriptor class that is used to define a getter+setter on the
-    Repository class that reads/writes a simple (immutable) value from the
-    database
-
-    """
-
-    def __init__(self, name, default=None):
-        self.name = name
-        self.default = default
-
-    def __get__(self, instance, owner):
-        if instance is None:
-            return self
-
-        try:
-            return instance.__dict__[self.name]
-        except KeyError:
-            try:
-                value = instance.settings[self.name]
-            except KeyError:
-                value = self.default
-
-            instance.__dict__[self.name] = value
-            return value
-
-    def __set__(self, instance, value):
-        instance.__dict__[self.name] = value
-        instance.settings[self.name] = value
-
-
-###########################
-###########################
-
 class Repository:
-    """This class acts as an interface to the storage backend as well as all
-    operations that are performed on the repository. It also manages the
-    local cache database.
+    """Represents a Backathon repository
+
+    This class is the interface to all operations performed on the remote
+    repository. It also manages the local cache database.
+
 
     Note: creating a new instance of this class registers a new database with
     Django. There's not really a clean way to un-register databases and close
-    old connections, so avoid creating short lived Repository objects,
-    or database connections are likely to be left open.
+    old connections, so calling code should avoid creating short lived
+    Repository objects. Otherwise, database connections are likely to be left
+    open.
 
     """
 
