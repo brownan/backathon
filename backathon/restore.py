@@ -198,7 +198,7 @@ def unpack_payload(payload):
     """Returns an iterator over a payload, iterating over the msgpacked
     objects within
 
-    :param payload: A file-like object open for reading
+    :param payload: A byte-like object
 
     """
     buf = util.BytesReader(payload)

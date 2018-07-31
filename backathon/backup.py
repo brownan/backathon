@@ -134,9 +134,9 @@ def backup(repo, progress=None):
         try:
             for f in concurrent.futures.as_completed(tasks):
                 f.result()
-            backup_count += 1
-            if progress is not None:
-                progress(backup_count, backup_total)
+                backup_count += 1
+                if progress is not None:
+                    progress(backup_count, backup_total)
         except KeyboardInterrupt:
             print()
             print("Ctrl-C received. Finishing current uploads, "
