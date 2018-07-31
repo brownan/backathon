@@ -16,6 +16,7 @@ import umsgpack
 from . import models
 from . import chunker
 from .exceptions import DependencyError
+from .threadpool import ThreadPoolExecutor
 
 logger = getLogger("backathon.backup")
 
@@ -56,7 +57,7 @@ def backup(repo, progress=None):
     backup_total = to_backup.count()
     backup_count = 0
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+    with ThreadPoolExecutor(max_workers=1) as executor:
         tasks = set()
 
         while to_backup.exists():
