@@ -63,9 +63,10 @@ Main TODO list:
 * Local filesystem storage backend: Working
 * Encryption functionality: Working
 * Compression functionality: Working
+* Restore routine: Working
+* Command line interface: Working
+* B2 Backend: Needs Testing
 * Prune routine: Partial
-* Restore routine: Partial
-* B2 Backend: Partial
 * Verify routine: Not started
 * Scheduler / Daemon: Not started
 * GUI: Not started
@@ -101,11 +102,15 @@ up. In many backup programs these two functions happen together: files are
 scanned and backed up if needed in a single step. However, in Backathon the scan 
 routine is decoupled from the backup routine. This has several advantages:
 
-* Scanning can easily be replaced with an inotify watcher. Scans can then 
-happen much less often (e.g. once a day). Inotify would mark files as "dirty" 
-and the backup routine only has to read in those files.
-* To report accurate info on the size and number of files to be backed up, 
-and show progress during backup.
+* The scanning and backup routines can be tuned and optimized independently,
+simplifying the code.
+* Scanning can be supplemented with an inotify watcher. Full scans can
+then happen much less often (e.g. once a day) while inotify runs continuously
+in the background and marks files as "dirty" when they change. The backup
+routine then only has to read in those files.
+* Having a list of "dirty" files lets us report accurate info on the size
+and number of files to be backed up, as well as accurate progress bars during
+backup.
 
 Backathon keeps a local cache of all files in the backup set, and stores some 
 metadata on each one. When a scan is performed, metadata from an `lstat()` 
@@ -120,22 +125,17 @@ finds which files should be read in and checked.)
 
 Right now, the metadata stored and used to determine changed files is:
 
-* st_mode (includes file type and permissions)
-* st_mtime_ns (last modified time)
-* st_size
+* `st_mode` (includes file type and permissions)
+* `st_mtime_ns` (last modified time)
+* `st_size`
 
 The file cache is kept in a local SQLite table. The scan process selects all 
 entries from this table and iterates over them, performing the `lstat()` call
 on each one. If a file has changed according to the metadata listed above, it
 is marked as dirty and its metadata updated in the database. If a directory 
 has changed, a `listdir()` is performed and its children updated: any old 
-children are deleted and any new children are added and flagged as "new" for 
-the next pass.
-
-When the first scan pass finishes, a second pass selects any entries with the 
-"new" flag and the same process is repeated. Passes continue until no more 
-new files are selected. For the initial scan, that would effectively make 
-this a breadth-first search from the root of the backup set.
+children are deleted and any new children are added and flagged as "new". The
+table is iterated over until there are no "new" entries left.
  
 Traversing the entries by iterating over the database table helps keep I/O 
 relatively low compared to traversing the filesystem, which would require a 
@@ -155,7 +155,7 @@ everything uploaded into the repository is an object, and objects are
 identified by a hash of their contents. This has the advantage of inherent 
 deduplication, as two objects with the same contents will only be stored once.
 
-In this system, there are three kinds of objects: Tree objects, Inode 
+In this system, there are three main types of objects: Tree objects, Inode
 objects, and Blob objects. They roughly correspond to their respective 
 filesystem counterparts.
 
@@ -250,9 +250,10 @@ This leaves two questions:
 1. How big should the chunks be?
 2. How large does a file have to be before it's worth chunking at all?
 
-Backblaze has set these parameters at 10MB and 30MB respectively [1], and 
-these are the parameters I've chosen to implement initially. As the software 
-matures and I get more feedback and benchmarks, these parameters can be tuned.
+Backblaze has set these parameters at 10MB and 30MB respectively [1] for their
+personal backup service, and seem like good initial values to me. As the
+software matures and I get more feedback and benchmarks, these parameters can
+be tuned.
 
 Some backup systems (such as Borg) use variable sized chunks and a rolling 
 hash to determine where to split the chunk boundaries. This has the advantage
@@ -309,9 +310,11 @@ being encrypted and authenticated with the proper keys
 * Valid, deleted objects may be re-inserted (replay attack), but it's 
 impossible for an attacker to construct a new original snapshot out of 
 existing or old valid objects since the references to other objects within 
-the object payload are authenticated.
+the object payloads are authenticated.
 
-These are the possible threats with this model:
+These are the possible threats with this model. Review this section carefully
+and decide whether these threats are acceptable to you before using this
+software.
 
 * Since snapshots are stored one per file, an attacker knows how many 
 snapshots exist
@@ -323,7 +326,8 @@ cache from the repository would notice missing objects)
 effectively restoring that snapshot
 * An attacker can delete objects or corrupt their contents to render some or 
 all snapshots inoperable. Such corruption would be detected during a restore,
-but would not be detected during the normal backup process
+but would not be detected during the normal backup process (as backups are a
+write-only operation)
 * An attacker observing access patterns can learn how often backups are 
 taken, and how much data is written to the repository
 * Careful analysis of the uploaded object sizes, number of objects at 
@@ -332,19 +336,20 @@ information about file sizes or directory structure of the backup set. For
 example, lots of small files, or lots of directories would generate more 
 metadata objects, which have a fairly predictiable and consistent size.
 * If an attacker has write access to a file in the backup set, it's possible 
-to mount a fingerprinting attack, where known data is written to a local file. 
-The attacker can then observe whether a new chunk is uploaded to the 
-repository or not, revealing whether that chunk of data already existed in 
-the repository from some other file. This is a consequence of the 
-deduplication system, although there may be ways to make this sort of attack 
-more difficult.
+to mount a fingerprinting attack, where known data is written to a local file.
+The attacker can then observe whether a new object is uploaded to the
+repository or not, revealing whether that chunk of data already existed in the
+repository from some other file. This is a consequence of any deduplication
+system, and although there may be ways to make this sort of attack more
+difficult, it's unlikely to be eliminated entirely.
 
 Another goal of Backathon is to not require a password for backup and other
-write-only operations to the repository, as it's designed to run in the 
-background and start automatically at boot. The obvious way to achieve this is 
-with public/private key encryption. The public key is used for encrypting 
-files before uploading, and is stored in plain text locally. Decryption
-requires the private key, which is stored encrypted with a password.
+write-only operations to the repository, as it's designed to run in the
+background and start automatically at boot (unattended backups). The obvious
+way to achieve this is with public/private key encryption. The public key is
+used for encrypting files before uploading, and is stored in plain text
+locally. Decryption requires the private key, which is stored encrypted with a
+password.
 
 This is the outline of how encryption is used:
 
@@ -365,21 +370,39 @@ decrypt downloaded data
 (Deriving a key to encrypt a randomly generated private key lets us change 
 the password without having to re-encrypt all encrypted data)
 
-While this protects against an adversary with access to the remote 
-repository, it also assumes the local machine is secure and uncompromised, 
-since the public key and storage credentials are stored in plain text locally.
-If the public key is compromised, there are more threats possible since an 
-attacker could upload valid objects into the object store, and perform brute 
-force attacks on the object IDs to recover their contents. I believe this is an 
-acceptable compromise for unattended backups since if your local filesystem 
-is compromised, the bigger threat is the attacker just reading your local files 
-directly.
+So a public/private key pair is used to encrypt all the data. The private key
+is stored encrypted locally and in the repository, allowing restores with a
+password. This protects against an adversary with access to the remote
+repository.
 
-So why bother with passwords at all if you assume a secure local machine? 
-Why not just generate and store a symmetric key in plain text? A few reasons:
+The public key, however, is not really "public". While it's kept in plain text
+locally to allow unattended backups, it must also be kept secret from
+adversaries as it lets the holder create valid, authenticated objects in the
+repository. (Storage credentials, API keys, etc are also stored unencrypted
+locally)
 
-1. While it's outside the threat model, it *is* still protecting the 
-repository data from being read if the public key is compromised
+The threat model therefore assumes the local machine is secure and
+uncompromised. If the public key is compromised, there are more threats
+possible since an attacker could create and upload valid objects into the
+object store and perform brute force attacks on the object IDs to recover their
+contents. I believe this is an acceptable compromise for unattended backups
+since if your local filesystem is compromised, the bigger threat is the
+attacker just reading your local files directly.
+
+I'd like to note that a lot of other backup systems generate a symmetric key
+for data encryption, encrypt that key with a password, and then leave password
+management up to the user. If the user wishes to schedule unattended backups
+e.g. from a cron script, they have to store the password in plaintext
+somewhere. I consider that setup to have an equivalent amount of security as
+just storing the whole key unencrypted.
+
+So why bother with passwords at all if you assume a secure local machine?  Why
+not just generate and store a symmetric key locally in plain text? A few
+reasons:
+
+1. While it's outside the threat model, the public/private encryption *is*
+still protecting the repository data from being read if the public key is
+compromised.
 2. For consistency: if you derive a key from a password and store it 
 unencrypted locally (and encrypted on the remote store), then you can perform
 backup *and* restore operations without the password. But as soon as you lose
@@ -391,18 +414,15 @@ your password if you've never needed it before a total system crash.
 repository even if read access to the local filesystem is possible 
 (intentionally or unintentionally)
 
-Also note that a lot of backup systems generate a symmetric key, encrypt it with
-a password, and then leave password management up to the user. If the user 
-wishes to schedule unattended backups e.g. from cron, they have to store the 
-password in plaintext somewhere. For purposes of the above argument, I 
-consider that setup equivalent to just storing the whole key unencrypted.
+If protecting the repository from a compromised client is a priority, then
+Backathon's write-only backups make it possible to configure a storage service
+with write-only access for an API key. The client wouldn't be able to prune old
+snapshots, and a different client would have to perform restores however. This
+is currently an untested setup but should theoretically work.
 
-If protecting the repository from a compromised client is a priority, then it's
-theoretically possible (I haven't tested this) to configure a storage backend
-with write-only access to an API key. Since Backathon only writes *new* objects
-during a backup operation—it never deletes or rewrites objects—it doesn't need
-read, modify, or delete access at all. The client wouldn't be able to prune old
-snapshots, and a different client would have to perform restores however.
+Additionally, storing the local public key in an OS-managed keyring or hardware
+key storage would also help against some local threats. This is not currently
+implemented but theoretically possible.
 
 ### Encryption Algorithms
 
