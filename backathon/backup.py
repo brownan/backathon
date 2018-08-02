@@ -376,7 +376,7 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
         # Note: backing up a directory doesn't involve reading
         # from the filesystem aside from the lstat() call from above. All
         # the information we need is already in the database.
-        children = list(fsentry.children.all().select_related("obj"))
+        children = list(fsentry.children.all())
 
         # This block asserts all children have been backed up before
         # entering this method. If they haven't, then the caller is in
@@ -388,14 +388,14 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
         # root nodes. There's no reason I can think of that that wouldn't
         # work. Enforcing this here is just a sanity check for the current
         # backup strategy.
-        if any(c.obj is None for c in children):
+        if any(c.obj_id is None for c in children):
             raise DependencyError(
                 "{} depends on these paths, but they haven't been "
                 "backed up yet. This is a bug. {}"
                 "".format(
                     fsentry.printablepath,
                     ", ".join(c.printablepath
-                              for c in children if c.obj is None),
+                              for c in children if c.obj_id is None),
                 )
             )
 
@@ -406,7 +406,7 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
         )
         relations = [
             models.ObjectRelation(
-                child=c.obj,
+                child_id=c.obj_id,
                 # Names are stored in the object relation model for
                 # purposes of searching and directory listing. It's stored in
                 # a utf-8 encoding with invalid bytes removed to make
@@ -431,7 +431,7 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
             # We have to store the original binary representation of
             # the filename or msgpack will error at filenames with
             # bad encodings
-            [(os.fsencode(c.name), c.obj.objid) for c in children],
+            [(os.fsencode(c.name), c.obj_id) for c in children],
             buf,
         )
         buf.seek(0)
