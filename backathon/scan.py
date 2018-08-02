@@ -46,24 +46,28 @@ def scan(alias, progress=None, skip_existing=False):
     # documented as not supporting it for SQLite [1][2]. This may be a bug in
     # Django or the Django docs, but it works to our advantage.
 
-    # The caveat, and the real reason Django probably doesn't support this,
-    # is that SQLite doesn't have isolation between queries on the same
-    # database connection [3]. According to the SQLite documentation,
-    # a SELECT query that runs interleaved with an INSERT, UPDATE,
-    # or DELETE on the same table results in undefined behavior.
-    # Specifically, it's undefined whether the inserted/modified/deleted rows
-    # will appear (perhaps for a second time) in the SELECT results. As long
-    # as the program can handle that possibility, there's no other problems
-    # with doing this (there's no risk of database corruption or anything).
+    # UPDATE: I filed this as a bug [3] and qs.iterator() will officially
+    # support SQLite in Django 2.2, even though it accidentally works in
+    # previous versions.
 
-    # HOWEVER! Due to a Python bug [4] in versions <=3.5.2, Python may crash
+    # The caveat is that SQLite doesn't have isolation between queries on
+    # the same database connection [4]. According to the SQLite documentation,
+    # a SELECT query that runs interleaved with an INSERT, UPDATE, or DELETE
+    # on the same table results in undefined behavior. Specifically,
+    # it's undefined whether the inserted/modified/deleted rows will appear
+    # (perhaps for a second time) in the SELECT results. As long as the
+    # program can handle that possibility, there's no other problems with
+    # doing this (there's no risk of database corruption or anything).
+
+    # HOWEVER! Due to a Python bug [5] in versions <=3.5.2, Python may crash
     # due to misuse of the SQLite API. This is caused by the Python SQLite
     # driver resetting all SQLite statements when committing. Stepping over a
-    # statement after a reset will start it from the beginning [5], but Python
+    # statement after a reset will start it from the beginning [6], but Python
     # keeps a cache of SQLite statements and thinks it's still reset. When
     # Python tries to re-use that statement by binding new parameters to it,
     # SQLite will return an error. SQLite doesn't allow binding parameters to a
-    # statement that's stepped through results without resetting it first [6].
+    # statement that's stepped through results without resetting it first [7],
+    # so it returns an error.
 
     # So this code is only compatible with Python 3.5.3 and above unless
     # someone finds another workaround.
@@ -72,10 +76,11 @@ def scan(alias, progress=None, skip_existing=False):
 
     # [1] https://docs.djangoproject.com/en/2.0/ref/models/querysets/#without-server-side-cursors
     # [2] https://github.com/django/django/blob/2.0/django/db/backends/sqlite3/features.py#L9
-    # [3] https://sqlite.org/isolation.html
-    # [4] https://bugs.python.org/issue10513
-    # [5] https://sqlite.org/c3ref/reset.html
-    # [6] https://sqlite.org/c3ref/bind_blob.html (see paragraph about SQLITE_MISUSE)
+    # [3] https://code.djangoproject.com/ticket/29563
+    # [4] https://sqlite.org/isolation.html
+    # [5] https://bugs.python.org/issue10513
+    # [6] https://sqlite.org/c3ref/reset.html
+    # [7] https://sqlite.org/c3ref/bind_blob.html (see paragraph about SQLITE_MISUSE)
 
     # Note about the below use of atomic blocks
     ###########################################
@@ -100,13 +105,14 @@ def scan(alias, progress=None, skip_existing=False):
     #  finishes.
     #
     # 2. SQLite won't re-use pages in the WAL across transactions; starting a
-    #  new transaction will append new entries to the WAL. So lots of small
-    #  write transactions in a situation where it can't checkpoint causes the
+    #  new transaction will append new entries to the WAL. This makes sense
+    #  from a design standpoint, but I wasn't able to find this behavior
+    #  explicitly documented in the SQLite docs. So lots of small write
+    #  transactions in a situation where it can't checkpoint causes the
     #  WAL to grow. In contrast, re-writing the DB page within a
-    #  transaction will re-write the same WAL page so the WAL stays small. I
-    #  couldn't find exact details on this behavior in the SQLite docs,
-    #  but it's consistent with what I observed. When we do the same operations
-    #  in one big transaction, the WAL never grows beyond a few hundred KB.
+    #  transaction will re-write the same WAL page so the WAL stays small.
+    #  When we do the same operations in one big transaction, the WAL never
+    # grows beyond a few hundred KB.
 
     scanned = 0
 
