@@ -50,7 +50,9 @@ class Object(models.Model):
     )
 
     # These fields are cached about the object. They may or may not have
-    # values depending on the object type
+    # values depending on the object type. Additionally, they may not be
+    # filled in after a restore, as the objects have not yet been downloaded
+    # and decoded.
     type = models.CharField(
         max_length=16,
         blank=True, null=True, default=None,
@@ -163,7 +165,21 @@ class Object(models.Model):
                 yield obj
 
 class ObjectRelation(models.Model):
-    """Keeps track of the dependency graph between objects"""
+    """Keeps track of the dependency graph between objects
+
+    This model's primary purpose is to track object relations (when one object
+    references another object) so that we can do garbage collection
+    calculations purely on the client. This model is not used during a
+    restore. During a restore, the object payloads are decoded and the object
+    tree traversed from the validated contents of each object.
+
+    This model is also used to support browsing file manifests in the UI.
+
+    The relations table may not be filled in at all after a recovery,
+    in which case UI browsing will be impossible or will have to fetch the
+    objects on demand. But full restores of an entire snapshot are still
+    possible.
+    """
     class Meta:
         db_table = "object_relations"
 
