@@ -4,10 +4,12 @@ import hmac
 import json
 import os.path
 import zlib
+import logging
 
 import django.core.files.storage
 import django.db
 from django.core.exceptions import ImproperlyConfigured
+from django.db import IntegrityError
 from django.utils.functional import cached_property
 from django.utils.text import slugify
 
@@ -241,30 +243,39 @@ class Repository:
         view = payload.getbuffer()
         objid = self.encrypter.calculate_objid(view)
 
-        with atomic_immediate():
+        try:
+            obj = models.Object.objects.using(self.db).get(objid=objid)
+        except models.Object.DoesNotExist:
+            # Object wasn't in the database.
+            obj.objid = objid
+            obj.uploaded_size = len(view)
+            for r in relations:
+                r.parent = obj
+
+            to_upload = self.encrypter.encrypt_bytes(
+                self.compress_bytes(
+                    view
+                )
+            )
+
+            path = self._get_path(objid)
+            self.storage.upload_file(
+                path,
+                util.BytesReader(to_upload),
+            )
+
             try:
-                obj = models.Object.objects.using(self.db).get(objid=objid)
-            except models.Object.DoesNotExist:
-                # Object wasn't in the database.
-                obj.objid = objid
-                obj.uploaded_size = len(view)
-                obj.save(using=self.db, force_insert=True)
-                for r in relations:
-                    r.parent = obj
-                models.ObjectRelation.objects.using(self.db).bulk_create(
-                    relations
-                )
-
-                to_upload = self.encrypter.encrypt_bytes(
-                    self.compress_bytes(
-                        view
+                with atomic_immediate(using=self.db):
+                    obj.save(using=self.db, force_insert=True)
+                    models.ObjectRelation.objects.using(self.db).bulk_create(
+                        relations
                     )
-                )
+            except IntegrityError:
+                # There is a race condition if two threads try to upload the
+                # same payload. This thread lost, but the file was uploaded
+                # so there's no problem.
+                pass
 
-                self.storage.upload_file(
-                    self._get_path(objid),
-                    util.BytesReader(to_upload),
-                )
 
         return obj
 
