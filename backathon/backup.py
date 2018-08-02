@@ -19,6 +19,46 @@ from .exceptions import DependencyError
 
 logger = getLogger("backathon.backup")
 
+# Note about the below use of a ThreadPoolExecutor
+###################################################
+# Django keeps database connections in a thread local variable (instance of
+# threading.local) so each thread automatically opens its own connection to
+# the database. This is what we want here, but we must also be mindful of how
+# transactions interact. Only one connection can have a write transaction
+# open at once. So we should make sure to do the heavy I/O like uploading to
+# the remote repository outside of a write transaction, so as not to block
+# any other thread from proceeding.
+#
+# After a thread exits, its thread local variables are deleted from all
+# threading.local instances. This will lead to garbage collection of the
+# database connection objects and closing of the extra database connections.
+# Except that Django's DatabaseWrapper class is involved in several reference
+# loops and won't be garbage collected until some time later. So it would help
+# to avoid accumulating memory and open file descriptors if we explicitly
+# close the database.
+#
+# However, that's tricky because the ThreadPoolExecutor doesn't provide any
+# per-thread teardown hook in which we could call connections.close_all(). Nor
+# is it possible to access a thread local variable from a different thread
+# (without deep hacks in the interpreter implementation). Nor can Django
+# database connections be closed from threads that didn't create them. Since the
+# connection will eventually be closed anyways, I'm not too worried about
+# working around all these issues. I feel it's likely the garbage collector
+# will run more often than the backup routine.
+#
+# If it turns out to be important, there is a way to set per-thread
+# finalizers that seems to work from my tests. First step is to set up our own
+# thread local variable at the module level. Then have each thread add an
+# object to it when it starts. The thread can then use weakref.finalize() to
+# add a finalizer callback on the object. The object is garbage collected
+# when the thread ends, and the finalizer will be called at that time. It's a
+# little hackish but it should  work. Python 3.7 provides an explicit
+# initializer feature for the ThreadPoolExecutor that can be used to set this
+# up.
+#
+# An easier hack may be to just call gc.collect() after the thread pool shuts
+# down.
+
 def backup(repo, progress=None):
     """Perform a backup
 
