@@ -369,7 +369,7 @@ class Repository:
     def get_roots(self):
         return models.FSEntry.objects.using(self.db).filter(parent__isnull=True)
 
-    def backup(self, progress=None):
+    def backup(self, **kwargs):
         """Perform a backup
 
         See documentation in the backathon.backup module
@@ -388,7 +388,7 @@ class Repository:
                                        "backend first")
 
         from . import backup
-        backup.backup(self, progress)
+        backup.backup(self, **kwargs)
 
     def save_metadata(self):
         """Updates the metadata file in the remote repository

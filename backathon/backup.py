@@ -59,7 +59,7 @@ logger = getLogger("backathon.backup")
 # An easier hack may be to just call gc.collect() after the thread pool shuts
 # down.
 
-def backup(repo, progress=None):
+def backup(repo, progress=None, single=False):
     """Perform a backup
 
     This is usually called from Repository.backup() and is tightly integrated
@@ -69,6 +69,8 @@ def backup(repo, progress=None):
     :type repo: backathon.repository.Repository
     :param progress: A callback function that provides status updates on the
         scan
+    :param single: If this parameter is true, the backup process will all
+        happen in a single thread. This can help with debugging and profiling.
 
     The progress callable takes two parameters: the backup count and backup
     total.
@@ -96,7 +98,12 @@ def backup(repo, progress=None):
     backup_total = to_backup.count()
     backup_count = 0
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+    if single:
+        executor = DummyExecutor()
+    else:
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+    with executor:
 
         while to_backup.exists():
             ct = 0
@@ -463,3 +470,22 @@ def _open_file(path):
     except PermissionError:
         pass
     return os.fdopen(os.open(path, flags), "rb")
+
+class DummyExecutor(concurrent.futures._base.Executor):
+    """A dummy executor that runs items immediately but has the same Executor
+    interface
+
+    Used as a drop in replacement for a ThreadPoolExecutor when a single
+    threaded execution is required.
+    """
+    _max_workers = 1 # for ThreadPoolExecutor compatibility
+
+    def submit(self, fn, *args, **kwargs):
+        f = concurrent.futures.Future()
+        try:
+            f.set_result(
+                fn(*args, **kwargs)
+            )
+        except BaseException as e:
+            f.set_exception(e)
+        return f

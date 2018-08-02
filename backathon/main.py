@@ -96,6 +96,8 @@ def main():
     except CommandError as e:
         logger.error(str(e))
         sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(1)
 
 def find_commands():
     backathon_config = apps.app_configs['backathon']

@@ -11,7 +11,11 @@ from . import CommandBase
 class Command(CommandBase):
     help="Backs up changed files. Run a scan first to detect changes."
 
-    def handle(self, *args, **kwargs):
+    def add_arguments(self, parser):
+        parser.add_argument("--single", action="store_true",
+                            help="Single-thread mode")
+
+    def handle(self, options):
         repo = self.get_repo()
 
         to_backup = models.FSEntry.objects\
@@ -33,5 +37,5 @@ class Command(CommandBase):
             pbar.total = total
             pbar.update(0)
 
-        repo.backup(progress=progress)
+        repo.backup(progress=progress, single=options.single)
 
