@@ -97,13 +97,13 @@ def backup(repo, progress=None):
     backup_count = 0
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        tasks = set()
 
         while to_backup.exists():
             ct = 0
 
             last_checkpoint = time.monotonic()
 
+            tasks = set()
             iterator = ready_to_backup.iterator()
             for entry in iterator: # type: models.FSEntry
                 ct += 1
@@ -170,19 +170,23 @@ def backup(repo, progress=None):
             # all their dependent children backed up.
             assert ct > 0
 
-        # Collect results for the rest of the tasks
-        try:
-            for f in concurrent.futures.as_completed(tasks):
-                f.result()
-                backup_count += 1
-                if progress is not None:
-                    progress(backup_count, backup_total)
-        except KeyboardInterrupt:
-            print()
-            print("Ctrl-C received. Finishing current uploads, "
-                  "please wait...")
-            import sys
-            sys.exit(1)
+            # Collect results for the rest of the tasks. We have to do this
+            # at the end of each inner loop to guarantee we back up entries
+            # before the entries that depend on them.
+            # Items selected next loop could depend on items still in process
+            #  in the thread pool.
+            try:
+                for f in concurrent.futures.as_completed(tasks):
+                    f.result()
+                    backup_count += 1
+                    if progress is not None:
+                        progress(backup_count, backup_total)
+            except KeyboardInterrupt:
+                print()
+                print("Ctrl-C received. Finishing current uploads, "
+                      "please wait...")
+                import sys
+                sys.exit(1)
 
     # Now add the Snapshot object(s) to the database representing this backup
     # run. There's one snapshot per root, but they all have the same datetime
