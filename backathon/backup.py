@@ -101,7 +101,10 @@ def backup(repo, progress=None, single=False):
     if single:
         executor = DummyExecutor()
     else:
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        executor = concurrent.futures.ThreadPoolExecutor(
+            thread_name_prefix="backup-worker",
+            max_workers=2,
+        )
 
     with executor:
 
@@ -135,25 +138,24 @@ def backup(repo, progress=None, single=False):
                 # the task queue, then workers won't get a shutdown signal
                 # in a timely manner, interfering with shutdown requests from
                 # e.g. ctrl-C.
-                if len(tasks) < executor._max_workers+1:
-                    timeout = 0
-                else:
-                    timeout = None
+                if len(tasks) >= executor._max_workers+1:
+                    try:
+                        done, tasks = concurrent.futures.wait(
+                            tasks,
+                            timeout=None,
+                            return_when=concurrent.futures.FIRST_COMPLETED,
+                        )
+                    except KeyboardInterrupt:
+                        print()
+                        print("Ctrl-C received. Finishing current uploads, "
+                              "please wait...")
+                        raise
 
-                try:
-                    done, tasks = concurrent.futures.wait(tasks, timeout=timeout)
-                except KeyboardInterrupt:
-                    print()
-                    print("Ctrl-C received. Finishing current uploads, "
-                          "please wait...")
-                    import sys
-                    sys.exit(1)
-
-                for f in done:
-                    f.result()
-                    backup_count += 1
-                    if progress is not None:
-                        progress(backup_count, backup_total)
+                    for f in done:
+                        f.result()
+                        backup_count += 1
+                        if progress is not None:
+                            progress(backup_count, backup_total)
 
                 # SQLite won't auto-checkpoint the write-ahead log while we
                 # have the iterator still open. So we exit this loop every
@@ -181,7 +183,7 @@ def backup(repo, progress=None, single=False):
             # at the end of each inner loop to guarantee we back up entries
             # before the entries that depend on them.
             # Items selected next loop could depend on items still in process
-            #  in the thread pool.
+            # in the thread pool.
             try:
                 for f in concurrent.futures.as_completed(tasks):
                     f.result()
