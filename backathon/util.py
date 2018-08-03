@@ -3,9 +3,6 @@ import json
 from django.db import DEFAULT_DB_ALIAS
 from django.db.transaction import Atomic, get_connection
 
-from backathon import models
-
-
 class BytesReader:
     """A file-like object that reads from a bytes-like object
 
@@ -122,6 +119,8 @@ def atomic_immediate(using=None, savepoint=True):
     else:
         return AtomicImmediate(using, savepoint)
 
+# This is imported here to avoid an import loop
+from . import models
 
 class Settings:
     """A loose proxy for the Settings database model that does json
