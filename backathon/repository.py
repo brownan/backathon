@@ -246,9 +246,10 @@ class Repository:
         try:
             obj = models.Object.objects.using(self.db).get(objid=objid)
         except models.Object.DoesNotExist:
-            # Object wasn't in the database.
+            # Object wasn't in the database. The passed-in obj has most of
+            # the metadata filled in but we have to set the object ID and
+            # uploaded_size
             obj.objid = objid
-            obj.uploaded_size = len(view)
             for r in relations:
                 r.parent = obj
 
@@ -257,6 +258,8 @@ class Repository:
                     view
                 )
             )
+
+            obj.uploaded_size = len(to_upload)
 
             path = self._get_path(objid)
             self.storage.upload_file(
@@ -273,9 +276,10 @@ class Repository:
             except IntegrityError:
                 # There is a race condition if two threads try to upload the
                 # same payload. This thread lost, but the file was uploaded
-                # so there's no problem.
-                pass
-
+                # so there's no problem. Get the latest from the database,
+                # which should be the same, but the obj has to have the right
+                # db alias set or we'll get an assignment error later.
+                obj.refresh_from_db(using=self.db)
 
         return obj
 
