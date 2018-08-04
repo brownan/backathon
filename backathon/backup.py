@@ -1,3 +1,4 @@
+import itertools
 import time
 from contextlib import ExitStack
 from logging import getLogger
@@ -104,10 +105,12 @@ def backup(repo, progress=None, single=False):
     else:
         executor = concurrent.futures.ThreadPoolExecutor(
             thread_name_prefix="backup-worker",
-            max_workers=2,
+            max_workers=1,
         )
 
     tasks = set()
+
+    BATCH_SIZE = 100
 
     contexts = ExitStack()
     with contexts:
@@ -131,15 +134,15 @@ def backup(repo, progress=None, single=False):
             last_checkpoint = time.monotonic()
 
             iterator = ready_to_backup.iterator()
-            for entry in iterator: # type: models.FSEntry
+            for entry_batch in batcher(iterator, BATCH_SIZE):
                 ct += 1
 
                 # Assert our query is working correctly and that there are no
                 # SQLite isolation problems
-                assert entry.obj_id is None
+                assert all(entry.obj_id is None for entry in entry_batch)
 
                 tasks.add(
-                    executor.submit(backup_entry, repo, entry)
+                    executor.submit(backup_entry, repo, entry_batch)
                 )
 
                 # Check if any are done yet. We don't put more than 100 items
@@ -153,8 +156,7 @@ def backup(repo, progress=None, single=False):
                     )
 
                     for f in done:
-                        f.result()
-                        backup_count += 1
+                        backup_count += f.result()
                         if progress is not None:
                             progress(backup_count, backup_total)
 
@@ -186,8 +188,7 @@ def backup(repo, progress=None, single=False):
             # Items selected next loop could depend on items still in process
             # in the thread pool.
             for f in concurrent.futures.as_completed(tasks):
-                f.result()
-                backup_count += 1
+                backup_count += f.result()
                 if progress is not None:
                     progress(backup_count, backup_total)
             tasks.clear()
@@ -214,24 +215,28 @@ def backup(repo, progress=None, single=False):
     with connections[repo.db].cursor() as cursor:
         cursor.execute("ANALYZE")
 
-def backup_entry(repo, entry):
-    iterator = backup_iterator(
-        entry,
-        inline_threshold=repo.backup_inline_threshold,
-    )
+def backup_entry(repo, entry_batch):
+    """Entry point for each worker thread/process"""
+    for entry in entry_batch:
+        iterator = backup_iterator(
+            entry,
+            inline_threshold=repo.backup_inline_threshold,
+        )
 
-    try:
-        yielded = next(iterator)
-        while True:
-            obj = repo.push_object(*yielded)
-            yielded = iterator.send(obj)
-    except StopIteration:
-        pass
+        try:
+            yielded = next(iterator)
+            while True:
+                obj = repo.push_object(*yielded)
+                yielded = iterator.send(obj)
+        except StopIteration:
+            pass
 
-    # Sanity check: If a bug in the backup generator function doesn't
-    # set one of these, the entry will be selected next iteration,
-    # causing an infinite loop
-    assert entry.obj_id is not None or entry.id is None
+        # Sanity check: If a bug in the backup generator function doesn't
+        # set one of these, the entry will be selected next iteration,
+        # causing an infinite loop
+        assert entry.obj_id is not None or entry.id is None
+
+    return len(entry_batch)
 
 
 def backup_iterator(fsentry, inline_threshold=2 ** 21):
@@ -489,3 +494,11 @@ class DummyExecutor(concurrent.futures._base.Executor):
         except BaseException as e:
             f.set_exception(e)
         return f
+
+def batcher(iterator, batchsize):
+    it = iter(iterator)
+    while True:
+        batch = tuple(itertools.islice(it, batchsize))
+        if not batch:
+            return
+        yield batch
