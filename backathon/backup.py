@@ -1,4 +1,5 @@
 import time
+from contextlib import ExitStack
 from logging import getLogger
 import os
 import stat
@@ -106,50 +107,50 @@ def backup(repo, progress=None, single=False):
             max_workers=2,
         )
 
-    with executor:
+    tasks = set()
+
+    contexts = ExitStack()
+    with contexts:
+        contexts.enter_context(executor)
+
+        # Cancel all tasks that haven't been started yet
+        def on_exit():
+            for t in tasks:
+                t.cancel()
+        contexts.callback(on_exit)
+
+        def catch_sigint(exc_type, exc_value, traceback):
+            if exc_type and issubclass(exc_type, KeyboardInterrupt):
+                print()
+                print("Ctrl-C received. Finishing current uploads, please wait...")
+        contexts.push(catch_sigint)
 
         while to_backup.exists():
-            ct = 0
 
+            ct = 0
             last_checkpoint = time.monotonic()
 
-            tasks = set()
             iterator = ready_to_backup.iterator()
             for entry in iterator: # type: models.FSEntry
                 ct += 1
 
-                # This sanity check is just making sure that our query works
-                # correctly by only selecting entries that haven't been backed up
-                # yet. Because we're modifying entries and iterating over a
-                # result set at the same time, SQLite may return a row twice,
-                # but since the modified rows don't match our query,
-                # they shouldn't re-appear in this same query. However,
-                # the SQLite documentation on isolation isn't clear on this. If I
-                # see this assert statement getting hit in practice, then the
-                # thing to do is to ignore the entry and move on.
+                # Assert our query is working correctly and that there are no
+                # SQLite isolation problems
                 assert entry.obj_id is None
 
                 tasks.add(
                     executor.submit(backup_entry, repo, entry)
                 )
 
-                # Check if any are done yet. If all workers are busy,
-                # don't submit any more just yet. If too many items are in
-                # the task queue, then workers won't get a shutdown signal
-                # in a timely manner, interfering with shutdown requests from
-                # e.g. ctrl-C.
-                if len(tasks) >= executor._max_workers+1:
-                    try:
-                        done, tasks = concurrent.futures.wait(
-                            tasks,
-                            timeout=None,
-                            return_when=concurrent.futures.FIRST_COMPLETED,
-                        )
-                    except KeyboardInterrupt:
-                        print()
-                        print("Ctrl-C received. Finishing current uploads, "
-                              "please wait...")
-                        raise
+                # Check if any are done yet. We don't put more than 100 items
+                # in the queue as a memory optimization. If there are more
+                # than 100, wait for one to finish.
+                if len(tasks) >= 100:
+                    done, tasks = concurrent.futures.wait(
+                        tasks,
+                        timeout=None,
+                        return_when=concurrent.futures.FIRST_COMPLETED,
+                    )
 
                     for f in done:
                         f.result()
@@ -174,7 +175,7 @@ def backup(repo, progress=None, single=False):
             # Sanity check: if we entered the outer loop but the inner loop's
             # query didn't select anything, then we're not making progress and
             # may be caught in an infinite loop. In particular, this could happen
-            # if we somehow got a cycle in the FSEntry objects in the database.
+            # if we somehow got a cycle in the FSEntry tree in the database.
             # There would be entries needing backing up, but none of them have
             # all their dependent children backed up.
             assert ct > 0
@@ -184,18 +185,15 @@ def backup(repo, progress=None, single=False):
             # before the entries that depend on them.
             # Items selected next loop could depend on items still in process
             # in the thread pool.
-            try:
-                for f in concurrent.futures.as_completed(tasks):
-                    f.result()
-                    backup_count += 1
-                    if progress is not None:
-                        progress(backup_count, backup_total)
-            except KeyboardInterrupt:
-                print()
-                print("Ctrl-C received. Finishing current uploads, "
-                      "please wait...")
-                import sys
-                sys.exit(1)
+            for f in concurrent.futures.as_completed(tasks):
+                f.result()
+                backup_count += 1
+                if progress is not None:
+                    progress(backup_count, backup_total)
+            tasks.clear()
+
+    # End of outer "while" loop, and end of the contexts ExitStack. The
+    # Executor is shut down at this point.
 
     # Now add the Snapshot object(s) to the database representing this backup
     # run. There's one snapshot per root, but they all have the same datetime
