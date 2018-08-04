@@ -100,17 +100,19 @@ def backup(repo, progress=None, single=False):
     backup_total = to_backup.count()
     backup_count = 0
 
+    BATCH_SIZE = 100
+    NUM_WORKERS = os.cpu_count()
+
     if single:
         executor = DummyExecutor()
     else:
-        executor = concurrent.futures.ThreadPoolExecutor(
-            thread_name_prefix="backup-worker",
-            max_workers=1,
+        executor = concurrent.futures.ProcessPoolExecutor(
+            max_workers=NUM_WORKERS,
         )
+        connections.close_all()
+        executor.submit(time.time)
 
     tasks = set()
-
-    BATCH_SIZE = 100
 
     contexts = ExitStack()
     with contexts:
@@ -125,7 +127,8 @@ def backup(repo, progress=None, single=False):
         def catch_sigint(exc_type, exc_value, traceback):
             if exc_type and issubclass(exc_type, KeyboardInterrupt):
                 print()
-                print("Ctrl-C received. Finishing current uploads, please wait...")
+                print("Ctrl-C caught. Finishing the current batch of "
+                      "uploads, please wait...")
         contexts.push(catch_sigint)
 
         while to_backup.exists():
@@ -145,10 +148,11 @@ def backup(repo, progress=None, single=False):
                     executor.submit(backup_entry, repo, entry_batch)
                 )
 
-                # Check if any are done yet. We don't put more than 100 items
-                # in the queue as a memory optimization. If there are more
-                # than 100, wait for one to finish.
-                if len(tasks) >= 100:
+                # Don't put the entire to_backup result set in the queue at
+                # once, to save memory.
+                # If there are too many unfinished tasks, wait for one to
+                # finish.
+                if len(tasks) >= NUM_WORKERS+1:
                     done, tasks = concurrent.futures.wait(
                         tasks,
                         timeout=None,
