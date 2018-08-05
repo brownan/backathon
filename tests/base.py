@@ -3,6 +3,7 @@ import tempfile
 import os.path
 import pathlib
 
+from django.db.transaction import atomic
 from django.test import TestCase
 
 from backathon import models
@@ -68,3 +69,52 @@ class TestBase(TestCase):
         pathobj.write_text(contents, encoding="UTF-8")
         return pathobj
 
+    def _insert_objects(self, *objects):
+        """Insert a set of objects into the Object table
+
+        Each object is a tuple of (objid, [children])
+
+        Callers must be careful to avoid reference loops in the object
+        hierarchy, as that is not a valid object tree.
+        """
+        # Since SQLite has deferrable foreign key constraints, we can insert
+        # references to rows that don't exist yet as long as they exist when
+        # the transaction is committed.
+        with atomic(using=self.db):
+            for objid, children in objects:
+                if isinstance(objid, str):
+                    objid = objid.encode("ASCII")
+                obj = self.object.create(
+                    objid=objid,
+                )
+                self.obj_relation.bulk_create([
+                    models.ObjectRelation(
+                        parent=obj,
+                        child_id=c.encode("ASCII") if isinstance(c,str) else c
+                    ) for c in children
+                ])
+
+    def assert_objects(self, objs, roots=None, no_extras=True):
+        """Asserts that the given hierarchy exists in the database and that
+        no other objects exist in the database
+
+        """
+        if roots is None:
+            roots = self.object.filter(
+                parents__isnull=True,
+            )
+
+        rootmap = {r.objid: r for r in roots}
+        for name, children in objs.items():
+            obj = rootmap.pop(name.encode("ASCII") if isinstance(name, str) else name)
+            self.assert_objects(
+                children,
+                obj.children.all(),
+            )
+
+        if no_extras:
+            self.assertDictEqual(
+                rootmap,
+                {},
+                "Unexpected object found"
+            )
