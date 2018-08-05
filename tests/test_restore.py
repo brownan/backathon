@@ -261,6 +261,21 @@ class TestRestore(TestBase):
             h2.hexdigest()
         )
 
+    def test_restore_symlink(self):
+        """Tests backing up and restoring symlinks"""
+        path = self.path("linkname")
+        os.symlink("this is the link target", path)
+
+        self.repo.scan()
+        self.repo.backup()
+        ss = self.snapshot.get()
+        self.repo.restore(ss.root, self.restoredir, self.password)
+
+        self.assertEqual(
+            os.readlink(pathlib.Path(self.restoredir, "linkname")),
+            "this is the link target"
+        )
+
 class TestRestoreWithCompression(TestRestore):
     def setUp(self):
         super().setUp()

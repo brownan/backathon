@@ -437,6 +437,31 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
             fsentry
         ))
 
+    elif stat.S_ISLNK(fsentry.st_mode):
+        buf = io.BytesIO()
+        umsgpack.pack("symlink", buf)
+        info = dict(
+            uid=stat_result.st_uid,
+            gid=stat_result.st_gid,
+            mode=stat_result.st_mode,
+            mtime=stat_result.st_mtime_ns,
+            atime=stat_result.st_atime_ns,
+        )
+        umsgpack.pack(info, buf)
+        umsgpack.pack(
+            os.readlink(fsentry.path),
+            buf
+        )
+
+        buf.seek(0)
+        obj = models.Object()
+        obj.type = "symlink"
+        obj.last_modified_time = datetime.datetime.fromtimestamp(
+            stat_result.st_mtime,
+            tz=pytz.UTC,
+        )
+        fsentry.obj = yield (buf, obj, [])
+
     else:
         logger.warning("Unknown file type, not backing up {}".format(
             fsentry))

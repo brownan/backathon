@@ -159,6 +159,44 @@ def restore_item(repo, obj, path, key=None):
 
             restore_item(repo, childobj, path / name, key)
 
+    elif obj_type == "symlink":
+        try:
+            os.symlink(
+                obj_contents,
+                path
+            )
+        except OSError as e:
+            logger.error("Could not create symlink at {}: {}".format(
+                path, e
+            ))
+        else:
+            # Custom set-file-properties code that only attempts to do so if
+            # the platform supports the follow_symlinks param
+            if os.chown in os.supports_follow_symlinks:
+                try:
+                    os.chown(str(path), obj_info['uid'], obj_info['gid'],
+                             follow_symlinks=False)
+                except OSError as e:
+                    logger.warning("Could not chown {}: {}".format(
+                        pathstr(path), e
+                    ))
+            if os.chmod in os.supports_follow_symlinks:
+                try:
+                    os.chmod(str(path), obj_info['mode'],
+                             follow_symlinks=False)
+                except OSError as e:
+                    logger.warning("Could not chmod {}: {}".format(
+                        pathstr(path), e
+                    ))
+            if os.utime in os.supports_follow_symlinks:
+                try:
+                    os.utime(str(path), ns=(obj_info['atime'], obj_info['mtime']),
+                             follow_symlinks=False)
+                except OSError as e:
+                    logger.warning("Could not set mtime on {}: {}".format(
+                        pathstr(path), e
+                    ))
+
     else:
         raise NotImplementedError("Restore not implemented for {} "
                                   "object type".format(obj_type))
