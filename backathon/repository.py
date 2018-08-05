@@ -81,8 +81,7 @@ class Repository:
     # Currently set at 2 megabytes by default, this was chosen as a value
     # that will catch a majority of small files. Small files probably won't
     # have much deduplication potential and thus aren't worth the additional
-    # overhead of creating two objects in the repository for the one backed
-    # up file.
+    # overhead of creating two objects in the repository for the one file.
     #
     # Good values for this probably range from between 1 and 10 megabytes.
     backup_inline_threshold = SimpleSetting("BACKUP_INLINE_THRESHOLD", 2 ** 21)
@@ -221,6 +220,9 @@ class Repository:
 
     def push_object(self, payload, obj, relations):
         """Pushes the given payload to the remote repository.
+
+        This method is used during the backup routines and is called from the
+        backathon.backup module.
 
         Atomically commits the given models.Object and related ObjectRelation
         instances to the database if the upload was successful.
