@@ -4,14 +4,12 @@ import hmac
 import json
 import os.path
 import zlib
-import logging
 
 import django.core.files.storage
 import django.db
 from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError
 from django.utils.functional import cached_property
-from django.utils.text import slugify
 
 import umsgpack
 
@@ -44,7 +42,7 @@ class Repository:
         # will not share the same in-memory database.
         if dbfile != ":memory:":
             dbfile = os.path.abspath(dbfile)
-        self.db = slugify(dbfile)  # Something unique for this file
+        self.db = dbfile # The db alias is just the path to the file
         config = {'ENGINE': 'backathon.sqlite3_backend', 'NAME': dbfile, }
         if self.db not in django.db.connections.databases:
             django.db.connections.databases[self.db] = config
@@ -59,6 +57,16 @@ class Repository:
     def conn(self):
         # Shortcut for this database connection
         return django.db.connections[self.db]
+
+    # This class is fairly lightweight to pickle and unpickle, but after
+    # unpickling, some attribute accesses will have to re-query the database
+    # for various settings to re-create them.
+    def __getstate__(self):
+        return {'db': self.db}
+
+    def __setstate__(self, state):
+        self.db = state['db']
+        self.settings = Settings(self.db)
 
     ##########################
     # The next set of properties and methods manipulate the utility classes

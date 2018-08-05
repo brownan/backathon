@@ -72,10 +72,10 @@ def backup(repo, progress=None, single=False):
         # SQLite connections should not be forked, according to the SQLite
         # documentation. Django and/or Python may have some protections
         # from this problem that I'm not aware of, so I'm taking caution and
-        # closing all connections before forcing the process pool to go ahead
-        # and launch the processes by submitting a dummy task.
+        # closing all connections before forcing the process pool to immediately
+        # launch the processes by submitting a dummy task.
         connections.close_all()
-        executor.submit(time.time)
+        executor.submit(time.time).result()
 
     tasks = set()
 
@@ -186,6 +186,7 @@ def backup(repo, progress=None, single=False):
     with connections[repo.db].cursor() as cursor:
         cursor.execute("ANALYZE")
 
+_worker_repo = None
 def backup_entry(repo, entry_batch):
     """Entry point for each worker thread/process
 
@@ -193,6 +194,19 @@ def backup_entry(repo, entry_batch):
 
     :returns: the length of the given list
     """
+
+    # Save this repo object between tasks. This way, all the attributes on
+    # the repo instance don't have to be re-created from the database or
+    # serialized each time. Also, the storage class can keep its persistent
+    # requests session open.
+    # Warning: this code assumes the Executor is a ProcessPoolExecutor,
+    # not a ThreadPoolExecutor.
+    global _worker_repo
+    if _worker_repo is None or _worker_repo.db != repo.db:
+        _worker_repo = repo
+    else:
+        repo = _worker_repo
+
     for entry in entry_batch:
         iterator = backup_iterator(
             entry,
