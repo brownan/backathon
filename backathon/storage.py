@@ -75,7 +75,10 @@ class FilesystemStorage(StorageBase):
     def delete(self, name):
         path = self.base_dir / name
 
-        path.unlink()
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
 
     def get_files_by_prefix(self, prefix):
         path = self.base_dir / prefix

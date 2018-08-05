@@ -1,9 +1,12 @@
 import math
 import random
+import logging
 
 from django.db import connections
 
 from . import models
+
+logger = logging.getLogger("backathon.garbage")
 
 class GarbageCollector:
     """Finds garbage objects in the Object table
@@ -27,11 +30,18 @@ class GarbageCollector:
     row on the first pass, which is a lot more IO and would probably be
     slower.
     """
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, repo, progress=None):
+        """
+
+        :type repo: backathon.repository.Repository
+        :type progress: ProgressIndicator
+        """
+        self.repo = repo
+        self.db = repo.db
         self.bloom = None
         self.m = None
         self.hashes = None
+        self.progress = progress or ProgressIndicator()
 
     def build_filter(self):
         """Builds the bloom filter
@@ -44,7 +54,7 @@ class GarbageCollector:
         p = 0.05
         m = int(math.ceil((num_objects * math.log(p)) / math.log(1 / math.pow(
             2, math.log(2)))))
-        k = int(round(math.log(2) * m / num_objects))
+        k = 4 # = int(round(math.log(2) * m / num_objects))
 
         arr_size = int(math.ceil(m/8))
         bloom = bytearray(arr_size)
@@ -78,11 +88,13 @@ class GarbageCollector:
                     bytepos, bitpos = divmod(h, 8)
                     bloom[bytepos] |= 1 << bitpos
 
+                self.progress.build_filter_progress()
+
         self.bloom = bloom
         self.m = m
         self.hashes = hashes
 
-    def iter_garbage(self):
+    def _iter_garbage(self):
         """Iterates over garbage objects
 
         Callers should take care to atomically delete objects in the remote
@@ -109,3 +121,50 @@ class GarbageCollector:
             if not all(hash_match(h, objid) for h in hashes):
                 yield obj
 
+    def delete_garbage(self):
+        """Deletes garbage according to the filter built in a previous call
+        to build_filter()
+
+        Callers should take care to hold the SQLite reserved lock between
+        calls to build_filter() and delete_garbage() if there's a chance of
+        any other connections manipulating the Object table simultaneously.
+        Otherwise, new objects or references could be created between the calls.
+
+        In order to preserve consistency between the local db and the
+        repository, this method swallows all exceptions and logs them to the
+        backathon.garbage logger. This way the caller's DB transaction is not
+        rolled back from any exceptions.
+
+        Returns the number of objects deleted and the number of bytes deleted
+        """
+        n = 0
+        s = 0
+        try:
+            for obj in self._iter_garbage(): # type: models.Object
+                self.repo.delete_object(obj)
+                n += 1
+                s += obj.uploaded_size
+                self.progress.delete_progress(obj.uploaded_size)
+        except KeyboardInterrupt:
+            self.progress.close()
+            logger.info("Ctrl-C caught, canceling garbage collection")
+        except Exception:
+            self.progress.close()
+            logger.critical("Error in garbage collection", exc_info=True)
+        finally:
+            self.progress.close()
+
+        return n, s
+
+class ProgressIndicator:
+
+    def build_filter_progress(self):
+        """Called for each step of building the filter"""
+        pass
+
+    def delete_progress(self, s):
+        """Called for each object deleted"""
+        pass
+
+    def close(self):
+        pass

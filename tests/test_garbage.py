@@ -10,11 +10,11 @@ class TestGarbage(TestBase):
 
     def setUp(self):
         super().setUp()
-        self.gc = backathon.garbage.GarbageCollector(self.db)
+        self.gc = backathon.garbage.GarbageCollector(self.repo)
 
     def find_garbage(self):
         self.gc.build_filter()
-        yield from self.gc.iter_garbage()
+        yield from self.gc._iter_garbage()
 
     def test_collect_garbage(self):
         self._insert_objects(

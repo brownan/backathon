@@ -215,7 +215,8 @@ class Repository:
 
     ################################
     # These next methods are the low level interface used by the scanning,
-    # backup, and restore routines.
+    # backup, and restore routines. They aren't meant to be called directly
+    # by UI code.
     ################################
 
     def push_object(self, payload, obj, relations):
@@ -328,6 +329,23 @@ class Repository:
                                       "match its hash for objid "
                                       "{}".format(objid))
         return contents
+
+    def delete_object(self, obj):
+        """Deletes an object from the remote repository and the local DB
+
+        This is used by the garbage collection routines
+        """
+        objid = obj.objid
+
+        # Delete from DB before removing from repository.
+        # If an object is left in the repo and not the DB, it takes a bit of
+        # extra space until the repo is scanned for unknown objects
+        # If an object is left in the DB and not the repo, then future
+        # snapshots may try and reference it, corrupting them.
+        obj.delete()
+
+        path = self._get_path(objid)
+        self.storage.delete(path)
 
     def put_snapshot(self, snapshot):
         """Adds a new snapshot index file to the storage backend
