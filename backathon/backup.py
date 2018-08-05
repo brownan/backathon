@@ -21,45 +21,8 @@ from .exceptions import DependencyError
 
 logger = getLogger("backathon.backup")
 
-# Note about the below use of a ThreadPoolExecutor
-###################################################
-# Django keeps database connections in a thread local variable (instance of
-# threading.local) so each thread automatically opens its own connection to
-# the database. This is what we want here, but we must also be mindful of how
-# transactions interact. Only one connection can have a write transaction
-# open at once. So we should make sure to do the heavy I/O like uploading to
-# the remote repository outside of a write transaction, so as not to block
-# any other thread from proceeding.
-#
-# After a thread exits, its thread local variables are deleted from all
-# threading.local instances. This will lead to garbage collection of the
-# database connection objects and closing of the extra database connections.
-# Except that Django's DatabaseWrapper class is involved in several reference
-# loops and won't be garbage collected until some time later. So it would help
-# to avoid accumulating memory and open file descriptors if we explicitly
-# close the database.
-#
-# However, that's tricky because the ThreadPoolExecutor doesn't provide any
-# per-thread teardown hook in which we could call connections.close_all(). Nor
-# is it possible to access a thread local variable from a different thread
-# (without deep hacks in the interpreter implementation). Nor can Django
-# database connections be closed from threads that didn't create them. Since the
-# connection will eventually be closed anyways, I'm not too worried about
-# working around all these issues. I feel it's likely the garbage collector
-# will run more often than the backup routine.
-#
-# If it turns out to be important, there is a way to set per-thread
-# finalizers that seems to work from my tests. First step is to set up our own
-# thread local variable at the module level. Then have each thread add an
-# object to it when it starts. The thread can then use weakref.finalize() to
-# add a finalizer callback on the object. The object is garbage collected
-# when the thread ends, and the finalizer will be called at that time. It's a
-# little hackish but it should  work. Python 3.7 provides an explicit
-# initializer feature for the ThreadPoolExecutor that can be used to set this
-# up.
-#
-# An easier hack may be to just call gc.collect() after the thread pool shuts
-# down.
+BATCH_SIZE = 100
+NUM_WORKERS = os.cpu_count()
 
 def backup(repo, progress=None, single=False):
     """Perform a backup
@@ -100,15 +63,17 @@ def backup(repo, progress=None, single=False):
     backup_total = to_backup.count()
     backup_count = 0
 
-    BATCH_SIZE = 100
-    NUM_WORKERS = os.cpu_count()
-
     if single:
         executor = DummyExecutor()
     else:
         executor = concurrent.futures.ProcessPoolExecutor(
             max_workers=NUM_WORKERS,
         )
+        # SQLite connections should not be forked, according to the SQLite
+        # documentation. Django and/or Python may have some protections
+        # from this problem that I'm not aware of, so I'm taking caution and
+        # closing all connections before forcing the process pool to go ahead
+        # and launch the processes by submitting a dummy task.
         connections.close_all()
         executor.submit(time.time)
 
@@ -141,7 +106,8 @@ def backup(repo, progress=None, single=False):
                 ct += 1
 
                 # Assert our query is working correctly and that there are no
-                # SQLite isolation problems
+                # SQLite isolation problems (entries we've already backed up
+                # re-appearing later in the same query)
                 assert all(entry.obj_id is None for entry in entry_batch)
 
                 tasks.add(
@@ -165,9 +131,9 @@ def backup(repo, progress=None, single=False):
                             progress(backup_count, backup_total)
 
                 # SQLite won't auto-checkpoint the write-ahead log while we
-                # have the iterator still open. So we exit this loop every
-                # once in a while and force a WAL checkpoint to keep the WAL
-                # from growing unbounded.
+                # have the query iterator still open. So we force the inner
+                # loop to exit every once in a while and force a WAL
+                # checkpoint to keep the WAL from growing unbounded.
                 if time.monotonic() - last_checkpoint > 30:
                     # Note: closing the iterator should close the cursor
                     # within it, but I think this is relying on reference
@@ -187,10 +153,11 @@ def backup(repo, progress=None, single=False):
             assert ct > 0
 
             # Collect results for the rest of the tasks. We have to do this
-            # at the end of each inner loop to guarantee we back up entries
-            # before the entries that depend on them.
-            # Items selected next loop could depend on items still in process
-            # in the thread pool.
+            # at the end of each inner loop to guarantee a correct ordering
+            # to backed up entries. Items selected next loop could depend on
+            # items still in process in the thread pool.
+            # This stalls the workers but it doesn't end up costing all that
+            # much time.
             for f in concurrent.futures.as_completed(tasks):
                 backup_count += f.result()
                 if progress is not None:
@@ -220,7 +187,12 @@ def backup(repo, progress=None, single=False):
         cursor.execute("ANALYZE")
 
 def backup_entry(repo, entry_batch):
-    """Entry point for each worker thread/process"""
+    """Entry point for each worker thread/process
+
+    Takes a list of entry objects to backup
+
+    :returns: the length of the given list
+    """
     for entry in entry_batch:
         iterator = backup_iterator(
             entry,
@@ -461,7 +433,11 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
     return
 
 def _open_file(path):
-    """Opens this file for reading"""
+    """Opens this file for reading
+
+    :returns: An open file object
+
+    """
     flags = os.O_RDONLY
 
     # Add O_BINARY on windows
@@ -481,14 +457,12 @@ def _open_file(path):
     return os.fdopen(os.open(path, flags), "rb")
 
 class DummyExecutor(concurrent.futures._base.Executor):
-    """A dummy executor that runs items immediately but has the same Executor
-    interface
+    """A dummy executor that implements the standard Executor interface but
+    runs its tasks immediately
 
-    Used as a drop in replacement for a ThreadPoolExecutor when a single
-    threaded execution is required.
+    Used as a drop in replacement for an Executor when single threaded
+    execution is required. This is useful when running under a debugger.
     """
-    _max_workers = 1 # for ThreadPoolExecutor compatibility
-
     def submit(self, fn, *args, **kwargs):
         f = concurrent.futures.Future()
         try:
@@ -500,6 +474,11 @@ class DummyExecutor(concurrent.futures._base.Executor):
         return f
 
 def batcher(iterator, batchsize):
+    """Yields tuples of items from the given iterator until the iterator is
+    exhausted
+
+    Yielded tuples are at most batchsize in length
+    """
     it = iter(iterator)
     while True:
         batch = tuple(itertools.islice(it, batchsize))
