@@ -10,7 +10,7 @@ from . import util
 
 logger = logging.getLogger("backathon.restore")
 
-def restore_item(repo, obj, path, key=None):
+def restore_item(repo, objid, path, key=None):
     """Restore the given object to the given path
 
     The last component of path is the item we're restoring. If it
@@ -23,7 +23,7 @@ def restore_item(repo, obj, path, key=None):
     reasons.
 
     :type repo: backathon.repository.Repository
-    :type obj: models.Object
+    :param objid: The object ID of the object to restore
     :type path: str|pathlib.Path
     :param key: The key to decrypt files if decryption was enabled
     :type key: None | nacl.public.PrivateKey
@@ -44,13 +44,11 @@ def restore_item(repo, obj, path, key=None):
     couldn't be restored.
 
     """
-    assert repo.db == obj._state.db
-
     # Important: if you print or log an error involving the path, pass it
     # through pathstr() first to sanitize any undecodable unicode surrogates
     path = pathlib.Path(path)
 
-    payload = repo.get_object(obj.objid, key)
+    payload = repo.get_object(objid, key)
     payload_items = unpack_payload(payload)
 
     try:
@@ -61,7 +59,7 @@ def restore_item(repo, obj, path, key=None):
         logger.error("Can't restore {}: Object {} has invalid cached "
                      "data. Rebuilding the local cache may fix this "
                      "problem.".format(
-            pathstr(path), obj.objid
+            pathstr(path), objid
         ))
         return
 
@@ -145,19 +143,10 @@ def restore_item(repo, obj, path, key=None):
 
         _set_file_properties(path, obj_info)
 
-        for name, objid in obj_contents:
+        for name, child_objid in obj_contents:
             name = os.fsdecode(name)
-            try:
-                childobj = models.Object.objects.using(repo.db).get(objid=objid)
-            except models.Object.DoesNotExist:
-                logger.error("Could not restore {}: referenced object does "
-                             "not exist in the local cache. Rebuilding the "
-                             "local cache may help fix this problem".format(
-                    pathstr(path / name)
-                ))
-                return
 
-            restore_item(repo, childobj, path / name, key)
+            restore_item(repo, child_objid, path / name, key)
 
     elif obj_type == "symlink":
         try:

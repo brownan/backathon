@@ -425,4 +425,4 @@ class Repository:
         key = self.encrypter.get_decryption_key(password)
 
         from . import restore
-        restore.restore_item(self, obj, path, key)
+        restore.restore_item(self, obj.objid, path, key)
