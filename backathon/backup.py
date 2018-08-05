@@ -118,7 +118,7 @@ def backup(repo, progress=None, single=False):
                 # once, to save memory.
                 # If there are too many unfinished tasks, wait for one to
                 # finish.
-                if len(tasks) >= NUM_WORKERS+1:
+                if len(tasks) >= NUM_WORKERS+1 or single:
                     done, tasks = concurrent.futures.wait(
                         tasks,
                         timeout=None,
