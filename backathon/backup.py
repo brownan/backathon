@@ -71,7 +71,7 @@ def backup(repo, progress=None, single=False):
         )
         # SQLite connections should not be forked, according to the SQLite
         # documentation. Django and/or Python may have some protections
-        # from this problem that I'm not aware of, so I'm taking caution and
+        # from this problem, but I'm not aware of any, so I'm taking caution and
         # closing all connections before forcing the process pool to immediately
         # launch the processes by submitting a dummy task.
         connections.close_all()
