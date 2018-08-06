@@ -447,3 +447,18 @@ class Repository:
         if password is not None:
             key = self.encrypter.get_decryption_key(password)
         restore.restore_item(self, obj.objid, path, key)
+
+    def sync_snapshots(self, password=None):
+        """Synchronize the local snapshot table from the remote repo snapshot
+        files
+
+        """
+        pass # TODO
+
+    def sync_objlist(self):
+        """Synchronize the local object list from the remote repo"""
+        pass # TODO
+
+    def sync_objdata(self, password=None):
+        """Synchronize object metadata from the remote repo"""
+        pass # TODO
