@@ -54,16 +54,6 @@ LOGGING = {
         "backathon": {
             "level": "WARNING",
         },
-        "backathon.restore": {
-            "level": "INFO",
-            "handlers": [],
-            "propagate": False,
-        },
-        "backathon.scan": {
-            "level": "INFO",
-            "handlers": [],
-            "propagate": False,
-        },
         "django.db": {
             "level": "WARNING",
         },

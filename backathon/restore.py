@@ -48,7 +48,15 @@ def restore_item(repo, objid, path, key=None):
     # through pathstr() first to sanitize any undecodable unicode surrogates
     path = pathlib.Path(path)
 
-    payload = repo.get_object(objid, key)
+    try:
+        payload = repo.get_object(objid, key)
+    except CorruptedRepository as e:
+        logger.error("Can't restore {}: Object {} is corrupted or "
+                     "missing".format(
+            pathstr(path),
+            objid.hex()[:7],
+        ))
+        return
     payload_items = unpack_payload(payload)
 
     try:
@@ -59,7 +67,7 @@ def restore_item(repo, objid, path, key=None):
         logger.error("Can't restore {}: Object {} has invalid cached "
                      "data. Rebuilding the local cache may fix this "
                      "problem.".format(
-            pathstr(path), objid
+            pathstr(path), objid.hex()[:7]
         ))
         return
 

@@ -1,7 +1,6 @@
-import pathlib
 import getpass
-import logging
 
+from ..encryption import DecryptionError
 from .. import models
 from . import CommandBase, CommandError
 
@@ -42,14 +41,20 @@ class Command(CommandBase):
         root = ss.root
 
         if repo.encrypter.password_required:
-            print("Enter your encryption password")
-            pwd = getpass.getpass()
+            while True:
+                pwd = getpass.getpass(
+                    "Enter your repository password: "
+                )
+                print("Decrypting key...")
+                try:
+                    key = repo.encrypter.get_decryption_key(pwd)
+                except DecryptionError:
+                    print("Invalid password or corrupted keyfile. Try again")
+                else:
+                    break
         else:
-            pwd = None
+            key = None
 
         print("Restoring files...")
 
-        logging.getLogger("backathon.restore").addHandler(
-            logging.StreamHandler()
-        )
-        repo.restore(root, dest_dir, pwd)
+        repo.restore(root, dest_dir, key=key)

@@ -435,12 +435,15 @@ class Repository:
         buf = io.BytesIO(json.dumps(data).encode("utf-8"))
         self.storage.upload_file("backathon.json", buf)
 
-    def restore(self, obj, path, password):
+    def restore(self, obj, path, password=None, key=None):
         """Restores the given object to the given path
 
         See docstring on the restore.restore_item() function for more details.
-        """
-        key = self.encrypter.get_decryption_key(password)
 
+        You can give either the key or the password. To get the key,
+        call repo.encrypter.get_decryption_key(). This can take a few seconds.
+        """
         from . import restore
+        if password is not None:
+            key = self.encrypter.get_decryption_key(password)
         restore.restore_item(self, obj.objid, path, key)
