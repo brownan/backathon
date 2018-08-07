@@ -1,5 +1,7 @@
 import os.path
+import sys
 
+from django.db import connections
 
 from ..util import atomic_immediate
 from .. import models
@@ -17,6 +19,8 @@ class Command(CommandBase):
 
         root_path = os.path.abspath(options.root)
 
+        print("Deleting root... ", end="")
+        sys.stdout.flush()
         with atomic_immediate():
             before_count = models.FSEntry.objects.using(repo.db).count()
 
@@ -27,6 +31,15 @@ class Command(CommandBase):
 
             after_count = models.FSEntry.objects.using(repo.db).count()
 
+        print("Done")
+        if before_count-after_count > 1:
+            print("Running database vacuum... ", end="")
+            sys.stdout.flush()
+            with connections[repo.db].cursor() as cursor:
+                cursor.execute("VACUUM")
+            print("Done")
+
+        print()
         print("Root removed: {}".format(root_path))
         print("{} files and directories removed from backup "
               "set".format(before_count - after_count))

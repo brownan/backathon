@@ -1,6 +1,7 @@
 import sys
 import logging
 
+from django.db import connections
 from django.template.defaultfilters import filesizeformat
 
 import tqdm
@@ -72,9 +73,17 @@ class Command(CommandBase):
             filter_progress.close()
 
             num_deleted, size_recovered = gc.delete_garbage()
+            collect_progress.close()
 
-            print()
-            print("Deleted {} objects of garbage".format(num_deleted))
-            print("Recovered {} of storage space".format(
-                filesizeformat(size_recovered)
-            ))
+        if num_deleted > 0:
+            with connections[repo.db].cursor() as cursor:
+                print("Running database vacuum...",end="")
+                sys.stdout.flush()
+                cursor.execute("VACUUM")
+                print(" Done")
+
+        print()
+        print("Deleted {} objects of garbage".format(num_deleted))
+        print("Recovered {} of storage space".format(
+            filesizeformat(size_recovered)
+        ))
