@@ -142,8 +142,14 @@ class TestScan(TestBase):
     def test_dir_no_permission(self):
         file = self.create_file("dir/file1", "file contents")
 
-        file.parent.chmod(0o000)
-        self.repo.scan()
+        real_listdir = os.listdir
+        def patched_listdir(path):
+            if pathlib.Path(path) == file.parent:
+                raise PermissionError()
+            return real_listdir(path)
+
+        with mock.patch("os.listdir", patched_listdir):
+            self.repo.scan()
 
         self.assertTrue(
             self.fsentry.filter(path=os.fspath(file.parent)).exists()
@@ -480,6 +486,8 @@ class TestBackup(TestBase):
         })
 
     def test_permission_denied_file(self):
+        """A permission denied error when reading a file shouldn't cause the
+        backup to fail, and other files should still get backed up"""
         file = self.create_file("dir/file1", "file contents")
         self.repo.scan()
         self.assertEqual(
@@ -487,9 +495,12 @@ class TestBackup(TestBase):
             self.fsentry.count()
         )
 
-        file.chmod(0o000)
+        def raise_permissiondeined(path):
+            raise PermissionError()
 
-        self.repo.backup()
+        with mock.patch("backathon.backup._open_file", raise_permissiondeined):
+            self.repo.backup()
+
         self.assertEqual(
             2,
             self.fsentry.count()

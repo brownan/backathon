@@ -345,7 +345,7 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
             return
         except OSError:
             # This happens with permission denied errors
-            logger.exception("Error in system call when reading file "
+            logger.error("Error in system call when reading file "
                              "{}".format(fsentry))
             # In order to not crash the entire backup, we must delete
             # this entry so that the parent directory can still be backed
