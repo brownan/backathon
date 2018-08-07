@@ -2,8 +2,6 @@ import os
 import os.path
 import stat
 import logging
-import math
-import random
 
 from django.db import models, IntegrityError
 from django.db.transaction import atomic
@@ -73,10 +71,10 @@ class Object(models.Model):
     )
 
     def __repr__(self):
-        return "<Object {}>".format(self.objid.hex())
+        return "<Object {}>".format(self.objid.hex()[:7])
 
     def __str__(self):
-        return self.objid.hex()
+        return self.objid.hex()[:7]
 
 class ObjectRelation(models.Model):
     """Keeps track of the dependency graph between objects
