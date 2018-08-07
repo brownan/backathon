@@ -8,13 +8,13 @@ import io
 import datetime
 import concurrent.futures
 
-from django.db.transaction import atomic
 from django.db import connections
 from django.utils import timezone
 import pytz
 
 import umsgpack
 
+from backathon.util import atomic_immediate
 from . import models
 from . import chunker
 from .exceptions import DependencyError
@@ -175,7 +175,7 @@ def backup(repo, progress=None, single=False):
         parent__isnull=True
     ):
         assert root.obj_id is not None
-        with atomic():
+        with atomic_immediate(using=repo.db):
             ss = models.Snapshot.objects.using(repo.db).create(
                 path=root.path,
                 root_id=root.obj_id,
