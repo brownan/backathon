@@ -5,6 +5,7 @@ from django.db import IntegrityError
 from django.db.models import Sum
 from django.template.defaultfilters import filesizeformat
 
+from backathon.util import atomic_immediate
 from .. import models
 from . import CommandBase, CommandError
 
@@ -13,35 +14,43 @@ class Command(CommandBase):
     help="Adds the given filesystem path as a backup root"
 
     def add_arguments(self, parser):
-        parser.add_argument("root", type=str)
+        parser.add_argument("root", type=str, nargs="+")
         parser.add_argument("--skip-scan", action='store_true')
 
     def handle(self, options):
 
         repo = self.get_repo()
 
-        root_path = os.path.abspath(options.root)
-        if not os.path.isdir(root_path):
-            raise CommandError("Not a directory: {}".format(root_path))
+        with atomic_immediate(using=repo.db):
+            for root_path in options.root:
+                root_path = os.path.abspath(root_path)
 
-        num_files_before = models.FSEntry.objects.using(repo.db).count()
-        size_before = models.FSEntry.objects.using(repo.db)\
-            .aggregate(size=Sum("st_size"))['size']
-        if not size_before:
-            # On first add, there will only be one item and it won't have a
-            # size yet
-            size_before = 0
+                if not os.path.isdir(root_path):
+                    raise CommandError("Not a directory: {}".format(root_path))
 
-        try:
-            repo.add_root(root_path)
-        except IntegrityError:
-            raise CommandError("Path is already being backed up")
-        print("Backup root added: {}".format(root_path))
+                num_files_before = models.FSEntry.objects.using(repo.db).count()
+                size_before = models.FSEntry.objects.using(repo.db)\
+                    .aggregate(size=Sum("st_size"))['size']
+                if not size_before:
+                    # On first add, there will only be one item and it won't have a
+                    # size yet
+                    size_before = 0
+
+                try:
+                    repo.add_root(root_path)
+                except IntegrityError:
+                    raise CommandError("Path is already being backed up")
+
+        print("Backup root{} added:\n{}".format(
+            "s" if len(options.root) != 1 else "",
+            "\n".join("* "+s for s in options.root)
+        ))
 
         if options.skip_scan:
             print("Skipping scan. Make sure you run a scan before a backup")
             return
 
+        print()
         print("Scanning for new files. This may take a while.")
         print("The initial scan has to build a local cache of file metadata;")
         print("re-scans will be faster")
