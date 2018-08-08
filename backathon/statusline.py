@@ -19,9 +19,10 @@ portable.
 """
 import sys
 import io
-import time
+import threading
 
 _instances = []
+_tlock = threading.RLock()
 
 CURSOR_UP = '\x1b[A'
 CURSOR_DOWN = '\n'
@@ -30,40 +31,46 @@ CLEAR_LINE = '\x1b[2K'
 
 FP = sys.stderr
 
-_last_draw = 0
-MIN_DRAW_DELAY = 0.1
-
 def draw_all():
-    global _last_draw
-    now = time.monotonic()
-    if now - _last_draw < MIN_DRAW_DELAY:
-        return
-    _last_draw = now
-
-    buf = io.StringIO()
-    buf.write(CLEAR_LINE)
-    for instance in _instances:
-        buf.write(CURSOR_DOWN)
+    with _tlock:
+        buf = io.StringIO()
         buf.write(CLEAR_LINE)
-        if instance._closed:
-            buf.write(instance._final_line)
-        else:
-            buf.write(instance.get_status())
-        buf.write(CURSOR_HOME)
+        for instance in _instances:
+            buf.write(CURSOR_DOWN)
+            buf.write(CLEAR_LINE)
+            if instance._closed:
+                buf.write(instance._final_line)
+            else:
+                buf.write(instance.get_status())
+            buf.write(CURSOR_HOME)
 
-    buf.write(CURSOR_UP * len(_instances))
+        buf.write(CURSOR_UP * len(_instances))
 
-    FP.write(buf.getvalue())
-    FP.flush()
+        FP.write(buf.getvalue())
+        FP.flush()
+
+
+def stderr_write(s):
+    with _tlock:
+        buf = io.StringIO()
+        buf.write(CLEAR_LINE)
+        buf.write((CURSOR_DOWN+CLEAR_LINE)*len(_instances))
+        buf.write(CURSOR_UP*len(_instances))
+        buf.write(s)
+        if not s.endswith(CURSOR_DOWN):
+            buf.write(CURSOR_DOWN)
+        FP.write(buf.getvalue())
+        draw_all()
 
 class StatusLineBase:
-
     def __init__(self):
-        self._pos = len(_instances)
-        _instances.append(self)
         self._closed = False
         self._final_line = ""
-        self.refresh()
+
+        with _tlock:
+            self._pos = len(_instances)
+            _instances.append(self)
+            self.refresh()
 
     def refresh(self):
         draw_all()
@@ -72,16 +79,17 @@ class StatusLineBase:
         if self._closed:
             return
 
-        self._closed = True
-        self._final_line = self.get_final_status()
+        with _tlock:
+            self._closed = True
+            self._final_line = self.get_final_status()
 
-        self.refresh()
+            self.refresh()
 
-        if all(i._closed for i in _instances):
-            FP.write(CURSOR_DOWN*(len(_instances)+1))
-            FP.flush()
+            if all(i._closed for i in _instances):
+                FP.write(CURSOR_DOWN*(len(_instances)+1))
+                FP.flush()
 
-            _instances.clear()
+                _instances.clear()
 
     def get_status(self):
         raise NotImplementedError()
@@ -100,7 +108,7 @@ class StatusLineBase:
 
 class StaticStatus(StatusLineBase):
     """Just prints a line that you can update"""
-    def __init__(self, initial="", final="", prefix=""):
+    def __init__(self, initial="", final=None, prefix=""):
         self.status = initial
         self.final = final
         self.prefix = prefix
@@ -110,7 +118,9 @@ class StaticStatus(StatusLineBase):
         return self.prefix + self.status
 
     def get_final_status(self):
-        return self.prefix + self.final
+        if self.final is not None:
+            return self.prefix + self.final
+        return self.get_status()
 
     def update(self, status):
         self.status = status
