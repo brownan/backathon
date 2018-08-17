@@ -19,10 +19,6 @@ class Object(models.Model):
     The existence of an object in this table implies that an object has been
     committed to the repository.
 
-    The payload field is only filled in for tree and inode object types. Blob
-    types are not stored locally. In other words, we only cache metadata type
-    objects locally.
-
     The children relation is used in the calculation of garbage objects. If
     an object depends on another in any way, it is added as a "child". Then,
     when a root object is deleted, a set of unreachable garbage objects can

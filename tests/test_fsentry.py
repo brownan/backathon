@@ -140,6 +140,8 @@ class TestScan(TestBase):
         self._replace_dir_with_file_asserts(file)
 
     def test_dir_no_permission(self):
+        """If we don't have permission to read a directory, it should be
+        considered empty"""
         file = self.create_file("dir/file1", "file contents")
 
         real_listdir = os.listdir
@@ -157,9 +159,6 @@ class TestScan(TestBase):
         self.assertFalse(
             self.fsentry.filter(path=os.fspath(file)).exists()
         )
-
-        # Set permission back so the tests can be cleaned up
-        file.parent.chmod(0o777)
 
     def test_root_merge(self):
         file = self.create_file("dir1/dir2/file", "file contents")
