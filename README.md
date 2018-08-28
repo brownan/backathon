@@ -18,22 +18,35 @@ points:
 
 Additionally, these are the main design goals that are a priority for me:
 
-* Low runtime memory usage: memory usage doesn't depend on the size of the
-  backup set
-* Fast and efficient filesystem scans to discover changed files
-* Decoupled scan and backup routines. This allows "continuous" style backups
-  with e.g. inotify, where the scan routine runs more often or continuously,
-  and the backup routine happens less often (e.g. 15 minutes).
-* Fast and efficient pruning of old backups to recover space
-* Fast and efficient local cache for browsing backed up file manifests,
-  for easy restores of select files.
-* Targets any generic object storage service (I plan to target Backblaze B2)
-* Client side encryption (currently using libsodium)
+* Low runtime memory usage: There are no in-memory data structures whose
+  size depends on the size of the backup set or repository, so memory usage
+  doesn't grow with the size of your backups.
+* Fast and efficient filesystem scans to discover changed files. Scans and
+  backups where not much has changed are very cheap.
+* Decoupled scan and backup routines. This allows the future implementation of
+  "continuous" style backups with e.g. inotify, where the scan routine runs
+  more often or continuously, and the backup routine happens less often (e.g.
+  15 minutes).
+* Write-only backups: the backup operation reads nothing from the repository,
+  allowing more secure setups with write-only api keys to the storage
+  provider. This sacrifices pruning and restores for better security against
+  a compromised client.
+* The local cache uses SQLite which keeps memory low (cache data is on disk and
+  not in memory) while still allowing fast, indexed access to cache data.
+  Operations like browsing backed up file manifests are quick and allow
+  restores of select files or entire snapshots.
+* Fast and efficient pruning of old backups to recover space by calculating
+  garbage solely client side using the local cache database.
+* Targets any generic object storage service (Currently supporting and
+  optimized for Backblaze B2)
+* Optimize repository access: many transaction types in Backblaze B2 cost
+  money. Backathon should do as much as it can locally using the cache
+  database and avoid expensive repository operations where possible. Of
+  course a complete disaster recovery still requires reading in the entire
+  repository, but common operations should be cheap or entirely client-side.
+* Client side encryption using libsodium
 * Keep the code and architecture simple. Complexity is avoided except when
   absolutely necessary
-* Backup operations are "write only" to support more secure setups where clients
-  have no read access to the storage backend. Prune operations similarly
-  only require delete permission,  and don't need read access.
 
 No other backup programs I've found quite met these criteria. Backathon takes 
 ideas from Borg, Restic, Duplicati, and others.
@@ -46,13 +59,19 @@ soon:
 
 * Multi-client support, meaning multiple machines backing up to the same
   repository, with deduplication across all files. This would require
-  repository locking, and synchronizing of metadata, which isn't a
-  problem I want to tackle. It would also greatly complicate the encryption.
+  repository locking (or reworking of the prune routine), synchronizing of
+  metadata (or expensive repository scans each backup), and would greatly
+  complicate the encryption (or require the same encryption keys on each
+  client). These aren't problems I want to tackle right now since I don't
+  consider multi-client repositories that important. Space is cheap and my
+  computers don't share that much data between them.
+  
   Omitting multi-client support is my compromise for the set of features
   I want in a backup system.
   
-  Note that I do plan on having read-only clients, and will possibly have to
-  implement some really simple metadata synchronization for that.
+  Note that I do plan on having read-only clients to allow restores from
+  other machines. However, curretly Backathon assumes its local cache database
+  is authorative.
   
 ## Roadmap
 What's done and not done?
