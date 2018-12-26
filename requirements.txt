@@ -16,7 +16,7 @@ pip-tools==2.0.2
 pycparser==2.18           # via cffi
 pynacl==1.2.1
 pytz==2018.5              # via django
-requests==2.19.1
+requests==2.21.0
 six==1.11.0               # via pip-tools, pynacl
 tqdm==4.24.0
 u-msgpack-python==2.5.0
