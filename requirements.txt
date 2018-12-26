@@ -9,7 +9,7 @@ cffi==1.11.5              # via pynacl
 chardet==3.0.4            # via requests
 click==6.7                # via pip-tools
 colorlog==3.1.4
-django==2.1
+django==2.1.4
 first==2.0.1              # via pip-tools
 idna==2.7                 # via requests
 pip-tools==2.0.2
