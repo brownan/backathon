@@ -16,7 +16,7 @@ class PathField(models.CharField):
     strings when loading/saving from the database.
 
     This avoids encoding problems, as passing a string with surrogates to
-    SQLite will raise an exception when trying to encode.
+    SQLite would raise an exception when trying to encode.
 
     Note that many of the common query lookups don't work on BLOB fields the
     same as TEXT fields. For example, using the __startswith lookup will

@@ -37,9 +37,11 @@ class Repository:
     """
 
     def __init__(self, dbfile):
-        # Create the database connection and register it with Django.
-        # In-memory databases are not recommended because separate threads
-        # will not share the same in-memory database.
+        # In-memory databases are not recommended because the backup routine
+        # uses a process pool, and so the separate processes won't share the
+        # same database. It can perhaps be useful for testing if you use
+        # "single" mode for backing up, but our tests dodge the issue
+        # by creating a database file in a temp dir
         if dbfile != ":memory:":
             dbfile = os.path.abspath(dbfile)
         self.db = dbfile # The db alias is just the path to the file
@@ -321,13 +323,13 @@ class Repository:
                 self.encrypter.decrypt_bytes(file.read(), key))
         except Exception as e:
             raise CorruptedRepository(
-                "Failed to read object {}: {}".format(objid.hex(), e)) from e
+                "Failed to read object {}: {}".format(objid, e)) from e
 
         digest = self.encrypter.calculate_objid(contents)
         if not hmac.compare_digest(digest, objid):
-            raise CorruptedRepository("Object payload does not "
-                                      "match its hash for objid "
-                                      "{}".format(objid))
+            raise CorruptedRepository(
+                "Object {} payload does not match its hash. "
+                "It may be corrupted.".format(objid))
         return contents
 
     def delete_object(self, obj):

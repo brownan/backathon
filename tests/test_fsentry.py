@@ -204,6 +204,17 @@ class TestBackup(TestBase):
 
         self.assertEqual(buf.decode("utf-8"), contents)
 
+    def _assert_symlink(self, obj, target):
+        """Asserts that the given object is a symlink type with the given
+        target"""
+        payload = unpack_payload(self.repo.get_object(obj.objid))
+        self.assertEqual("symlink", next(payload))
+        info = next(payload)
+        self.assertEqual(
+            os.fsencode(target),
+            next(payload)
+        )
+
     def _assert_dir(self, obj, contents):
         """Asserts that the given object is a dir object with the given
         contents"""
@@ -253,6 +264,9 @@ class TestBackup(TestBase):
                 self._assert_file_obj(obj, contents)
             elif isinstance(contents, dict):
                 self._assert_dir(obj, contents)
+            elif isinstance(contents, tuple) and contents[0] == 's':
+                # symlink
+                self._assert_symlink(obj, contents[1])
             else:
                 raise TypeError("Unknown contents type")
 
@@ -523,3 +537,36 @@ class TestBackup(TestBase):
             self.backupdir: {name: "file contents"}
         })
 
+    def test_symlink(self):
+        """Tests that symlinks are saved properly"""
+        self.create_file("file1", "file contents")
+
+        pathobj = pathlib.Path(self.path("file2"))
+        pathobj.symlink_to("file1")
+
+        self.repo.scan()
+        self.repo.backup()
+
+        self.assert_backupsets({
+            self.backupdir: {
+                "file1": "file contents",
+                "file2": ('s', "file1")
+            }
+        })
+
+    def test_invalid_utf8_symlink(self):
+        """Similar to the test for invalid filenames, but for symlinks: make
+        sure we don't error if a symlink target is invalid utf-8
+
+        """
+        target = os.fsdecode(b"\xff\xffhello\xff\xff")
+
+        pathobj = pathlib.Path(self.path("badsymlink"))
+        pathobj.symlink_to(target)
+
+        self.repo.scan()
+        self.repo.backup()
+
+        self.assert_backupsets({
+            self.backupdir: {"badsymlink": ('s', target)}
+        })

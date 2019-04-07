@@ -6,9 +6,9 @@ workload. Since some API calls cost real money, we have the goal of
 minimizing costs for common operations. Also since we may potentially have
 millions of objects stored, we also must be conscious of memory efficiency.
 
-The original plan was to make a Django Storage compatible class, but that
-quickly became difficult to do efficiently because of differences in the B2
-API and the Storage API.
+The original plan was to make a class compatible with the Django Storage API,
+but that quickly became difficult to do efficiently because of differences in
+the B2 API and the Storage API.
 
 For example, there's no easy way to efficiently iterate over a huge
 number of objects with the Django storage API, since the listdir() call
@@ -154,9 +154,9 @@ class B2Bucket(StorageBase):
                 # No response from server at all
                 if max_delay < delay:
                     # Give up
-                    logger.info("Timeout in B2 call. Giving up")
+                    logger.error("Timeout in B2 API call. Giving up")
                     raise
-                logger.debug("Timeout in B2 call, retrying in {}s".format(
+                logger.warning("Timeout in B2 API call, retrying in {}s".format(
                     delay))
                 time.sleep(delay)
                 delay *= 2
@@ -165,17 +165,17 @@ class B2Bucket(StorageBase):
                     # Service unavailable
                     if max_delay < delay:
                         # Give up
-                        logger.info("B2 service unavailable. Giving up")
+                        logger.error("B2 service unavailable. Giving up")
                         return response
-                    logger.debug("B2 service unavailable, retrying in "
-                                 "{}s".format(delay))
+                    logger.warning("B2 API error: service unavailable, "
+                                   "retrying in {}s".format(delay))
                     time.sleep(delay)
                     delay *= 2
                 elif response.status_code == 429:
                     # Too many requests
                     delay = int(response.headers.get('Retry-After', 1))
-                    logger.debug("B2 returned 429 Too Many Requests. "
-                                  "Retrying in {}s".format(delay))
+                    logger.warning("B2 API returned error 429 Too Many "
+                                   "Requests. Retrying in {}s".format(delay))
                     time.sleep(delay)
                     delay = 1
                 else:

@@ -155,9 +155,9 @@ def backup(repo, progress=None, single=False):
             # Collect results for the rest of the tasks. We have to do this
             # at the end of each inner loop to guarantee a correct ordering
             # to backed up entries. Items selected next loop could depend on
-            # items still in process in the thread pool.
+            # items still in process in the pool.
             # This stalls the workers but it doesn't end up costing all that
-            # much time.
+            # much time compared to time spent working.
             for f in concurrent.futures.as_completed(tasks):
                 backup_count += f.result()
                 if progress is not None:
@@ -168,7 +168,7 @@ def backup(repo, progress=None, single=False):
     # Executor is shut down at this point.
 
     # Now add the Snapshot object(s) to the database representing this backup
-    # run. There's one snapshot per root, but they all have the same datetime
+    # run. There's one snapshot per root, but we give them all the same datetime
     # so they can still be grouped together in queries.
     now = timezone.now()
     for root in models.FSEntry.objects.using(repo.db).filter(
@@ -186,21 +186,21 @@ def backup(repo, progress=None, single=False):
     with connections[repo.db].cursor() as cursor:
         cursor.execute("ANALYZE")
 
+
 _worker_repo = None
 def backup_entry(repo, entry_batch):
-    """Entry point for each worker thread/process
+    """Entry point for each worker process
 
     Takes a list of entry objects to backup
 
     :returns: the length of the given list
     """
 
-    # Save this repo object between tasks. This way, all the attributes on
-    # the repo instance don't have to be re-created from the database or
-    # serialized each time. Also, the storage class can keep its persistent
-    # requests session open.
-    # Warning: this code assumes the Executor is a ProcessPoolExecutor,
-    # not a ThreadPoolExecutor.
+    # Save this repo object between tasks. This way, all the calculated
+    # properties on the repo instance don't have to be re-created from the
+    # database or serialized each time. Also, the storage class can keep its
+    # persistent http session open. Warning: this code only supports
+    # ProcessPoolExecutors, and won't work with a ThreadPoolExecutor.
     global _worker_repo
     if _worker_repo is None or _worker_repo.db != repo.db:
         _worker_repo = repo
@@ -253,14 +253,15 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
     to the database, atomically with uploading the payload to the repository.
     2. If the objid *does* exist in the Object table: do nothing
 
-    Either way, the (saved or fetched) Object is sent back into this
-    generator function so it can be used in a subsequent ObjectRelation entry.
+    Either way, the (saved or fetched) Object with a set objid is sent back
+    into this generator function so it can be used in a subsequent
+    ObjectRelation entry.
 
     This function is responsible for updating the FSEntry.obj foreign key field
     with the sent object after yielding a payload.
 
     Yields: (payload, Object, [ObjectRelation list])
-    Caller sends: The saved models.Object instance
+    Caller sends: A models.Object instance with obj.objid set
 
     The payload is a file-like object ready for reading. Usually a BytesIO
     instance.
@@ -448,8 +449,11 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
             atime=stat_result.st_atime_ns,
         )
         umsgpack.pack(info, buf)
+
+        # Symlinks may be invalid utf-8 sequences. Make sure we re-encode
+        # them to their original byte representation before saving
         umsgpack.pack(
-            os.readlink(fsentry.path),
+            os.fsencode(os.readlink(fsentry.path)),
             buf
         )
 

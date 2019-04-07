@@ -4,7 +4,6 @@ import os
 
 import umsgpack
 
-from . import models
 from .exceptions import CorruptedRepository
 from . import util
 
@@ -51,10 +50,9 @@ def restore_item(repo, objid, path, key=None):
     try:
         payload = repo.get_object(objid, key)
     except CorruptedRepository as e:
-        logger.error("Can't restore {}: Object {} is corrupted or "
-                     "missing".format(
+        logger.error("Can't restore {}: {}".format(
             pathstr(path),
-            objid.hex()[:7],
+            e,
         ))
         return
     payload_items = unpack_payload(payload)
@@ -64,10 +62,13 @@ def restore_item(repo, objid, path, key=None):
         obj_info = next(payload_items)
         obj_contents = next(payload_items)
     except umsgpack.UnpackException:
-        logger.error("Can't restore {}: Object {} has invalid cached "
-                     "data. Rebuilding the local cache may fix this "
-                     "problem.".format(
-            pathstr(path), objid.hex()[:7]
+        # If the object was downloaded, decrypted, decompressed, and its hash
+        # validated, but then we get an error here with the msgpack payload,
+        # that's got to be either a bug or a malicious upload from an actor that
+        # has the encryption key
+        logger.error("Can't restore {}: Object {} has an invalid payload. "
+                     "This may be a bug.".format(
+            pathstr(path), objid
         ))
         return
 
