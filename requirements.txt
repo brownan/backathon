@@ -4,20 +4,20 @@
 #
 #    pip-compile --output-file requirements.txt requirements.in
 #
-certifi==2018.4.16        # via requests
-cffi==1.11.5              # via pynacl
+certifi==2019.3.9         # via requests
+cffi==1.12.3              # via pynacl
 chardet==3.0.4            # via requests
-click==6.7                # via pip-tools
-colorlog==3.1.4
-django==2.1.8
-first==2.0.1              # via pip-tools
-idna==2.7                 # via requests
-pip-tools==2.0.2
-pycparser==2.18           # via cffi
-pynacl==1.2.1
-pytz==2018.5              # via django
+click==7.0                # via pip-tools
+colorlog==4.0.2
+django==2.2
+idna==2.8                 # via requests
+pip-tools==3.6.0
+pycparser==2.19           # via cffi
+pynacl==1.3.0
+pytz==2019.1              # via django
 requests==2.21.0
-six==1.11.0               # via pip-tools, pynacl
-tqdm==4.24.0
-u-msgpack-python==2.5.0
-urllib3==1.23             # via requests
+six==1.12.0               # via pip-tools, pynacl
+sqlparse==0.3.0           # via django
+tqdm==4.31.1
+u-msgpack-python==2.5.1
+urllib3==1.24.2           # via requests
