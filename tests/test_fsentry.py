@@ -60,7 +60,7 @@ class TestScan(TestBase):
     def test_scan(self):
         self.create_file("dir/file1", "file contents")
         self.create_file("dir2/file2", "another file contents")
-        self.repo.scan()
+        self.backathon.scan()
         self.assertEqual(
             5,
             self.fsentry.count()
@@ -76,22 +76,22 @@ class TestScan(TestBase):
 
     def test_deleted_file(self):
         file = self.create_file("dir/file1", "file contents")
-        self.repo.scan()
+        self.backathon.scan()
         self.assertTrue(
             self.fsentry.filter(path=os.fspath(file)).exists()
         )
         file.unlink()
-        self.repo.scan()
+        self.backathon.scan()
         self.assertFalse(
             self.fsentry.filter(path=os.fspath(file)).exists()
         )
 
     def test_deleted_dir(self):
         file = self.create_file("dir/file1", "file contents")
-        self.repo.scan()
+        self.backathon.scan()
         file.unlink()
         file.parent.rmdir()
-        self.repo.scan()
+        self.backathon.scan()
         self.assertFalse(
             self.fsentry.filter(path=os.fspath(file.parent)).exists()
         )
@@ -101,13 +101,13 @@ class TestScan(TestBase):
 
     def test_replace_dir_with_file(self):
         file = self.create_file("dir/file1", "file contents")
-        self.repo.scan()
+        self.backathon.scan()
         file.unlink()
         file.parent.rmdir()
         file.parent.write_text("another  file contents")
         # Scan the parent first
         self.fsentry.get(path=os.fspath(file.parent)).scan()
-        self.repo.scan()
+        self.backathon.scan()
         self._replace_dir_with_file_asserts(file)
 
     def _replace_dir_with_file_asserts(self, file):
@@ -130,13 +130,13 @@ class TestScan(TestBase):
 
     def test_replace_dir_with_file_2(self):
         file = self.create_file("dir/file1", "file contents")
-        self.repo.scan()
+        self.backathon.scan()
         file.unlink()
         file.parent.rmdir()
         file.parent.write_text("another  file contents")
         # Scan the file first
         self.fsentry.get(path=os.fspath(file)).scan()
-        self.repo.scan()
+        self.backathon.scan()
         self._replace_dir_with_file_asserts(file)
 
     def test_dir_no_permission(self):
@@ -151,7 +151,7 @@ class TestScan(TestBase):
             return real_listdir(path)
 
         with mock.patch("os.listdir", patched_listdir):
-            self.repo.scan()
+            self.backathon.scan()
 
         self.assertTrue(
             self.fsentry.filter(path=os.fspath(file.parent)).exists()
@@ -167,7 +167,7 @@ class TestScan(TestBase):
             2,
             self.fsentry.filter(parent__isnull=True).count()
         )
-        self.repo.scan()
+        self.backathon.scan()
         self.assertEqual(
             1,
             self.fsentry.filter(parent__isnull=True).count()
@@ -314,8 +314,8 @@ class TestBackup(TestBase):
         """Do a backup and then assert the objects actually get committed to
         the backing store"""
         self.create_file("dir/file1", "file contents")
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
 
         for obj in self.object.all():
             # Assert that an object file exists in the backing store and is
@@ -339,12 +339,12 @@ class TestBackup(TestBase):
     def test_backup(self):
         self.create_file("dir/file1", "file contents")
         self.create_file("dir/file2", "file contents 2")
-        self.repo.scan()
+        self.backathon.scan()
         self.assertEqual(
             4,
             self.fsentry.count()
         )
-        self.repo.backup()
+        self.backathon.backup()
         self.assertTrue(
             all(entry.obj is not None for entry in
                 self.fsentry.all())
@@ -366,8 +366,8 @@ class TestBackup(TestBase):
     def test_backup_identical_files(self):
         self.create_file("file1", "file contents")
         self.create_file("file2", "file contents")
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
         self.assert_backupsets({
             self.backupdir: {
                 'file1': 'file contents',
@@ -386,8 +386,8 @@ class TestBackup(TestBase):
             file,
             file.parent / "file2"
         )
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
         self.assert_backupsets({
             self.backupdir: {
                 'file1': 'file contents',
@@ -402,13 +402,13 @@ class TestBackup(TestBase):
 
     def test_file_disappeared(self):
         file = self.create_file("dir/file1", "file contents")
-        self.repo.scan()
+        self.backathon.scan()
         self.assertEqual(
             3,
             self.fsentry.count()
         )
         file.unlink()
-        self.repo.backup()
+        self.backathon.backup()
         self.assertEqual(
             2,
             self.fsentry.count()
@@ -429,7 +429,7 @@ class TestBackup(TestBase):
         not back it up, but that turned out not to be necessary.
         """
         file = self.create_file("dir/file1", "file contents")
-        self.repo.scan()
+        self.backathon.scan()
         self.assertEqual(
             3,
             self.fsentry.count()
@@ -442,7 +442,7 @@ class TestBackup(TestBase):
 
         file.unlink()
         file.mkdir()
-        self.repo.backup()
+        self.backathon.backup()
 
         self.assertEqual(
             3,
@@ -465,7 +465,7 @@ class TestBackup(TestBase):
         # race condition. So we patch os.lstat to delete the file right after
         # the lstat call.
         file = self.create_file("dir/file1", "file contents")
-        self.repo.scan()
+        self.backathon.scan()
         self.assertEqual(
             3,
             self.fsentry.count()
@@ -485,7 +485,7 @@ class TestBackup(TestBase):
             )
         )
 
-        self.repo.backup()
+        self.backathon.backup()
         self.assertEqual(
             2,
             self.fsentry.count()
@@ -502,7 +502,7 @@ class TestBackup(TestBase):
         """A permission denied error when reading a file shouldn't cause the
         backup to fail, and other files should still get backed up"""
         file = self.create_file("dir/file1", "file contents")
-        self.repo.scan()
+        self.backathon.scan()
         self.assertEqual(
             3,
             self.fsentry.count()
@@ -512,7 +512,7 @@ class TestBackup(TestBase):
             raise PermissionError()
 
         with mock.patch("backathon.backup._open_file", raise_permissiondeined):
-            self.repo.backup()
+            self.backathon.backup()
 
         self.assertEqual(
             2,
@@ -530,8 +530,8 @@ class TestBackup(TestBase):
         """Tests that a file with invalid utf-8 in the name can be backed up"""
         name = os.fsdecode(b"\xff\xffhello\xff\xff")
         self.create_file(name, "file contents")
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
 
         self.assert_backupsets({
             self.backupdir: {name: "file contents"}
@@ -544,8 +544,8 @@ class TestBackup(TestBase):
         pathobj = pathlib.Path(self.path("file2"))
         pathobj.symlink_to("file1")
 
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
 
         self.assert_backupsets({
             self.backupdir: {
@@ -564,8 +564,8 @@ class TestBackup(TestBase):
         pathobj = pathlib.Path(self.path("badsymlink"))
         pathobj.symlink_to(target)
 
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
 
         self.assert_backupsets({
             self.backupdir: {"badsymlink": ('s', target)}

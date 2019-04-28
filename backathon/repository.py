@@ -21,11 +21,122 @@ from . import encryption
 from . import storage
 
 
+class Backathon:
+    """This class represents the high level interface to all operations
+
+    The repository class defined below is a low level interface used by
+    the various subsystems. This class, in contrast, defines the high
+    level interface used by the command line and UI to invoke various
+    functionality.
+    """
+
+    def __init__(self, dbfile):
+        self.repository = Repository(dbfile)
+        self.db = self.repository.db
+
+    def scan(self, skip_existing=False, progress=None):
+        """Scans the backup set
+
+        The backup set is the set of files and directories starting at the
+        root paths.
+
+        See more info in the backathon.scan module
+        """
+        from . import scan
+        scan.scan(alias=self.db,
+                  progress=progress,
+                  skip_existing=skip_existing)
+
+    def add_root(self, root_path):
+        """Adds a new root path to the backup set
+
+        This just adds the root. The caller may want to call
+        scan(skip_existing=True) afterwards to update the local filesystem
+        cache.
+
+        If this entry is already a root or is a descendant of an existing
+        root, this call raises an IntegrityError
+        """
+        root_path = os.path.abspath(root_path)
+        models.FSEntry.objects.using(self.db).create(path=root_path)
+
+    def del_root(self, root_path):
+        root_path = os.path.abspath(root_path)
+        entry = models.FSEntry.objects.using(self.db) \
+            .filter(parent__isnull=True) \
+            .get(path=root_path)
+        entry.delete()
+
+    def get_roots(self):
+        return models.FSEntry.objects.using(self.db).filter(parent__isnull=True)
+
+    def backup(self, **kwargs):
+        """Perform a backup
+
+        See documentation in the backathon.backup module
+
+        """
+        try:
+            _ = self.repository.encrypter
+        except KeyError:
+            raise ImproperlyConfigured("You must configure the encryption "
+                                       "first")
+
+        try:
+            _ = self.repository.storage
+        except KeyError:
+            raise ImproperlyConfigured("You must configure the storage "
+                                       "backend first")
+
+        from . import backup
+        backup.backup(self.repository, **kwargs)
+
+    def save_metadata(self):
+        """Updates the metadata file in the remote repository
+
+        Callers should call this after changing any parameters such as the
+        encryption settings. Having up to date metadata in the remote
+        repository is essential for recovering from a complete loss of the
+        local cache
+        """
+        data = {"encryption": self.repository.encrypter.get_public_params(),
+                "compression": self.repository.compression, }
+        buf = io.BytesIO(json.dumps(data).encode("utf-8"))
+        self.repository.storage.upload_file("backathon.json", buf)
+
+    def restore(self, obj, path, password=None, key=None):
+        """Restores the given object to the given path
+
+        See docstring on the restore.restore_item() function for more details.
+
+        You can give either the key or the password. To get the key,
+        call repo.encrypter.get_decryption_key(). This can take a few seconds.
+        """
+        from . import restore
+        if password is not None:
+            key = self.repository.encrypter.get_decryption_key(password)
+        restore.restore_item(self.repository, obj.objid, path, key)
+
+    def sync_snapshots(self, password=None):
+        """Synchronize the local snapshot table from the remote repo snapshot
+        files
+
+        """
+        pass # TODO
+
+    def sync_objlist(self):
+        """Synchronize the local object list from the remote repo"""
+        pass # TODO
+
+    def sync_objdata(self, password=None):
+        """Synchronize object metadata from the remote repo"""
+        pass # TODO
+
 class Repository:
     """Represents a Backathon repository
 
-    This class is the interface to all operations performed on the remote
-    repository. It also manages the local cache database.
+    This class is the low level interface to all operations performed on the
+    remote repository. It also manages the local cache database.
 
 
     Note: creating a new instance of this class registers a new database with
@@ -365,102 +476,3 @@ class Repository:
             self.compress_bytes(contents.getbuffer()))
         self.storage.upload_file(path, util.BytesReader(to_upload))
 
-    ############################
-    # These next methods define the high level interface to this repository.
-    # These methods are meant to be called from the UI code.
-    ############################
-    def scan(self, skip_existing=False, progress=None):
-        """Scans the backup set
-
-        The backup set is the set of files and directories starting at the
-        root paths.
-
-        See more info in the backathon.scan module
-        """
-        from . import scan
-        scan.scan(alias=self.db, progress=progress, skip_existing=skip_existing)
-
-    def add_root(self, root_path):
-        """Adds a new root path to the backup set
-
-        This just adds the root. The caller may want to call
-        scan(skip_existing=True) afterwards to update the local filesystem
-        cache.
-
-        If this entry is already a root or is a descendant of an existing
-        root, this call raises an IntegrityError
-        """
-        root_path = os.path.abspath(root_path)
-        models.FSEntry.objects.using(self.db).create(path=root_path)
-
-    def del_root(self, root_path):
-        root_path = os.path.abspath(root_path)
-        entry = models.FSEntry.objects.using(self.db)\
-            .filter(parent__isnull=True)\
-            .get(path=root_path)
-        entry.delete()
-
-    def get_roots(self):
-        return models.FSEntry.objects.using(self.db).filter(parent__isnull=True)
-
-    def backup(self, **kwargs):
-        """Perform a backup
-
-        See documentation in the backathon.backup module
-
-        """
-        try:
-            _ = self.encrypter
-        except KeyError:
-            raise ImproperlyConfigured("You must configure the encryption "
-                                       "first")
-
-        try:
-            _ = self.storage
-        except KeyError:
-            raise ImproperlyConfigured("You must configure the storage "
-                                       "backend first")
-
-        from . import backup
-        backup.backup(self, **kwargs)
-
-    def save_metadata(self):
-        """Updates the metadata file in the remote repository
-
-        Callers should call this after changing any parameters such as the
-        encryption settings. Having up to date metadata in the remote
-        repository is essential for recovering from a complete loss of the
-        local cache
-        """
-        data = {"encryption": self.encrypter.get_public_params(),
-                "compression": self.compression, }
-        buf = io.BytesIO(json.dumps(data).encode("utf-8"))
-        self.storage.upload_file("backathon.json", buf)
-
-    def restore(self, obj, path, password=None, key=None):
-        """Restores the given object to the given path
-
-        See docstring on the restore.restore_item() function for more details.
-
-        You can give either the key or the password. To get the key,
-        call repo.encrypter.get_decryption_key(). This can take a few seconds.
-        """
-        from . import restore
-        if password is not None:
-            key = self.encrypter.get_decryption_key(password)
-        restore.restore_item(self, obj.objid, path, key)
-
-    def sync_snapshots(self, password=None):
-        """Synchronize the local snapshot table from the remote repo snapshot
-        files
-
-        """
-        pass # TODO
-
-    def sync_objlist(self):
-        """Synchronize the local object list from the remote repo"""
-        pass # TODO
-
-    def sync_objdata(self, password=None):
-        """Synchronize object metadata from the remote repo"""
-        pass # TODO

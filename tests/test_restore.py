@@ -53,12 +53,12 @@ class TestRestore(TestBase):
     def test_simple_restore(self):
         self.create_file("file1", "contents1")
         self.create_file("dir/file2", "contents2")
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
 
         ss = self.snapshot.get()
 
-        self.repo.restore(ss.root, self.restoredir, self.password)
+        self.backathon.restore(ss.root, self.restoredir, self.password)
 
         self.assert_restored_file("file1", "contents1")
         self.assert_restored_file("dir/file2", "contents2")
@@ -67,10 +67,10 @@ class TestRestore(TestBase):
         file_a = self.create_file("file1", "contents")
         file_a.chmod(0o777)
 
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
         ss = self.snapshot.get()
-        self.repo.restore(ss.root, self.restoredir, self.password)
+        self.backathon.restore(ss.root, self.restoredir, self.password)
 
         file_b = pathlib.Path(self.restoredir, "file1")
         stat_result = file_b.stat()
@@ -86,10 +86,10 @@ class TestRestore(TestBase):
         except PermissionError:
             raise unittest.SkipTest("Process doesn't have chown permission")
 
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
         ss = self.snapshot.get()
-        self.repo.restore(ss.root, self.restoredir, self.password)
+        self.backathon.restore(ss.root, self.restoredir, self.password)
 
         file_b = pathlib.Path(self.restoredir, "file1")
         stat_result = file_b.stat()
@@ -106,10 +106,10 @@ class TestRestore(TestBase):
         file_a = self.create_file("file1", "contents")
         os.utime(file_a, ns=(123456789, 987654321))
 
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
         ss = self.snapshot.get()
-        self.repo.restore(ss.root, self.restoredir, self.password)
+        self.backathon.restore(ss.root, self.restoredir, self.password)
 
         file_b = pathlib.Path(self.restoredir, "file1")
 
@@ -128,8 +128,8 @@ class TestRestore(TestBase):
         dir_a.mkdir()
         os.utime(dir_a, ns=(123456789, 987654321))
 
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
         ss = self.snapshot.get()
 
         # The directory atime gets reset before we back it up, so just check
@@ -142,7 +142,7 @@ class TestRestore(TestBase):
         info = list(unpack_payload(payload))[1]
         atime = info['atime']
 
-        self.repo.restore(ss.root, self.restoredir, self.password)
+        self.backathon.restore(ss.root, self.restoredir, self.password)
 
         dir1 = pathlib.Path(self.restoredir, "dir1")
 
@@ -159,13 +159,13 @@ class TestRestore(TestBase):
     def test_restore_multiple_revisions(self):
         self.create_file("file", "contents A")
 
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
 
         self.create_file("file", "new contents")
 
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
 
         snapshots = list(self.snapshot.order_by("date"))
 
@@ -176,8 +176,8 @@ class TestRestore(TestBase):
         )
 
         restoredir = pathlib.Path(self.restoredir)
-        self.repo.restore(snapshots[0].root, restoredir /"ss1", self.password)
-        self.repo.restore(snapshots[1].root, restoredir /"ss2", self.password)
+        self.backathon.restore(snapshots[0].root, restoredir /"ss1", self.password)
+        self.backathon.restore(snapshots[1].root, restoredir /"ss2", self.password)
 
         file1 = restoredir / "ss1" / "file"
         file2 = restoredir / "ss2" / "file"
@@ -194,8 +194,8 @@ class TestRestore(TestBase):
     def test_restore_single_file(self):
         self.create_file("file", "contents")
 
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
 
         root = self.snapshot.get().root
 
@@ -203,7 +203,7 @@ class TestRestore(TestBase):
         inode = root.children.get()
 
         filename = pathlib.Path(self.restoredir, "my_file")
-        self.repo.restore(inode, filename, self.password)
+        self.backathon.restore(inode, filename, self.password)
 
         self.assertEqual(
             "contents",
@@ -221,11 +221,11 @@ class TestRestore(TestBase):
 
         self.create_file(name, "contents")
 
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
         ss = self.snapshot.get()
 
-        self.repo.restore(ss.root, self.restoredir, self.password)
+        self.backathon.restore(ss.root, self.restoredir, self.password)
 
         self.assert_restored_file(name, "contents")
 
@@ -243,10 +243,10 @@ class TestRestore(TestBase):
                 h.update(block)
                 f.write(block)
 
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
         ss = self.snapshot.get()
-        self.repo.restore(ss.root, self.restoredir, self.password)
+        self.backathon.restore(ss.root, self.restoredir, self.password)
 
         outfile = pathlib.Path(self.restoredir, "bigfile")
         h2 = hashlib.md5()
@@ -266,10 +266,10 @@ class TestRestore(TestBase):
         path = self.path("linkname")
         os.symlink("this is the link target", path)
 
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
         ss = self.snapshot.get()
-        self.repo.restore(ss.root, self.restoredir, self.password)
+        self.backathon.restore(ss.root, self.restoredir, self.password)
 
         self.assertEqual(
             os.readlink(pathlib.Path(self.restoredir, "linkname")),
@@ -311,8 +311,8 @@ class TestRestoreWithEncryption(TestRestore):
         payload on disk"""
         self.create_file("secret_file", "super secret contents")
 
-        self.repo.scan()
-        self.repo.backup()
+        self.backathon.scan()
+        self.backathon.backup()
 
         ss = self.snapshot.get()
         tree = ss.root

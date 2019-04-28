@@ -7,7 +7,7 @@ from django.db.transaction import atomic
 from django.test import TestCase
 
 from backathon import models
-from backathon.repository import Repository
+from backathon.repository import Backathon
 import backathon.encryption
 
 
@@ -31,7 +31,9 @@ class TestBase(TestCase):
         tmpdb = tempfile.NamedTemporaryFile(delete=False)
         tmpdb.close()
         self.stack.callback(os.unlink, tmpdb.name)
-        self.repo = Repository(tmpdb.name)
+
+        self.backathon = Backathon(tmpdb.name)
+        self.repo = self.backathon.repository
 
         self.repo.set_storage("local", {"base_dir": self.datadir})
         self.repo.set_compression(False)
