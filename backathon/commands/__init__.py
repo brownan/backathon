@@ -1,75 +1,97 @@
+import abc
 import pathlib
+from argparse import ArgumentTypeError
+import os.path
+import logging
+
 
 class CommandError(Exception):
     pass
 
 
-class CommandBase:
+class CommandBase(metaclass=abc.ABCMeta):
 
     help = ""
+    logger = logging.getLogger("backathon.cmd")
 
-    def __init__(self, config):
-        self.config = config
+    def __init__(self):
+        pass
 
     def add_arguments(self, parser):
-        return parser
+        pass
 
-    def handle(self, options):
-        raise NotImplementedError()
+    @abc.abstractmethod
+    def handle(self, args):
+        pass
 
-    def get_repo(self):
-        from .. import repository
-        return repository.Repository(self.config)
+    def print(self, s):
+        self.logger.info(s)
 
-    def input_yn(self, prompt, default=None):
-        if default is None:
-            prompt += " [y/n]: "
-        elif default:
-            prompt += " [Y/n]: "
+def _backathon_type(dbname):
+    if not os.path.exists(dbname):
+        raise ArgumentTypeError("Database file {} does not exist".format(dbname))
+    from backathon.repository import Backathon
+    return Backathon(dbname)
+
+
+class RepoCommand(CommandBase):
+
+    def add_arguments(self, parser):
+        super().add_arguments(parser)
+        parser.add_argument("repo", type=_backathon_type,
+                            help="Repository metadata file")
+
+
+def input_yn(prompt, default=None):
+    if default is None:
+        prompt += " [y/n]: "
+    elif default:
+        prompt += " [Y/n]: "
+    else:
+        prompt += " [y/N]: "
+
+    while True:
+        response = input(prompt)
+
+        if not response and default is not None:
+            return default
+
+        response = response.lower()
+        if response not in "yn":
+            print("Please type 'y' or 'n'")
         else:
-            prompt += " [y/N]: "
+            return response == 'y'
 
-        while True:
-            response = input(prompt)
+def input_menu(prompt, choices):
+    while True:
+        for i, choice in enumerate(choices):
+            print("{}) {}".format(i+1, choice))
 
-            if not response and default is not None:
-                return default
+        response = input(prompt + ": ")
 
-            response = response.lower()
-            if response not in "yn":
-                print("Please type 'y' or 'n'")
-            else:
-                return response == 'y'
+        try:
+            response = int(response)
+        except ValueError:
+            print("Invalid choice")
+            continue
 
-    def input_menu(self, prompt, choices):
-        while True:
-            for i, choice in enumerate(choices):
-                print("{}) {}".format(i+1, choice))
+        if response not in range(1, len(choices)+1):
+            print("Invalid choice")
+            continue
 
-            response = input(prompt + ": ")
+        return response-1
 
-            try:
-                response = int(response)
-            except ValueError:
-                print("Invalid choice")
-                continue
-
-            if response not in range(1, len(choices)+1):
-                print("Invalid choice")
-                continue
-
-            return response-1
-
-    def input_local_dir_path(self, prompt):
-        while True:
-            response = input(prompt + ": ")
-            path = pathlib.Path(response)
-            if path.is_dir():
+def input_local_dir_path(prompt):
+    while True:
+        response = input(prompt + ": ")
+        path = pathlib.Path(response)
+        if path.is_dir():
+            return str(path)
+        elif not path.exists() and path.parent.is_dir():
+            if input_yn("Path does not exist. Create it?",
+                        default=True):
+                path.mkdir()
                 return str(path)
-            elif not path.exists() and path.parent.is_dir():
-                if self.input_yn("Path does not exist. Create it?",
-                                 default=True):
-                    path.mkdir()
-                    return str(path)
-            else:
-                print("Path does not exist")
+        else:
+            print("Path does not exist")
+

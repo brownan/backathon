@@ -7,19 +7,21 @@ from django.template.defaultfilters import filesizeformat
 
 from backathon.util import atomic_immediate
 from .. import models
-from . import CommandBase, CommandError
+from . import CommandBase, CommandError, RepoCommand
 
 
-class Command(CommandBase):
+class Command(RepoCommand):
     help="Adds the given filesystem path as a backup root"
 
-    def add_arguments(self, parser):
-        parser.add_argument("root", type=str, nargs="+")
-        parser.add_argument("--skip-scan", action='store_true')
+    @classmethod
+    def add_arguments(cls, parser):
+        super().add_arguments(parser)
+        parser.add_argument("root", type=str, nargs="+",
+                            help="Filesystem path to the new backup root")
+        parser.add_argument("--skip-scan", action='store_true',
+                            help="Skip scanning the new root path")
 
-    def handle(self, options):
-
-        repo = self.get_repo()
+    def handle(self):
 
         with atomic_immediate(using=repo.db):
             for root_path in options.root:

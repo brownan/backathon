@@ -10,7 +10,9 @@ from . import CommandBase, CommandError
 class Command(CommandBase):
     help="Adds the given filesystem path as a backup root"
 
-    def add_arguments(self, parser):
+    @classmethod
+    def add_arguments(cls, parser):
+        super().add_arguments(parser)
         parser.add_argument("root", type=str, nargs="+")
 
     def handle(self, options):

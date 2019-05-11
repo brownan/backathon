@@ -8,12 +8,14 @@ from importlib import import_module
 import django
 from django.apps import apps
 
-from backathon.commands import CommandError, CommandBase
+from backathon.commands import CommandError
 
 logger = logging.getLogger("backathon.main")
 
 def setup():
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backathon.settings")
+    os.environ['DJANGO_SETTINGS_MODULE'] = os.environ.get(
+        "BACKATHON_SETTINGS_MODULE", "backathon.settings"
+    )
     django.setup()
 
 def main():
@@ -21,78 +23,49 @@ def main():
 
     """
 
-    argv = sys.argv
-
-    if len(argv) < 3:
-        subcommand = "help"
-    else:
-        subcommand = argv[2]
-
-    if len(argv) >= 2:
-        dbpath = argv[1]
-
-    # Special exception, all commands except for 'help' and 'init' require the
-    # database to exist.
-    if subcommand not in ['init', 'help'] and not os.path.exists(dbpath):
-        sys.stderr.write("Could not find config database: {}\n".format(dbpath))
-        sys.stderr.write("Check the path, or if this is a new config you must run 'init'\n")
-        sys.exit(1)
-
     setup()
 
-    commands = find_commands()
+    commands = {
+        cmd_name: get_command_obj(cmd_name)
+        for cmd_name in find_commands()
+    }
 
-    if subcommand == "help":
-        usage = [
-            "Usage: {} CONFIG SUBCOMMAND [options] [args]".format(
-                os.path.basename(argv[0]),
-            ),
-            "",
-            "Available subcommands:"
-        ]
-        for command in sorted(commands):
-            usage.append("\t" + command)
-        sys.stdout.write("\n".join(usage) + "\n")
+    # Configure the parser
+    parser = argparse.ArgumentParser(prog="Backathon")
+    parser.add_argument("-v", "--verbose", action="count", default=0,
+                        help="Increase logging verbosity. Use twice for debug"
+                             "output")
+    parser.add_argument("-q", "--quiet", action="store_true",
+                        help="Disable all logging output except errors")
+
+    # Add a subparser for each defined command class in the backathon.commands
+    # package, and add each command's arguments to its subparser.
+    subparsers = parser.add_subparsers(title="subcommands", dest="cmd_name")
+    for cmd_name, command in commands.items():
+        sub_parser = subparsers.add_parser(cmd_name,
+                                           help=command.help)
+        command.add_arguments(sub_parser)
+
+    args = parser.parse_args()
+    if args.cmd_name is None:
+        parser.print_help()
         sys.exit(1)
-
-    if subcommand not in commands:
-        sys.stderr.write("Unknown command: {!r}\tType '{} help' for usage.\n"
-                         .format(subcommand, os.path.basename(argv[0])))
-        sys.exit(1)
-
-    command_class = get_command_class(subcommand)
-    assert issubclass(command_class, CommandBase)
-
-    command = command_class(dbpath)
-
-    # Configure the parser and re-parse the arguments
-    parser = argparse.ArgumentParser(
-        prog="{} {} {}".format(os.path.basename(argv[0]), dbpath, subcommand),
-        description=command.help or None,
-    )
-    parser.add_argument("-v", "--verbose", action="count", default=0)
-    parser.add_argument("-q", "--quiet", action="store_true")
-    command.add_arguments(parser)
-
-    options = parser.parse_args(argv[3:])
 
     # Set log level
-    if options.quiet:
+    if args.quiet:
         level = logging.ERROR
-    elif options.verbose == 0:
+    elif args.verbose == 0:
         level = logging.WARNING
-    elif options.verbose == 1:
+    elif args.verbose == 1:
         level = logging.INFO
     else:
         level = logging.DEBUG
     logging.getLogger("backathon").setLevel(level)
 
-    logger.info("Using config database {}".format(
-        dbpath
-    ))
+    command = commands[args.cmd_name]
 
     try:
-        command.handle(options)
+        command.handle()
     except CommandError as e:
         logger.error(str(e))
         sys.exit(1)
@@ -105,9 +78,9 @@ def find_commands():
     return [name for _, name, is_pkg in pkgutil.iter_modules([path])
             if not is_pkg and not name.startswith("_")]
 
-def get_command_class(cmd_name):
+def get_command_obj(cmd_name):
     module = import_module('backathon.commands.{}'.format(cmd_name))
-    return module.Command
+    return module.Command()
 
 
 if __name__ == "__main__":

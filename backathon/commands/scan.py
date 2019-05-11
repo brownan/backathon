@@ -11,7 +11,9 @@ from . import CommandBase
 class Command(CommandBase):
     help="Scan the filesystem for changes and update the cache database"
 
+    @classmethod
     def add_arguments(self, parser):
+        super().add_arguments(parser)
         parser.add_argument("--skip-existing", action='store_true',
                             default=False,
                             help="Resumes an initial scan from an 'addroot'")

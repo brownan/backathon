@@ -11,7 +11,9 @@ from . import CommandBase
 class Command(CommandBase):
     help="Backs up changed files. Run a scan first to detect changes."
 
-    def add_arguments(self, parser):
+    @classmethod
+    def add_arguments(cls, parser):
+        super().add_arguments(parser)
         parser.add_argument("--single", action="store_true",
                             help="Single-thread mode")
 

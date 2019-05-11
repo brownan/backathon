@@ -54,6 +54,9 @@ LOGGING = {
         "backathon": {
             "level": "WARNING",
         },
+        "backathon.cmd": {
+            "level": "INFO"
+        },
         "django.db": {
             "level": "WARNING",
         },
