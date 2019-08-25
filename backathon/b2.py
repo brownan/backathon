@@ -378,7 +378,7 @@ class B2Bucket(StorageBase):
 
             try:
                 response_data = response.json()
-            except ValueError():
+            except ValueError:
                 raise IOError("Invalid json returned from B2 API")
 
             if response.status_code == 401 and response_data['code'] == "expired_auth_token":
