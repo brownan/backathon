@@ -1,7 +1,7 @@
 u-msgpack-python
 PyNaCl
 pip-tools
-Django~=2.2.0
+Django~=2.2.24
 colorlog
 tqdm
 requests
