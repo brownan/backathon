@@ -7,8 +7,10 @@ import nacl.secret
 import nacl.public
 import nacl.exceptions
 
+
 class DecryptionError(Exception):
     pass
+
 
 class BaseEncryption:
     """Base class for encryption classes
@@ -126,12 +128,14 @@ class BaseEncryption:
         """
         raise NotImplementedError()
 
+
 class NullEncryption(BaseEncryption):
     """Performs no encryption
 
     Use this for local repositories, trusted repositories, or where data is
     not sensitive
     """
+
     password_required = False
 
     @classmethod
@@ -164,6 +168,7 @@ class NullEncryption(BaseEncryption):
     def calculate_objid(self, content):
         return hashlib.sha256(content).digest()
 
+
 class NaclSealedBox(BaseEncryption):
     password_required = True
 
@@ -171,11 +176,11 @@ class NaclSealedBox(BaseEncryption):
     MEMLIMIT = nacl.pwhash.argon2id.MEMLIMIT_SENSITIVE
 
     def __init__(self, salt, ops, mem, pubkey, enc_privkey):
-        self.salt = salt # type: bytes
-        self.ops = ops # type: int
-        self.mem = mem # type: int
-        self.pubkey = pubkey # type: nacl.public.PublicKey
-        self.enc_privkey = enc_privkey # type: bytes
+        self.salt = salt  # type: bytes
+        self.ops = ops  # type: int
+        self.mem = mem  # type: int
+        self.pubkey = pubkey  # type: nacl.public.PublicKey
+        self.enc_privkey = enc_privkey  # type: bytes
 
     def _get_symmetric_key(self, password):
         # This key is derived from the password and is used to encrypt
@@ -220,30 +225,28 @@ class NaclSealedBox(BaseEncryption):
 
         self.pubkey = key.public_key
 
-        self.enc_privkey = nacl.secret.SecretBox(
-            symmetric_key
-        ).encrypt(bytes(key))
+        self.enc_privkey = nacl.secret.SecretBox(symmetric_key).encrypt(bytes(key))
 
         return self
 
     @classmethod
     def init_from_private(cls, params):
         return cls(
-            salt=bytes.fromhex(params['salt']),
-            ops=params['ops'],
-            mem=params['mem'],
-            pubkey=nacl.public.PublicKey(bytes.fromhex(params['pubkey'])),
-            enc_privkey=bytes.fromhex(params['key']),
+            salt=bytes.fromhex(params["salt"]),
+            ops=params["ops"],
+            mem=params["mem"],
+            pubkey=nacl.public.PublicKey(bytes.fromhex(params["pubkey"])),
+            enc_privkey=bytes.fromhex(params["key"]),
         )
 
     @classmethod
     def init_from_public(cls, params, password):
         self = cls(
-            salt=bytes.fromhex(params['salt']),
-            ops=params['ops'],
-            mem=params['mem'],
+            salt=bytes.fromhex(params["salt"]),
+            ops=params["ops"],
+            mem=params["mem"],
             pubkey=None,
-            enc_privkey=bytes.fromhex(params['key']),
+            enc_privkey=bytes.fromhex(params["key"]),
         )
 
         self.pubkey = self._decrypt_privkey(password).public_key
@@ -252,19 +255,19 @@ class NaclSealedBox(BaseEncryption):
 
     def get_public_params(self):
         return {
-            'salt': self.salt.hex(),
-            'ops': self.ops,
-            'mem': self.mem,
-            'key': self.enc_privkey.hex(),
+            "salt": self.salt.hex(),
+            "ops": self.ops,
+            "mem": self.mem,
+            "key": self.enc_privkey.hex(),
         }
 
     def get_private_params(self):
         return {
-            'salt': self.salt.hex(),
-            'ops': self.ops,
-            'mem': self.mem,
-            'pubkey': bytes(self.pubkey).hex(),
-            'key': self.enc_privkey.hex(),
+            "salt": self.salt.hex(),
+            "ops": self.ops,
+            "mem": self.mem,
+            "pubkey": bytes(self.pubkey).hex(),
+            "key": self.enc_privkey.hex(),
         }
 
     def encrypt_bytes(self, plaintext):

@@ -1,11 +1,11 @@
 import pathlib
 
+
 class CommandError(Exception):
     pass
 
 
 class CommandBase:
-
     help = ""
 
     def __init__(self, config):
@@ -19,6 +19,7 @@ class CommandBase:
 
     def get_repo(self):
         from .. import repository
+
         return repository.Repository(self.config)
 
     def input_yn(self, prompt, default=None):
@@ -39,12 +40,12 @@ class CommandBase:
             if response not in "yn":
                 print("Please type 'y' or 'n'")
             else:
-                return response == 'y'
+                return response == "y"
 
     def input_menu(self, prompt, choices):
         while True:
             for i, choice in enumerate(choices):
-                print("{}) {}".format(i+1, choice))
+                print("{}) {}".format(i + 1, choice))
 
             response = input(prompt + ": ")
 
@@ -54,11 +55,11 @@ class CommandBase:
                 print("Invalid choice")
                 continue
 
-            if response not in range(1, len(choices)+1):
+            if response not in range(1, len(choices) + 1):
                 print("Invalid choice")
                 continue
 
-            return response-1
+            return response - 1
 
     def input_local_dir_path(self, prompt):
         while True:
@@ -67,8 +68,7 @@ class CommandBase:
             if path.is_dir():
                 return str(path)
             elif not path.exists() and path.parent.is_dir():
-                if self.input_yn("Path does not exist. Create it?",
-                                 default=True):
+                if self.input_yn("Path does not exist. Create it?", default=True):
                     path.mkdir()
                     return str(path)
             else:

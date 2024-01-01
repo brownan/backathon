@@ -9,6 +9,7 @@ from . import util
 
 logger = logging.getLogger("backathon.restore")
 
+
 def restore_item(repo, objid, path, key=None):
     """Restore the given object to the given path
 
@@ -50,10 +51,12 @@ def restore_item(repo, objid, path, key=None):
     try:
         payload = repo.get_object(objid, key)
     except CorruptedRepository as e:
-        logger.error("Can't restore {}: {}".format(
-            pathstr(path),
-            e,
-        ))
+        logger.error(
+            "Can't restore {}: {}".format(
+                pathstr(path),
+                e,
+            )
+        )
         return
     payload_items = unpack_payload(payload)
 
@@ -66,16 +69,18 @@ def restore_item(repo, objid, path, key=None):
         # validated, but then we get an error here with the msgpack payload,
         # that's got to be either a bug or a malicious upload from an actor that
         # has the encryption key
-        logger.error("Can't restore {}: Object {} has an invalid payload. "
-                     "This may be a bug.".format(
-            pathstr(path), objid
-        ))
+        logger.error(
+            "Can't restore {}: Object {} has an invalid payload. "
+            "This may be a bug.".format(pathstr(path), objid)
+        )
         return
 
     if obj_type == "inode":
         if path.exists() and not path.is_file():
-            logger.error("Can't restore path {}: it already exists but isn't "
-                         "a file".format(pathstr(path)))
+            logger.error(
+                "Can't restore path {}: it already exists but isn't "
+                "a file".format(pathstr(path))
+            )
             return
         logger.info("Restoring file {}".format(pathstr(path)))
 
@@ -85,16 +90,13 @@ def restore_item(repo, objid, path, key=None):
             with path.open("wb") as fileout:
                 if obj_payload_type == "chunklist":
                     for pos, chunk_id in obj_payload_contents:
-
                         try:
-                            blob_payload = unpack_payload(
-                                repo.get_object(chunk_id, key)
-                            )
+                            blob_payload = unpack_payload(repo.get_object(chunk_id, key))
                         except CorruptedRepository as e:
-                            logger.error("Could not restore chunk of {} at byte {}: "
-                                         "{}".format(
-                                pathstr(path), pos, e
-                            ))
+                            logger.error(
+                                "Could not restore chunk of {} at byte {}: "
+                                "{}".format(pathstr(path), pos, e)
+                            )
                             continue
 
                         try:
@@ -103,18 +105,14 @@ def restore_item(repo, objid, path, key=None):
                         except umsgpack.UnpackException:
                             logger.error(
                                 "Could not restore chunk of {} at byte {}: "
-                                "invalid or corrupted data".format(
-                                    pathstr(path), pos
-                                )
+                                "invalid or corrupted data".format(pathstr(path), pos)
                             )
                             continue
 
                         if blob_type != "blob":
                             logger.error(
                                 "Could not restore chunk of {} at byte {}: object of "
-                                "type blob expected".format(
-                                    pathstr(path), pos
-                                )
+                                "type blob expected".format(pathstr(path), pos)
                             )
                             continue
 
@@ -128,26 +126,24 @@ def restore_item(repo, objid, path, key=None):
                     raise AssertionError("Invalid inode payload type")
 
         except OSError as e:
-            logger.error("Error writing {}: {}".format(
-                pathstr(path), e
-            ))
+            logger.error("Error writing {}: {}".format(pathstr(path), e))
             return
 
         _set_file_properties(path, obj_info)
 
     elif obj_type == "tree":
         if path.exists() and not path.is_dir():
-            logger.error("Can't restore path {}: it already exists but isn't "
-                         "a directory".format(pathstr(path)))
+            logger.error(
+                "Can't restore path {}: it already exists but isn't "
+                "a directory".format(pathstr(path))
+            )
             return
 
         if not path.exists():
             try:
-                path.mkdir(mode=obj_info['mode'])
+                path.mkdir(mode=obj_info["mode"])
             except OSError as e:
-                logger.error("Could not make directory {}: {}".format(
-                    pathstr(path), e
-                ))
+                logger.error("Could not make directory {}: {}".format(pathstr(path), e))
                 return
 
         _set_file_properties(path, obj_info)
@@ -159,45 +155,41 @@ def restore_item(repo, objid, path, key=None):
 
     elif obj_type == "symlink":
         try:
-            os.symlink(
-                obj_contents,
-                path
-            )
+            os.symlink(obj_contents, path)
         except OSError as e:
-            logger.error("Could not create symlink at {}: {}".format(
-                path, e
-            ))
+            logger.error("Could not create symlink at {}: {}".format(path, e))
         else:
             # Custom set-file-properties code that only attempts to do so if
             # the platform supports the follow_symlinks param
             if os.chown in os.supports_follow_symlinks:
                 try:
-                    os.chown(str(path), obj_info['uid'], obj_info['gid'],
-                             follow_symlinks=False)
+                    os.chown(
+                        str(path), obj_info["uid"], obj_info["gid"], follow_symlinks=False
+                    )
                 except OSError as e:
-                    logger.warning("Could not chown {}: {}".format(
-                        pathstr(path), e
-                    ))
+                    logger.warning("Could not chown {}: {}".format(pathstr(path), e))
             if os.chmod in os.supports_follow_symlinks:
                 try:
-                    os.chmod(str(path), obj_info['mode'],
-                             follow_symlinks=False)
+                    os.chmod(str(path), obj_info["mode"], follow_symlinks=False)
                 except OSError as e:
-                    logger.warning("Could not chmod {}: {}".format(
-                        pathstr(path), e
-                    ))
+                    logger.warning("Could not chmod {}: {}".format(pathstr(path), e))
             if os.utime in os.supports_follow_symlinks:
                 try:
-                    os.utime(str(path), ns=(obj_info['atime'], obj_info['mtime']),
-                             follow_symlinks=False)
+                    os.utime(
+                        str(path),
+                        ns=(obj_info["atime"], obj_info["mtime"]),
+                        follow_symlinks=False,
+                    )
                 except OSError as e:
-                    logger.warning("Could not set mtime on {}: {}".format(
-                        pathstr(path), e
-                    ))
+                    logger.warning(
+                        "Could not set mtime on {}: {}".format(pathstr(path), e)
+                    )
 
     else:
-        raise NotImplementedError("Restore not implemented for {} "
-                                  "object type".format(obj_type))
+        raise NotImplementedError(
+            "Restore not implemented for {} " "object type".format(obj_type)
+        )
+
 
 def _set_file_properties(path, obj_info):
     """Sets the file properties of the given path
@@ -208,27 +200,23 @@ def _set_file_properties(path, obj_info):
     Sets: owner, group, mode, atime, mtime
     """
     try:
-        os.chown(str(path), obj_info['uid'], obj_info['gid'])
+        os.chown(str(path), obj_info["uid"], obj_info["gid"])
     except OSError as e:
-        logger.warning("Could not chown {}: {}".format(
-            pathstr(path), e
-        ))
+        logger.warning("Could not chown {}: {}".format(pathstr(path), e))
     try:
-        os.chmod(str(path), obj_info['mode'])
+        os.chmod(str(path), obj_info["mode"])
     except OSError as e:
-        logger.warning("Could not chmod {}: {}".format(
-            pathstr(path), e
-        ))
+        logger.warning("Could not chmod {}: {}".format(pathstr(path), e))
     try:
-        os.utime(str(path), ns=(obj_info['atime'], obj_info['mtime']))
+        os.utime(str(path), ns=(obj_info["atime"], obj_info["mtime"]))
     except OSError as e:
-        logger.warning("Could not set mtime on {}: {}".format(
-            pathstr(path), e
-        ))
+        logger.warning("Could not set mtime on {}: {}".format(pathstr(path), e))
+
 
 def pathstr(p):
     """Returns the path string suitable for printing or logging"""
     return os.fsencode(str(p)).decode("UTF-8", errors="replace")
+
 
 def unpack_payload(payload):
     """Returns an iterator over a payload, iterating over the msgpacked

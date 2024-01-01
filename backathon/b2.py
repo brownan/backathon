@@ -75,24 +75,24 @@ from .storage import StorageBase
 
 logger = getLogger("backathon.b2")
 
-extra_headers = {
-    'User-Agent': 'Backathon/Python3 <github.com/brownan/backathon>'
-}
+extra_headers = {"User-Agent": "Backathon/Python3 <github.com/brownan/backathon>"}
 
 # Timeout used in HTTP calls
 TIMEOUT = 5
 
+
 class B2ResponseError(IOError):
     def __init__(self, data):
-        super().__init__(data['message'])
+        super().__init__(data["message"])
         self.data = data
 
     def __str__(self):
-        return "{} {}: \"{}\"".format(
-            self.data['status'],
-            self.data['code'],
-            self.data['message'],
+        return '{} {}: "{}"'.format(
+            self.data["status"],
+            self.data["code"],
+            self.data["message"],
         )
+
 
 class B2Bucket(StorageBase):
     """Represents a B2 Bucket, a container for objects
@@ -102,11 +102,13 @@ class B2Bucket(StorageBase):
     authorization tokens.
 
     """
-    def __init__(self,
-                 account_id,
-                 application_key,
-                 bucket_name,
-                 ):
+
+    def __init__(
+        self,
+        account_id,
+        application_key,
+        bucket_name,
+    ):
         self.account_id = account_id
         self.application_key = application_key
         self.bucket_name = bucket_name
@@ -117,9 +119,9 @@ class B2Bucket(StorageBase):
 
     def get_params(self):
         return {
-            'account_id': self.account_id,
-            'application_key': self.application_key,
-            'bucket_name': self.bucket_name,
+            "account_id": self.account_id,
+            "application_key": self.application_key,
+            "bucket_name": self.bucket_name,
         }
 
     @property
@@ -129,9 +131,9 @@ class B2Bucket(StorageBase):
         try:
             return self._local.session
         except AttributeError:
-            logger.debug("Initializing session for thread id {}".format(
-                threading.get_ident()
-            ))
+            logger.debug(
+                "Initializing session for thread id {}".format(threading.get_ident())
+            )
             session = requests.Session()
             session.headers.update(extra_headers)
             self._local.session = session
@@ -142,22 +144,20 @@ class B2Bucket(StorageBase):
 
         Implements automatic retries and backoffs as per the B2 documentation
         """
-        kwargs.setdefault('timeout', TIMEOUT)
+        kwargs.setdefault("timeout", TIMEOUT)
 
         delay = 1
         max_delay = 64
         while True:
             try:
                 response = self.session.post(*args, **kwargs)
-            except (requests.exceptions.ConnectionError,
-                    requests.exceptions.Timeout):
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
                 # No response from server at all
                 if max_delay < delay:
                     # Give up
                     logger.error("Timeout in B2 API call. Giving up")
                     raise
-                logger.warning("Timeout in B2 API call, retrying in {}s".format(
-                    delay))
+                logger.warning("Timeout in B2 API call, retrying in {}s".format(delay))
                 time.sleep(delay)
                 delay *= 2
             else:
@@ -167,15 +167,19 @@ class B2Bucket(StorageBase):
                         # Give up
                         logger.error("B2 service unavailable. Giving up")
                         return response
-                    logger.warning("B2 API error: service unavailable, "
-                                   "retrying in {}s".format(delay))
+                    logger.warning(
+                        "B2 API error: service unavailable, "
+                        "retrying in {}s".format(delay)
+                    )
                     time.sleep(delay)
                     delay *= 2
                 elif response.status_code == 429:
                     # Too many requests
-                    delay = int(response.headers.get('Retry-After', 1))
-                    logger.warning("B2 API returned error 429 Too Many "
-                                   "Requests. Retrying in {}s".format(delay))
+                    delay = int(response.headers.get("Retry-After", 1))
+                    logger.warning(
+                        "B2 API returned error 429 Too Many "
+                        "Requests. Retrying in {}s".format(delay)
+                    )
                     time.sleep(delay)
                     delay = 1
                 else:
@@ -193,17 +197,18 @@ class B2Bucket(StorageBase):
         once per thread at the start of the session, but extremely long
         sessions may need to refresh the authorization token.
         """
-        logger.debug("Acquiring authorization token for thread id {}".format(
-            threading.get_ident()
-        ))
+        logger.debug(
+            "Acquiring authorization token for thread id {}".format(threading.get_ident())
+        )
         response = self._post_with_backoff_retry(
             "https://api.backblazeb2.com/b2api/v1/b2_authorize_account",
             headers={
-                'Authorization': 'Basic {}'.format(
-                    base64.b64encode("{}:{}".format(
-                        self.account_id,
-                        self.application_key
-                    ).encode("ASCII")).decode("ASCII")
+                "Authorization": "Basic {}".format(
+                    base64.b64encode(
+                        "{}:{}".format(self.account_id, self.application_key).encode(
+                            "ASCII"
+                        )
+                    ).decode("ASCII")
                 ),
             },
             json={},
@@ -219,9 +224,9 @@ class B2Bucket(StorageBase):
         if response.status_code != 200:
             raise B2ResponseError(data)
 
-        self._local.authorization_token = data['authorizationToken']
-        self._local.api_url = data['apiUrl']
-        self._local.download_url = data['downloadUrl']
+        self._local.authorization_token = data["authorizationToken"]
+        self._local.api_url = data["apiUrl"]
+        self._local.download_url = data["downloadUrl"]
 
     def _call_api(self, api_name, data):
         """Calls the given API with the given json data
@@ -233,23 +238,25 @@ class B2Bucket(StorageBase):
 
         If unsuccessful, raises an IOError with a description of the error
         """
-        api_url = getattr(self._local, 'api_url', None)
-        authorization_token = getattr(self._local, 'authorization_token', None)
+        api_url = getattr(self._local, "api_url", None)
+        authorization_token = getattr(self._local, "authorization_token", None)
         if api_url is None or authorization_token is None:
             self._authorize_account()
 
         response = self._post_with_backoff_retry(
             "{}/b2api/v1/{}".format(self._local.api_url, api_name),
-            headers = {
-                'Authorization': self._local.authorization_token,
+            headers={
+                "Authorization": self._local.authorization_token,
             },
             json=data,
         )
-        logger.debug("{} {} {:.2f}s".format(
-            api_name,
-            response.status_code,
-            response.elapsed.total_seconds(),
-        ))
+        logger.debug(
+            "{} {} {:.2f}s".format(
+                api_name,
+                response.status_code,
+                response.elapsed.total_seconds(),
+            )
+        )
 
         try:
             data = response.json()
@@ -257,7 +264,7 @@ class B2Bucket(StorageBase):
             response.raise_for_status()
             raise IOError("Invalid json response from B2 on call to {}".format(api_name))
 
-        if response.status_code == 401 and data['code'] == "expired_auth_token":
+        if response.status_code == 401 and data["code"] == "expired_auth_token":
             # Auth token has expired. Retry after getting a new one.
             self._local.api_url = None
             self._local.authorization_token = None
@@ -279,10 +286,10 @@ class B2Bucket(StorageBase):
         This costs one class C transaction, and the result is cached for the
         lifetime of this B2Bucket instance.
         """
-        data = self._call_api("b2_list_buckets", {'accountId': self.account_id})
-        for bucketinfo in data['buckets']:
-            if bucketinfo['bucketName'] == self.bucket_name:
-                return bucketinfo['bucketId']
+        data = self._call_api("b2_list_buckets", {"accountId": self.account_id})
+        for bucketinfo in data["buckets"]:
+            if bucketinfo["bucketName"] == self.bucket_name:
+                return bucketinfo["bucketId"]
 
         raise IOError("No such bucket name {}".format(self.bucket_name))
 
@@ -292,10 +299,9 @@ class B2Bucket(StorageBase):
         This costs one class A transaction
         """
         logger.debug("Getting a new upload url")
-        data = self._call_api("b2_get_upload_url",
-                              data={'bucketId': self.bucket_id})
-        self._local.upload_url = data['uploadUrl']
-        self._local.upload_token = data['authorizationToken']
+        data = self._call_api("b2_get_upload_url", data={"bucketId": self.bucket_id})
+        self._local.upload_url = data["uploadUrl"]
+        self._local.upload_token = data["authorizationToken"]
 
     def upload_file(self, name, content):
         """Calls b2_upload_file to upload the given data to the given name
@@ -334,54 +340,62 @@ class B2Bucket(StorageBase):
             digest.update(chunk)
 
         headers = {
-            'X-Bz-File-Name': filename,
-            'Content-Type': "b2/x-auto",
-            'Content-Length': str(filesize),
-            'X-Bz-Content-Sha1': digest.hexdigest(),
+            "X-Bz-File-Name": filename,
+            "Content-Type": "b2/x-auto",
+            "Content-Length": str(filesize),
+            "X-Bz-Content-Sha1": digest.hexdigest(),
         }
 
         # We don't use the usual backoff handler when uploading. As per the B2
         # documentation, for most problems we can just get a new upload URL
         # with b2_get_upload_url and try again immediately
         for _ in range(5):
-            if (getattr(self._local, "upload_url", None) is None or
-                getattr(self._local, "upload_token", None) is None
+            if (
+                getattr(self._local, "upload_url", None) is None
+                or getattr(self._local, "upload_token", None) is None
             ):
                 self._get_upload_url()
 
-            headers['Authorization'] = self._local.upload_token
+            headers["Authorization"] = self._local.upload_token
 
             response = None
             response_data = None
             exc_str = None
-            
+
             content.seek(0)
 
             try:
                 response = self.session.post(
                     self._local.upload_url,
-                    headers = headers,
+                    headers=headers,
                     timeout=TIMEOUT,
                     data=content,
                 )
-            except (requests.exceptions.ConnectionError,
-                    requests.exceptions.Timeout) as e:
+            except (
+                requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout,
+            ) as e:
                 logger.info("Error when uploading ({})".format(e))
                 exc_str = str(e)
                 del self._local.upload_url
                 continue
 
-            logger.debug("b2_upload_file {} {:.2f}s".format(
-                response.status_code,
-                response.elapsed.total_seconds(),
-            ))
+            logger.debug(
+                "b2_upload_file {} {:.2f}s".format(
+                    response.status_code,
+                    response.elapsed.total_seconds(),
+                )
+            )
 
             try:
                 response_data = response.json()
             except ValueError:
                 raise IOError("Invalid json returned from B2 API")
 
-            if response.status_code == 401 and response_data['code'] == "expired_auth_token":
+            if (
+                response.status_code == 401
+                and response_data["code"] == "expired_auth_token"
+            ):
                 logger.info("Expired auth token when uploading")
                 del self._local.upload_url
                 continue
@@ -433,8 +447,9 @@ class B2Bucket(StorageBase):
             max_size=2**21,
         )
 
-        if (getattr(self._local, "download_url", None) is None or
-            getattr(self._local, "authorization_token", None) is None
+        if (
+            getattr(self._local, "download_url", None) is None
+            or getattr(self._local, "authorization_token", None) is None
         ):
             self._authorize_account()
 
@@ -450,15 +465,17 @@ class B2Bucket(StorageBase):
             ),
             timeout=TIMEOUT,
             headers={
-                'Authorization': self._local.authorization_token,
+                "Authorization": self._local.authorization_token,
             },
             stream=True,
         )
 
-        logger.debug("b2_download_file_by_name {} {:.2f}s".format(
-            response.status_code,
-            response.elapsed.total_seconds(),
-        ))
+        logger.debug(
+            "b2_download_file_by_name {} {:.2f}s".format(
+                response.status_code,
+                response.elapsed.total_seconds(),
+            )
+        )
 
         with response:
             if response.status_code != 200:
@@ -466,8 +483,7 @@ class B2Bucket(StorageBase):
                     resp_json = response.json()
                 except ValueError:
                     response.raise_for_status()
-                    raise IOError("Non-200 status code returned for download "
-                                  "request")
+                    raise IOError("Non-200 status code returned for download " "request")
                 raise B2ResponseError(resp_json)
 
             for chunk in response.iter_content(chunk_size=io.DEFAULT_BUFFER_SIZE):
@@ -475,27 +491,25 @@ class B2Bucket(StorageBase):
                 f.write(chunk)
 
         if not hmac.compare_digest(
-                digest.hexdigest(),
-                response.headers['X-Bz-Content-Sha1'],
+            digest.hexdigest(),
+            response.headers["X-Bz-Content-Sha1"],
         ):
             f.close()
             raise IOError("Corrupt download: Sha1 doesn't match")
 
         data = {
-            'fileId': response.headers['X-Bz-File-Id'],
-            'fileName': urllib.parse.unquote(response.headers['X-Bz-File-Name']),
-            'contentSha1': response.headers['X-Bz-Content-Sha1'],
-            'contentLength': response.headers['Content-Length'],
-            'contentType': response.headers['Content-Type'],
-            'uploadTimestamp': response.headers['X-Bz-Upload-Timestamp'],
-            'fileInfo': {},
+            "fileId": response.headers["X-Bz-File-Id"],
+            "fileName": urllib.parse.unquote(response.headers["X-Bz-File-Name"]),
+            "contentSha1": response.headers["X-Bz-Content-Sha1"],
+            "contentLength": response.headers["Content-Length"],
+            "contentType": response.headers["Content-Type"],
+            "uploadTimestamp": response.headers["X-Bz-Upload-Timestamp"],
+            "fileInfo": {},
         }
 
         for h in response.headers:
             if h.startswith("X-Bz-Info-"):
-                data['fileInfo'][h[10:]] = urllib.parse.unquote(
-                        response.headers[h]
-                )
+                data["fileInfo"][h[10:]] = urllib.parse.unquote(response.headers[h])
 
         f.seek(0)
         return data, f
@@ -522,19 +536,19 @@ class B2Bucket(StorageBase):
             data = self._call_api(
                 "b2_list_file_names",
                 {
-                    'bucketId': self.bucket_id,
+                    "bucketId": self.bucket_id,
                     # 1000 is the maximum number of items that can be
                     # returned in a single class C transaction. The API can
                     # return more but it will charge multiple transactions.
                     # This may be worth it if we discover it gives us
                     # performance gains.
-                    'maxFileCount': 1000,
-                    'prefix': prefix,
-                    'startFileName': start_filename,
-                }
+                    "maxFileCount": 1000,
+                    "prefix": prefix,
+                    "startFileName": start_filename,
+                },
             )
-            yield from data['files']
-            start_filename = data['nextFileName']
+            yield from data["files"]
+            start_filename = data["nextFileName"]
             if start_filename is None:
                 break
 
@@ -554,13 +568,12 @@ class B2Bucket(StorageBase):
             self._call_api(
                 "b2_hide_file",
                 {
-                    'bucketId': self.bucket_id,
-                    'fileName': name,
-                }
+                    "bucketId": self.bucket_id,
+                    "fileName": name,
+                },
             )
         except B2ResponseError as e:
-            if e.data['code'] in ('no_such_file', 'already_hidden'):
+            if e.data["code"] in ("no_such_file", "already_hidden"):
                 pass
             else:
                 raise
-

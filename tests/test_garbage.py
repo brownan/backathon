@@ -6,8 +6,8 @@ from django.db.transaction import atomic
 from .base import TestBase
 import backathon.garbage
 
-class TestGarbage(TestBase):
 
+class TestGarbage(TestBase):
     def setUp(self):
         super().setUp()
         self.gc = backathon.garbage.GarbageCollector(self.repo)
@@ -25,41 +25,41 @@ class TestGarbage(TestBase):
             ("D", ["F"]),
             ("E", []),
             ("F", []),
-
             # Tree 2, shares some of the same objects
             ("G", ["B", "H"]),
             ("H", ["I", "J"]),
             ("I", ["F"]),
             ("J", []),
         )
-        self.snapshot.create(root_id=b"A",
-                             date=datetime.datetime(2018, 1,1, tzinfo=pytz.UTC))
-        self.snapshot.create(root_id=b"G",
-                             date=datetime.datetime(2018, 1,1, tzinfo=pytz.UTC))
-
-        self.assertEqual(
-            10,
-            self.object.count()
+        self.snapshot.create(
+            root_id=b"A", date=datetime.datetime(2018, 1, 1, tzinfo=pytz.UTC)
         )
-        self.assert_objects({
-            'A': {
-                "B": {
-                    "D": {"F": {}},
-                    "E": {},
+        self.snapshot.create(
+            root_id=b"G", date=datetime.datetime(2018, 1, 1, tzinfo=pytz.UTC)
+        )
+
+        self.assertEqual(10, self.object.count())
+        self.assert_objects(
+            {
+                "A": {
+                    "B": {
+                        "D": {"F": {}},
+                        "E": {},
+                    },
+                    "C": {},
                 },
-                "C": {}
-            },
-            "G": {
-                "B": {
-                    "D": {"F": {}},
-                    "E": {},
+                "G": {
+                    "B": {
+                        "D": {"F": {}},
+                        "E": {},
+                    },
+                    "H": {
+                        "I": {"F": {}},
+                        "J": {},
+                    },
                 },
-                "H": {
-                    "I": {"F": {}},
-                    "J": {},
-                }
             }
-        })
+        )
 
         # No garbage expected yet
         self.assertSetEqual(
@@ -74,66 +74,60 @@ class TestGarbage(TestBase):
         # Garbage collection is stochastic, but should never collect
         # non-garbage
         self.assertTrue(
-            {g.objid for g in garbage}.issubset(
-                {b'A', b'C'}
-            ),
+            {g.objid for g in garbage}.issubset({b"A", b"C"}),
         )
 
         with atomic():
             for g in garbage:
                 g.delete()
 
-        self.assert_objects({
-            "G": {
-                "B": {
-                    "D": {"F": {}},
-                    "E": {},
-                },
-                "H": {
-                    "I": {"F": {}},
-                    "J": {},
+        self.assert_objects(
+            {
+                "G": {
+                    "B": {
+                        "D": {"F": {}},
+                        "E": {},
+                    },
+                    "H": {
+                        "I": {"F": {}},
+                        "J": {},
+                    },
                 }
-            }
-        }, no_extras=False)
+            },
+            no_extras=False,
+        )
 
     def test_collect_garbage_2(self):
         N = 100
         for root in ["A", "B"]:
-            obj = self.object.create(
-                objid="root_{}".format(root).encode("ASCII")
-            )
+            obj = self.object.create(objid="root_{}".format(root).encode("ASCII"))
             for i in range(N):
                 obj2 = self.object.create(
-                    objid="obj_{}_{}".format(root,i).encode("ASCII")
+                    objid="obj_{}_{}".format(root, i).encode("ASCII")
                 )
-                self.obj_relation.create(
-                    parent=obj,
-                    child=obj2
-                )
+                self.obj_relation.create(parent=obj, child=obj2)
                 obj = obj2
 
-
-        self.snapshot.create(root_id=b"root_A",
-                             date=datetime.datetime(2018, 1,1, tzinfo=pytz.UTC))
-        self.snapshot.create(root_id=b"root_B",
-                             date=datetime.datetime(2018, 1,1, tzinfo=pytz.UTC))
+        self.snapshot.create(
+            root_id=b"root_A", date=datetime.datetime(2018, 1, 1, tzinfo=pytz.UTC)
+        )
+        self.snapshot.create(
+            root_id=b"root_B", date=datetime.datetime(2018, 1, 1, tzinfo=pytz.UTC)
+        )
 
         self.assertEqual(
-            N*2 + 2,
+            N * 2 + 2,
             self.object.count(),
-            )
-        garbage = list(self.find_garbage())
-        self.assertListEqual(
-            [],
-            garbage
         )
+        garbage = list(self.find_garbage())
+        self.assertListEqual([], garbage)
 
         self.snapshot.get(root_id=b"root_B").delete()
         garbage = list(self.find_garbage())
         self.assertLessEqual(
             len(garbage),
-            N+1,
-            )
+            N + 1,
+        )
 
         # Assert at least some garbage was collected. The current
         # implementation is probabilistic, and may not collect all the
@@ -144,6 +138,4 @@ class TestGarbage(TestBase):
         )
         for obj in garbage:
             objid = obj.objid.decode("ASCII")
-            self.assertTrue(
-                objid.startswith("obj_B") or objid == "root_B"
-            )
+            self.assertTrue(objid.startswith("obj_B") or objid == "root_B")

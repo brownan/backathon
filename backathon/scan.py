@@ -5,6 +5,7 @@ from django.db import connections
 from .util import atomic_immediate
 from . import models
 
+
 def scan(alias, progress=None, skip_existing=False):
     """Scans all FSEntry objects for changes
 
@@ -153,8 +154,6 @@ def scan(alias, progress=None, skip_existing=False):
                     # chance for other writers to write to the database.
                     break
 
-
     # This seems like as good a time as any to do this.
     with connections[alias].cursor() as cursor:
         cursor.execute("ANALYZE fsentry")
-

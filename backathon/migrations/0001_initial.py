@@ -6,87 +6,197 @@ import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
-            name='FSEntry',
+            name="FSEntry",
             fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('path', backathon.fields.PathField(help_text='Absolute path on the local filesystem', max_length=4096, unique=True)),
-                ('new', models.BooleanField(db_index=True, default=True, help_text='Indicates this is a new entry and needs scanning. It forces an update to the metadata next scan.')),
-                ('st_mode', models.IntegerField(null=True)),
-                ('st_mtime_ns', models.IntegerField(null=True)),
-                ('st_size', models.IntegerField(null=True)),
+                (
+                    "id",
+                    models.AutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "path",
+                    backathon.fields.PathField(
+                        help_text="Absolute path on the local filesystem",
+                        max_length=4096,
+                        unique=True,
+                    ),
+                ),
+                (
+                    "new",
+                    models.BooleanField(
+                        db_index=True,
+                        default=True,
+                        help_text="Indicates this is a new entry and needs scanning. It forces an update to the metadata next scan.",
+                    ),
+                ),
+                ("st_mode", models.IntegerField(null=True)),
+                ("st_mtime_ns", models.IntegerField(null=True)),
+                ("st_size", models.IntegerField(null=True)),
             ],
             options={
-                'db_table': 'fsentry',
+                "db_table": "fsentry",
             },
         ),
         migrations.CreateModel(
-            name='Object',
+            name="Object",
             fields=[
-                ('objid', models.BinaryField(primary_key=True, serialize=False)),
-                ('type', models.CharField(blank=True, default=None, max_length=16, null=True)),
-                ('uploaded_size', models.PositiveIntegerField(blank=True, help_text='Size of the uploaded payload, after compression and encryption', null=True)),
-                ('file_size', models.PositiveIntegerField(blank=True, help_text="For inode objects, this is the file's size", null=True)),
-                ('last_modified_time', models.DateTimeField(blank=True, help_text='For inode and tree objects, this is the last modified time', null=True)),
+                ("objid", models.BinaryField(primary_key=True, serialize=False)),
+                (
+                    "type",
+                    models.CharField(blank=True, default=None, max_length=16, null=True),
+                ),
+                (
+                    "uploaded_size",
+                    models.PositiveIntegerField(
+                        blank=True,
+                        help_text="Size of the uploaded payload, after compression and encryption",
+                        null=True,
+                    ),
+                ),
+                (
+                    "file_size",
+                    models.PositiveIntegerField(
+                        blank=True,
+                        help_text="For inode objects, this is the file's size",
+                        null=True,
+                    ),
+                ),
+                (
+                    "last_modified_time",
+                    models.DateTimeField(
+                        blank=True,
+                        help_text="For inode and tree objects, this is the last modified time",
+                        null=True,
+                    ),
+                ),
             ],
             options={
-                'db_table': 'objects',
+                "db_table": "objects",
             },
         ),
         migrations.CreateModel(
-            name='ObjectRelation',
+            name="ObjectRelation",
             fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(blank=True, default=None, help_text="The decoded name of this directory entry if parent is a tree object. Names are decoded using the 'ignore' error handler", max_length=4096, null=True)),
-                ('child', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='+', to='backathon.Object')),
-                ('parent', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='+', to='backathon.Object')),
+                (
+                    "id",
+                    models.AutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "name",
+                    models.CharField(
+                        blank=True,
+                        default=None,
+                        help_text="The decoded name of this directory entry if parent is a tree object. Names are decoded using the 'ignore' error handler",
+                        max_length=4096,
+                        null=True,
+                    ),
+                ),
+                (
+                    "child",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="+",
+                        to="backathon.Object",
+                    ),
+                ),
+                (
+                    "parent",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="+",
+                        to="backathon.Object",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'object_relations',
+                "db_table": "object_relations",
             },
         ),
         migrations.CreateModel(
-            name='Setting',
+            name="Setting",
             fields=[
-                ('key', models.TextField(primary_key=True, serialize=False)),
-                ('value', models.TextField()),
+                ("key", models.TextField(primary_key=True, serialize=False)),
+                ("value", models.TextField()),
             ],
             options={
-                'db_table': 'settings',
+                "db_table": "settings",
             },
         ),
         migrations.CreateModel(
-            name='Snapshot',
+            name="Snapshot",
             fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('path', backathon.fields.PathField(help_text='Root directory of this snapshot on the original filesystem', max_length=4096)),
-                ('date', models.DateTimeField(db_index=True)),
-                ('root', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='backathon.Object')),
+                (
+                    "id",
+                    models.AutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "path",
+                    backathon.fields.PathField(
+                        help_text="Root directory of this snapshot on the original filesystem",
+                        max_length=4096,
+                    ),
+                ),
+                ("date", models.DateTimeField(db_index=True)),
+                (
+                    "root",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT, to="backathon.Object"
+                    ),
+                ),
             ],
             options={
-                'db_table': 'snapshots',
+                "db_table": "snapshots",
             },
         ),
         migrations.AddField(
-            model_name='object',
-            name='children',
-            field=models.ManyToManyField(related_name='parents', through='backathon.ObjectRelation', to='backathon.Object'),
+            model_name="object",
+            name="children",
+            field=models.ManyToManyField(
+                related_name="parents",
+                through="backathon.ObjectRelation",
+                to="backathon.Object",
+            ),
         ),
         migrations.AddField(
-            model_name='fsentry',
-            name='obj',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='backathon.Object'),
+            model_name="fsentry",
+            name="obj",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                to="backathon.Object",
+            ),
         ),
         migrations.AddField(
-            model_name='fsentry',
-            name='parent',
-            field=models.ForeignKey(blank=True, help_text='The parent FSEntry. This relation defines the hierarchy of the filesystem. It is null for the root entry of the backup set.', null=True, on_delete=django.db.models.deletion.DO_NOTHING, related_name='children', to='backathon.FSEntry'),
+            model_name="fsentry",
+            name="parent",
+            field=models.ForeignKey(
+                blank=True,
+                help_text="The parent FSEntry. This relation defines the hierarchy of the filesystem. It is null for the root entry of the backup set.",
+                null=True,
+                on_delete=django.db.models.deletion.DO_NOTHING,
+                related_name="children",
+                to="backathon.FSEntry",
+            ),
         ),
     ]

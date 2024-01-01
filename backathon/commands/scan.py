@@ -8,13 +8,17 @@ import tqdm
 from .. import models
 from . import CommandBase
 
+
 class Command(CommandBase):
-    help="Scan the filesystem for changes and update the cache database"
+    help = "Scan the filesystem for changes and update the cache database"
 
     def add_arguments(self, parser):
-        parser.add_argument("--skip-existing", action='store_true',
-                            default=False,
-                            help="Resumes an initial scan from an 'addroot'")
+        parser.add_argument(
+            "--skip-existing",
+            action="store_true",
+            default=False,
+            help="Resumes an initial scan from an 'addroot'",
+        )
 
     def handle(self, options):
         repo = self.get_repo()
@@ -22,11 +26,13 @@ class Command(CommandBase):
         pbar = None
 
         roots = repo.get_roots()
-        print("Scanning {} root{}{}:".format(
-            len(roots),
-            "s" if len(roots) != 1 else "",
-            " for newly added files" if options.skip_existing else ""
-        ))
+        print(
+            "Scanning {} root{}{}:".format(
+                len(roots),
+                "s" if len(roots) != 1 else "",
+                " for newly added files" if options.skip_existing else "",
+            )
+        )
         for root in repo.get_roots():
             print("* " + root.printablepath)
         print()
@@ -41,8 +47,7 @@ class Command(CommandBase):
 
         try:
             try:
-                repo.scan(progress=progress,
-                          skip_existing=options.skip_existing)
+                repo.scan(progress=progress, skip_existing=options.skip_existing)
             finally:
                 if pbar is not None:
                     pbar.close()
@@ -51,23 +56,25 @@ class Command(CommandBase):
             return
 
         if not options.skip_existing:
-            print("Scanned {} entries".format(
-                models.FSEntry.objects.using(repo.db).count(),
-                ))
+            print(
+                "Scanned {} entries".format(
+                    models.FSEntry.objects.using(repo.db).count(),
+                )
+            )
 
         to_backup = models.FSEntry.objects.using(repo.db).filter(obj__isnull=True)
-        print("Need to back up {} files and directories "
-                          "totaling {}".format(
-            to_backup.count(),
-            filesizeformat(
-                to_backup.aggregate(size=Sum("st_size"))['size']
+        print(
+            "Need to back up {} files and directories "
+            "totaling {}".format(
+                to_backup.count(),
+                filesizeformat(to_backup.aggregate(size=Sum("st_size"))["size"]),
             )
-        ))
+        )
 
         clean = models.FSEntry.objects.using(repo.db).filter(obj__isnull=False)
-        print("{} files ({}) clean".format(
-            clean.count(),
-            filesizeformat(
-                clean.aggregate(size=Sum("st_size"))['size']
+        print(
+            "{} files ({}) clean".format(
+                clean.count(),
+                filesizeformat(clean.aggregate(size=Sum("st_size"))["size"]),
             )
-        ))
+        )

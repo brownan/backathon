@@ -1,8 +1,8 @@
-
 from django.db import IntegrityError
 from django.test import TransactionTestCase
 
 from .base import TestBase
+
 
 class TestObject(TestBase, TransactionTestCase):
     """Tests various functionality of the Object class"""
@@ -22,4 +22,3 @@ class TestObject(TestBase, TransactionTestCase):
             ("A", ["B", "C"]),
             ("B", []),
         )
-

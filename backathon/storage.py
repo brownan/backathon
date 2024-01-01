@@ -2,8 +2,10 @@ import pathlib
 import shutil
 import os
 
+
 class StorageBase:
     """Base class defining the storage interface"""
+
     def get_params(self):
         """Returns the parameters to initialize this class
 
@@ -40,6 +42,7 @@ class StorageBase:
         """
         raise NotImplementedError()
 
+
 class FilesystemStorage(StorageBase):
     """A filesystem storage class with an api compatible with our B2 class"""
 
@@ -49,14 +52,10 @@ class FilesystemStorage(StorageBase):
     def _get_metadata(self, path: pathlib.Path):
         # Not all metadata that B2 calls return is computed here. Feel free
         # to add more as we need it.
-        return {
-            'fileName': str(path.relative_to(self.base_dir))
-        }
+        return {"fileName": str(path.relative_to(self.base_dir))}
 
     def get_params(self):
-        return {
-            'base_dir': self.base_dir
-        }
+        return {"base_dir": self.base_dir}
 
     def upload_file(self, name, content):
         path = self.base_dir / name
@@ -109,5 +108,3 @@ class FilesystemStorage(StorageBase):
                         for fname in filenames:
                             path = pathlib.Path(dirpath) / fname
                             yield self._get_metadata(path)
-
-

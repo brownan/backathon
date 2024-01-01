@@ -10,5 +10,5 @@ class BackathonRouter:
     """
 
     def allow_migrate(self, db, app_label, model_name=None, **hints):
-        if db == 'default' and app_label == 'backathon':
+        if db == "default" and app_label == "backathon":
             return False

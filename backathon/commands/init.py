@@ -4,11 +4,11 @@ from . import CommandBase
 from .. import repository
 from .. import encryption
 
+
 class Command(CommandBase):
     help = "Initialize a new repository and local cache database"
 
     def handle(self, options):
-
         path = self.config
 
         print("Initializing a new database at {}...".format(path))
@@ -19,20 +19,21 @@ class Command(CommandBase):
             choice = self.input_menu(
                 "Choose a destination for your backup storage",
                 ["Local Filesystem", "Backblaze B2"],
-
             )
             if choice == 0:
                 settings = {
-                    'base_dir': self.input_local_dir_path("Enter a local path for the storage destination")
+                    "base_dir": self.input_local_dir_path(
+                        "Enter a local path for the storage destination"
+                    )
                 }
-                repo.set_storage('local', settings)
+                repo.set_storage("local", settings)
             elif choice == 1:
                 settings = {
-                    'account_id': input("Enter your account ID: "),
-                    'application_key': input("Enter your application key: "),
-                    'bucket_name': input("Enter your bucket name: "),
+                    "account_id": input("Enter your account ID: "),
+                    "application_key": input("Enter your application key: "),
+                    "bucket_name": input("Enter your bucket name: "),
                 }
-                repo.set_storage('b2', settings)
+                repo.set_storage("b2", settings)
             else:
                 raise AssertionError()
         else:
@@ -53,8 +54,7 @@ class Command(CommandBase):
                         print("Passwords do not match")
                     else:
                         break
-                print("Do not lose your password. You will need it to recover "
-                      "files")
+                print("Do not lose your password. You will need it to recover " "files")
                 print("Generating encryption keys...")
                 encrypter = encryption.NaclSealedBox.init_new(password)
                 repo.set_encrypter(encrypter)
@@ -71,4 +71,3 @@ class Command(CommandBase):
         print()
         print("Done!")
         print("Next step: add some backup roots with the 'addroot' command")
-

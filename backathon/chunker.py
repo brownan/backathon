@@ -5,6 +5,7 @@ class FixedChunker:
     Yields (position, byteslike) for each chunk in a given file object
 
     """
+
     def __init__(self, fileobj):
         self.f = fileobj
         self.pos = 0
@@ -19,4 +20,3 @@ class FixedChunker:
             if not data:
                 return
             yield pos, data
-

@@ -43,9 +43,8 @@ class Backathon:
         See more info in the backathon.scan module
         """
         from . import scan
-        scan.scan(alias=self.db,
-                  progress=progress,
-                  skip_existing=skip_existing)
+
+        scan.scan(alias=self.db, progress=progress, skip_existing=skip_existing)
 
     def add_root(self, root_path):
         """Adds a new root path to the backup set
@@ -62,9 +61,11 @@ class Backathon:
 
     def del_root(self, root_path):
         root_path = os.path.abspath(root_path)
-        entry = models.FSEntry.objects.using(self.db) \
-            .filter(parent__isnull=True) \
+        entry = (
+            models.FSEntry.objects.using(self.db)
+            .filter(parent__isnull=True)
             .get(path=root_path)
+        )
         entry.delete()
 
     def get_roots(self):
@@ -79,16 +80,15 @@ class Backathon:
         try:
             _ = self.repository.encrypter
         except KeyError:
-            raise ImproperlyConfigured("You must configure the encryption "
-                                       "first")
+            raise ImproperlyConfigured("You must configure the encryption " "first")
 
         try:
             _ = self.repository.storage
         except KeyError:
-            raise ImproperlyConfigured("You must configure the storage "
-                                       "backend first")
+            raise ImproperlyConfigured("You must configure the storage " "backend first")
 
         from . import backup
+
         backup.backup(self.repository, **kwargs)
 
     def save_metadata(self):
@@ -99,8 +99,10 @@ class Backathon:
         repository is essential for recovering from a complete loss of the
         local cache
         """
-        data = {"encryption": self.repository.encrypter.get_public_params(),
-                "compression": self.repository.compression, }
+        data = {
+            "encryption": self.repository.encrypter.get_public_params(),
+            "compression": self.repository.compression,
+        }
         buf = io.BytesIO(json.dumps(data).encode("utf-8"))
         self.repository.storage.upload_file("backathon.json", buf)
 
@@ -113,6 +115,7 @@ class Backathon:
         call repo.encrypter.get_decryption_key(). This can take a few seconds.
         """
         from . import restore
+
         if password is not None:
             key = self.repository.encrypter.get_decryption_key(password)
         restore.restore_item(self.repository, obj.objid, path, key)
@@ -122,15 +125,16 @@ class Backathon:
         files
 
         """
-        pass # TODO
+        pass  # TODO
 
     def sync_objlist(self):
         """Synchronize the local object list from the remote repo"""
-        pass # TODO
+        pass  # TODO
 
     def sync_objdata(self, password=None):
         """Synchronize object metadata from the remote repo"""
-        pass # TODO
+        pass  # TODO
+
 
 class Repository:
     """Represents a Backathon repository
@@ -155,8 +159,11 @@ class Repository:
         # by creating a database file in a temp dir
         if dbfile != ":memory:":
             dbfile = os.path.abspath(dbfile)
-        self.db = dbfile # The db alias is just the path to the file
-        config = {'ENGINE': 'backathon.sqlite3_backend', 'NAME': dbfile, }
+        self.db = dbfile  # The db alias is just the path to the file
+        config = {
+            "ENGINE": "backathon.sqlite3_backend",
+            "NAME": dbfile,
+        }
         if self.db not in django.db.connections.databases:
             django.db.connections.databases[self.db] = config
 
@@ -175,10 +182,10 @@ class Repository:
     # unpickling, some attribute accesses will have to re-query the database
     # for various settings to re-create them.
     def __getstate__(self):
-        return {'db': self.db}
+        return {"db": self.db}
 
     def __setstate__(self, state):
-        self.db = state['db']
+        self.db = state["db"]
         self.settings = Settings(self.db)
 
     ##########################
@@ -197,16 +204,18 @@ class Repository:
     # overhead of creating two objects in the repository for the one file.
     #
     # Good values for this probably range from between 1 and 10 megabytes.
-    backup_inline_threshold = SimpleSetting("BACKUP_INLINE_THRESHOLD", 2 ** 21)
+    backup_inline_threshold = SimpleSetting("BACKUP_INLINE_THRESHOLD", 2**21)
 
     @cached_property
     def encrypter(self):
-        data = self.settings['ENCRYPTION_SETTINGS']
-        cls_name = data['class']
-        settings = data['settings']
+        data = self.settings["ENCRYPTION_SETTINGS"]
+        cls_name = data["class"]
+        settings = data["settings"]
 
-        cls = {"none": encryption.NullEncryption,
-               "nacl": encryption.NaclSealedBox, }[cls_name]
+        cls = {
+            "none": encryption.NullEncryption,
+            "nacl": encryption.NaclSealedBox,
+        }[cls_name]
 
         return cls.init_from_private(settings)
 
@@ -217,38 +226,43 @@ class Repository:
 
         :type encrypter: encryption.BaseEncryption
         """
-        cls_name = {encryption.NullEncryption: "none",
-                    encryption.NaclSealedBox: "nacl", }[type(encrypter)]
+        cls_name = {
+            encryption.NullEncryption: "none",
+            encryption.NaclSealedBox: "nacl",
+        }[type(encrypter)]
         settings = encrypter.get_private_params()
 
-        self.settings['ENCRYPTION_SETTINGS'] = {'class': cls_name,
-                                                'settings': settings, }
+        self.settings["ENCRYPTION_SETTINGS"] = {
+            "class": cls_name,
+            "settings": settings,
+        }
         self.__dict__["encrypter"] = encrypter
 
     @cached_property
     def compression(self):
         try:
-            return self.settings['COMPRESSION_ENABLED']
+            return self.settings["COMPRESSION_ENABLED"]
         except KeyError:
             return False
 
     def set_compression(self, enabled):
         enabled = bool(enabled)
-        self.settings['COMPRESSION_ENABLED'] = enabled
-        self.__dict__['compression'] = enabled
+        self.settings["COMPRESSION_ENABLED"] = enabled
+        self.__dict__["compression"] = enabled
         return enabled
 
     @cached_property
     def storage(self):
-        data = self.settings['STORAGE_SETTINGS']
+        data = self.settings["STORAGE_SETTINGS"]
 
-        cls_name = data['class']
-        settings = data['settings']
+        cls_name = data["class"]
+        settings = data["settings"]
 
         if cls_name == "local":
             cls = storage.FilesystemStorage
         elif cls_name == "b2":
             from .b2 import B2Bucket
+
             cls = B2Bucket
         else:
             raise KeyError("Unknown storage class {}".format(cls_name))
@@ -256,8 +270,10 @@ class Repository:
         return cls(**settings)
 
     def set_storage(self, cls_name, settings):
-        self.settings['STORAGE_SETTINGS'] = {'class': cls_name,
-                                             'settings': settings, }
+        self.settings["STORAGE_SETTINGS"] = {
+            "class": cls_name,
+            "settings": settings,
+        }
 
         self.__dict__.pop("storage", None)
         return self.storage
@@ -277,6 +293,7 @@ class Repository:
         # This workflow is simplified down to just what we need from the
         # "migrate" management command
         from django.db.migrations.executor import MigrationExecutor
+
         conn = django.db.connections[self.db]
         executor = MigrationExecutor(conn)
         executor.loader.check_consistent_history(conn)
@@ -324,7 +341,10 @@ class Repository:
         # ten million objects, each directory has on the order of 10^3
         # objects per directory. Should be manageable for most filesystems.
         objid_hex = objid.hex()
-        return "objects/{}/{}".format(objid_hex[:3], objid_hex, )
+        return "objects/{}/{}".format(
+            objid_hex[:3],
+            objid_hex,
+        )
 
     ################################
     # These next methods are the low level interface used by the scanning,
@@ -377,11 +397,7 @@ class Repository:
             for r in relations:
                 r.parent = obj
 
-            to_upload = self.encrypter.encrypt_bytes(
-                self.compress_bytes(
-                    view
-                )
-            )
+            to_upload = self.encrypter.encrypt_bytes(self.compress_bytes(view))
 
             obj.uploaded_size = len(to_upload)
 
@@ -394,9 +410,7 @@ class Repository:
             try:
                 with atomic_immediate(using=self.db):
                     obj.save(using=self.db, force_insert=True)
-                    models.ObjectRelation.objects.using(self.db).bulk_create(
-                        relations
-                    )
+                    models.ObjectRelation.objects.using(self.db).bulk_create(relations)
             except IntegrityError:
                 # There is a race condition if two threads try to upload the
                 # same payload. This thread lost, but the file was uploaded
@@ -431,16 +445,19 @@ class Repository:
         try:
             _, file = self.storage.download_file(self._get_path(objid))
             contents = self.decompress_bytes(
-                self.encrypter.decrypt_bytes(file.read(), key))
+                self.encrypter.decrypt_bytes(file.read(), key)
+            )
         except Exception as e:
             raise CorruptedRepository(
-                "Failed to read object {}: {}".format(objid, e)) from e
+                "Failed to read object {}: {}".format(objid, e)
+            ) from e
 
         digest = self.encrypter.calculate_objid(contents)
         if not hmac.compare_digest(digest, objid):
             raise CorruptedRepository(
                 "Object {} payload does not match its hash. "
-                "It may be corrupted.".format(objid))
+                "It may be corrupted.".format(objid)
+            )
         return contents
 
     def delete_object(self, obj):
@@ -469,10 +486,15 @@ class Repository:
         contents = io.BytesIO()
         umsgpack.pack("snapshot", contents)
         umsgpack.pack(
-            {"date": snapshot.date.timestamp(), "root": snapshot.root_id,
-             "path": snapshot.path, }, contents)
+            {
+                "date": snapshot.date.timestamp(),
+                "root": snapshot.root_id,
+                "path": snapshot.path,
+            },
+            contents,
+        )
         contents.seek(0)
         to_upload = self.encrypter.encrypt_bytes(
-            self.compress_bytes(contents.getbuffer()))
+            self.compress_bytes(contents.getbuffer())
+        )
         self.storage.upload_file(path, util.BytesReader(to_upload))
-

@@ -8,6 +8,7 @@ from django.db.backends.sqlite3 import base, schema
 
 logger = getLogger("django.db")
 
+
 class DatabaseSchemaEditor(schema.DatabaseSchemaEditor):
     # This adds cascading deletes to foreign key relations. Foreign key
     # fields with on_delete set to DO_NOTHING will still cascade, but SQLite
@@ -15,9 +16,12 @@ class DatabaseSchemaEditor(schema.DatabaseSchemaEditor):
     # memory. Signals and such aren't run, but for large tables, this is the
     # only way to delete a large number of objects without using a lot of
     # memory.
-    sql_create_inline_fk = "REFERENCES %(to_table)s (%(to_column)s) " \
-                           "ON DELETE CASCADE " \
-                           "DEFERRABLE INITIALLY DEFERRED"
+    sql_create_inline_fk = (
+        "REFERENCES %(to_table)s (%(to_column)s) "
+        "ON DELETE CASCADE "
+        "DEFERRABLE INITIALLY DEFERRED"
+    )
+
 
 class DatabaseWrapper(base.DatabaseWrapper):
     SchemaEditorClass = DatabaseSchemaEditor
@@ -119,5 +123,5 @@ class DatabaseWrapper(base.DatabaseWrapper):
         # like it's using more memory than it actually is. So I keep this off
         # for development so it's easy to see if a routine or query uses
         # more memory than I expect.
-        #conn.execute("PRAGMA mmap_size=1073741824;").close()
+        # conn.execute("PRAGMA mmap_size=1073741824;").close()
         return conn

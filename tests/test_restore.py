@@ -11,6 +11,7 @@ from django.db import connections
 from backathon import models
 from .base import TestBase
 
+
 class AssertionHandler(logging.Handler):
     """A logging handler that will raise an AssertionError if any warnings or
     errors are emitted
@@ -18,22 +19,23 @@ class AssertionHandler(logging.Handler):
     Use this in tests by attaching it to a logger to make sure no warnings are
     emitted by that logger
     """
+
     def emit(self, record):
         raise AssertionError(self.format(record))
+
 
 class TestRestore(TestBase):
     """Tests restore functionality, and some other end-to-end scan and backup
     functionality
 
     """
+
     # Set by subclasses that test encryption
     password = None
 
     def setUp(self):
         super().setUp()
-        self.restoredir = self.stack.enter_context(
-            tempfile.TemporaryDirectory()
-        )
+        self.restoredir = self.stack.enter_context(tempfile.TemporaryDirectory())
 
         self.handler = AssertionHandler()
         self.handler.setLevel(logging.WARNING)
@@ -93,14 +95,8 @@ class TestRestore(TestBase):
 
         file_b = pathlib.Path(self.restoredir, "file1")
         stat_result = file_b.stat()
-        self.assertEqual(
-            1,
-            stat_result.st_uid
-        )
-        self.assertEqual(
-            1,
-            stat_result.st_gid
-        )
+        self.assertEqual(1, stat_result.st_uid)
+        self.assertEqual(1, stat_result.st_gid)
 
     def test_restore_time(self):
         file_a = self.create_file("file1", "contents")
@@ -139,8 +135,9 @@ class TestRestore(TestBase):
         tree = ss.root.children.get()
         payload = self.repo.get_object(tree.objid, key)
         from backathon.restore import unpack_payload
+
         info = list(unpack_payload(payload))[1]
-        atime = info['atime']
+        atime = info["atime"]
 
         self.backathon.restore(ss.root, self.restoredir, self.password)
 
@@ -170,26 +167,17 @@ class TestRestore(TestBase):
         snapshots = list(self.snapshot.order_by("date"))
 
         self.assertEqual(2, len(snapshots))
-        self.assertEqual(
-            6,
-            self.object.count()
-        )
+        self.assertEqual(6, self.object.count())
 
         restoredir = pathlib.Path(self.restoredir)
-        self.backathon.restore(snapshots[0].root, restoredir /"ss1", self.password)
-        self.backathon.restore(snapshots[1].root, restoredir /"ss2", self.password)
+        self.backathon.restore(snapshots[0].root, restoredir / "ss1", self.password)
+        self.backathon.restore(snapshots[1].root, restoredir / "ss2", self.password)
 
         file1 = restoredir / "ss1" / "file"
         file2 = restoredir / "ss2" / "file"
 
-        self.assertEqual(
-            "contents A",
-            file1.read_text()
-        )
-        self.assertEqual(
-            "new contents",
-            file2.read_text()
-        )
+        self.assertEqual("contents A", file1.read_text())
+        self.assertEqual("new contents", file2.read_text())
 
     def test_restore_single_file(self):
         self.create_file("file", "contents")
@@ -205,19 +193,12 @@ class TestRestore(TestBase):
         filename = pathlib.Path(self.restoredir, "my_file")
         self.backathon.restore(inode, filename, self.password)
 
-        self.assertEqual(
-            "contents",
-            filename.read_text()
-        )
+        self.assertEqual("contents", filename.read_text())
 
     def test_restore_invalid_utf8_filename(self):
         name = os.fsdecode(b"\xFF\xFFHello\xFF\xFF")
 
-        self.assertRaises(
-            UnicodeEncodeError,
-            name.encode,
-            "utf-8"
-        )
+        self.assertRaises(UnicodeEncodeError, name.encode, "utf-8")
 
         self.create_file(name, "contents")
 
@@ -235,7 +216,7 @@ class TestRestore(TestBase):
 
         """
         infile = self.create_file("bigfile", "")
-        block = b"\0"*1024*1024
+        block = b"\0" * 1024 * 1024
         h = hashlib.md5()
 
         with infile.open("wb") as f:
@@ -252,14 +233,11 @@ class TestRestore(TestBase):
         h2 = hashlib.md5()
         with outfile.open("rb") as f:
             while True:
-                a = f.read(64*2**10)
+                a = f.read(64 * 2**10)
                 if not a:
                     break
                 h2.update(a)
-        self.assertEqual(
-            h.hexdigest(),
-            h2.hexdigest()
-        )
+        self.assertEqual(h.hexdigest(), h2.hexdigest())
 
     def test_restore_symlink(self):
         """Tests backing up and restoring symlinks"""
@@ -273,13 +251,15 @@ class TestRestore(TestBase):
 
         self.assertEqual(
             os.readlink(pathlib.Path(self.restoredir, "linkname")),
-            "this is the link target"
+            "this is the link target",
         )
+
 
 class TestRestoreWithCompression(TestRestore):
     def setUp(self):
         super().setUp()
         self.repo.set_compression(True)
+
 
 class TestRestoreWithEncryption(TestRestore):
     def setUp(self):
@@ -291,19 +271,20 @@ class TestRestoreWithEncryption(TestRestore):
 
         # Set the ops limit and mem limit low so the tests don't take forever
         import nacl.pwhash.argon2id
+
         self.stack.enter_context(
-            unittest.mock.patch.object(encryption.NaclSealedBox, "OPSLIMIT",
-                                       nacl.pwhash.argon2id.OPSLIMIT_MIN)
+            unittest.mock.patch.object(
+                encryption.NaclSealedBox, "OPSLIMIT", nacl.pwhash.argon2id.OPSLIMIT_MIN
+            )
         )
         self.stack.enter_context(
-            unittest.mock.patch.object(encryption.NaclSealedBox, "MEMLIMIT",
-                                       nacl.pwhash.argon2id.MEMLIMIT_MIN)
+            unittest.mock.patch.object(
+                encryption.NaclSealedBox, "MEMLIMIT", nacl.pwhash.argon2id.MEMLIMIT_MIN
+            )
         )
 
         # Initialize our encrypter
-        encrypter = encryption.NaclSealedBox.init_new(
-            self.password
-        )
+        encrypter = encryption.NaclSealedBox.init_new(self.password)
         self.repo.set_encrypter(encrypter)
 
     def test_not_plaintext(self):
@@ -319,15 +300,15 @@ class TestRestoreWithEncryption(TestRestore):
         inode = tree.children.get()
         blob = inode.children.get()
 
-        path = pathlib.Path(self.datadir, "objects",
-                            blob.objid.hex()[:3],
-                            blob.objid.hex())
+        path = pathlib.Path(
+            self.datadir, "objects", blob.objid.hex()[:3], blob.objid.hex()
+        )
         self.assertTrue(path.exists())
         contents = path.read_bytes()
-        self.assertFalse(
-            b"super secret contents" in contents
-        )
+        self.assertFalse(b"super secret contents" in contents)
 
-class TestRestoreEncryptionAndCompression(TestRestoreWithCompression,
-                                          TestRestoreWithEncryption):
+
+class TestRestoreEncryptionAndCompression(
+    TestRestoreWithCompression, TestRestoreWithEncryption
+):
     pass

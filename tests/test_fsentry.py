@@ -9,6 +9,7 @@ from backathon import models, util
 from .base import TestBase
 from backathon.restore import unpack_payload
 
+
 class FSEntryTest(TestBase):
     """Tests some misc functionality of the FSEntry class"""
 
@@ -44,15 +45,13 @@ class FSEntryTest(TestBase):
         )
         self.assertSetEqual(
             set(self.fsentry.filter(obj__isnull=False)),
-            {root,e1,e2},
+            {root, e1, e2},
         )
 
         e3.invalidate()
 
-        self.assertEqual(
-            self.fsentry.filter(obj__isnull=True).count(),
-            4
-        )
+        self.assertEqual(self.fsentry.filter(obj__isnull=True).count(), 4)
+
 
 class TestScan(TestBase):
     """Tests the scan functionality of the FSEntry class"""
@@ -61,30 +60,20 @@ class TestScan(TestBase):
         self.create_file("dir/file1", "file contents")
         self.create_file("dir2/file2", "another file contents")
         self.backathon.scan()
-        self.assertEqual(
-            5,
-            self.fsentry.count()
-        )
+        self.assertEqual(5, self.fsentry.count())
         entries = self.fsentry.all()
 
         names = set(e.name for e in entries)
-        for name in ['file1', 'file2', 'dir', 'dir2']:
-            self.assertIn(
-                name,
-                names
-            )
+        for name in ["file1", "file2", "dir", "dir2"]:
+            self.assertIn(name, names)
 
     def test_deleted_file(self):
         file = self.create_file("dir/file1", "file contents")
         self.backathon.scan()
-        self.assertTrue(
-            self.fsentry.filter(path=os.fspath(file)).exists()
-        )
+        self.assertTrue(self.fsentry.filter(path=os.fspath(file)).exists())
         file.unlink()
         self.backathon.scan()
-        self.assertFalse(
-            self.fsentry.filter(path=os.fspath(file)).exists()
-        )
+        self.assertFalse(self.fsentry.filter(path=os.fspath(file)).exists())
 
     def test_deleted_dir(self):
         file = self.create_file("dir/file1", "file contents")
@@ -92,12 +81,8 @@ class TestScan(TestBase):
         file.unlink()
         file.parent.rmdir()
         self.backathon.scan()
-        self.assertFalse(
-            self.fsentry.filter(path=os.fspath(file.parent)).exists()
-        )
-        self.assertFalse(
-            self.fsentry.filter(path=os.fspath(file)).exists()
-        )
+        self.assertFalse(self.fsentry.filter(path=os.fspath(file.parent)).exists())
+        self.assertFalse(self.fsentry.filter(path=os.fspath(file)).exists())
 
     def test_replace_dir_with_file(self):
         file = self.create_file("dir/file1", "file contents")
@@ -111,22 +96,11 @@ class TestScan(TestBase):
         self._replace_dir_with_file_asserts(file)
 
     def _replace_dir_with_file_asserts(self, file):
-        self.assertTrue(
-            self.fsentry.filter(path=os.fspath(file.parent)).exists()
-        )
-        self.assertFalse(
-            self.fsentry.filter(path=os.fspath(file)).exists()
-        )
-        entry = self.fsentry.get(
-            path=os.fspath(file.parent)
-        )
-        self.assertEqual(
-            entry.children.count(),
-            0
-        )
-        self.assertTrue(
-            stat.S_ISREG(entry.st_mode)
-        )
+        self.assertTrue(self.fsentry.filter(path=os.fspath(file.parent)).exists())
+        self.assertFalse(self.fsentry.filter(path=os.fspath(file)).exists())
+        entry = self.fsentry.get(path=os.fspath(file.parent))
+        self.assertEqual(entry.children.count(), 0)
+        self.assertTrue(stat.S_ISREG(entry.st_mode))
 
     def test_replace_dir_with_file_2(self):
         file = self.create_file("dir/file1", "file contents")
@@ -145,6 +119,7 @@ class TestScan(TestBase):
         file = self.create_file("dir/file1", "file contents")
 
         real_listdir = os.listdir
+
         def patched_listdir(path):
             if pathlib.Path(path) == file.parent:
                 raise PermissionError()
@@ -153,25 +128,16 @@ class TestScan(TestBase):
         with mock.patch("os.listdir", patched_listdir):
             self.backathon.scan()
 
-        self.assertTrue(
-            self.fsentry.filter(path=os.fspath(file.parent)).exists()
-        )
-        self.assertFalse(
-            self.fsentry.filter(path=os.fspath(file)).exists()
-        )
+        self.assertTrue(self.fsentry.filter(path=os.fspath(file.parent)).exists())
+        self.assertFalse(self.fsentry.filter(path=os.fspath(file)).exists())
 
     def test_root_merge(self):
         file = self.create_file("dir1/dir2/file", "file contents")
         self.fsentry.create(path=os.fspath(file.parent))
-        self.assertEqual(
-            2,
-            self.fsentry.filter(parent__isnull=True).count()
-        )
+        self.assertEqual(2, self.fsentry.filter(parent__isnull=True).count())
         self.backathon.scan()
-        self.assertEqual(
-            1,
-            self.fsentry.filter(parent__isnull=True).count()
-        )
+        self.assertEqual(1, self.fsentry.filter(parent__isnull=True).count())
+
 
 class TestBackup(TestBase):
     """Tests the backup functionality of the FSEntry class"""
@@ -189,18 +155,16 @@ class TestBackup(TestBase):
         datatype, chunks = next(payload)
         # No inline files; the base class set the chunk threshold to 0
         self.assertEqual(datatype, "chunklist")
-        self.assertRaises(StopIteration, next,payload)
+        self.assertRaises(StopIteration, next, payload)
 
-        buf = bytearray(info['size'])
+        buf = bytearray(info["size"])
         for pos, chunkid in chunks:
             chunk = self.object.get(objid=chunkid)
-            chunkpayload = unpack_payload(
-                self.repo.get_object(chunk.objid)
-            )
+            chunkpayload = unpack_payload(self.repo.get_object(chunk.objid))
             self.assertEqual("blob", next(chunkpayload))
             chunkcontents = next(chunkpayload)
-            self.assertRaises(StopIteration, next,chunkpayload)
-            buf[pos:pos+len(chunkcontents)] = chunkcontents
+            self.assertRaises(StopIteration, next, chunkpayload)
+            buf[pos : pos + len(chunkcontents)] = chunkcontents
 
         self.assertEqual(buf.decode("utf-8"), contents)
 
@@ -210,10 +174,7 @@ class TestBackup(TestBase):
         payload = unpack_payload(self.repo.get_object(obj.objid))
         self.assertEqual("symlink", next(payload))
         info = next(payload)
-        self.assertEqual(
-            os.fsencode(target),
-            next(payload)
-        )
+        self.assertEqual(os.fsencode(target), next(payload))
 
     def _assert_dir(self, obj, contents):
         """Asserts that the given object is a dir object with the given
@@ -223,12 +184,9 @@ class TestBackup(TestBase):
 
         info = next(payload)
         children = next(payload)
-        self.assertRaises(StopIteration, next,payload)
+        self.assertRaises(StopIteration, next, payload)
 
-        children_objs = {
-            name: self.object.get(objid=objid)
-            for name, objid in children
-        }
+        children_objs = {name: self.object.get(objid=objid) for name, objid in children}
         self._assert_objects(contents, children_objs)
 
     def _assert_objects(self, structure, objects):
@@ -248,23 +206,16 @@ class TestBackup(TestBase):
         # Encode all file names and we do byte comparisons throughout this
         # method and the helper methods. It's easier than decoding the object
         # file names everywhere they appear.
-        structure = {
-            os.fsencode(name): contents
-            for name, contents in structure.items()
-        }
+        structure = {os.fsencode(name): contents for name, contents in structure.items()}
 
         for name, contents in structure.items():
-            self.assertIn(
-                name,
-                objects,
-                "Object {} not found".format(name)
-            )
+            self.assertIn(name, objects, "Object {} not found".format(name))
             obj = objects.pop(name)
             if isinstance(contents, str):
                 self._assert_file_obj(obj, contents)
             elif isinstance(contents, dict):
                 self._assert_dir(obj, contents)
-            elif isinstance(contents, tuple) and contents[0] == 's':
+            elif isinstance(contents, tuple) and contents[0] == "s":
                 # symlink
                 self._assert_symlink(obj, contents[1])
             else:
@@ -295,8 +246,9 @@ class TestBackup(TestBase):
         test does two backups, then it should provide two structures
         describing the contents of each backup.
         """
-        backup_dates = self.snapshot.all().distinct().order_by("date")\
-            .values_list("date", flat=True)
+        backup_dates = (
+            self.snapshot.all().distinct().order_by("date").values_list("date", flat=True)
+        )
 
         self.assertEqual(
             len(structures),
@@ -304,10 +256,7 @@ class TestBackup(TestBase):
         )
 
         for structure, date in zip(structures, backup_dates):
-            roots = {
-                os.fsencode(s.path): s.root
-                for s in self.snapshot.filter(date=date)
-            }
+            roots = {os.fsencode(s.path): s.root for s in self.snapshot.filter(date=date)}
             self._assert_objects(structure, roots)
 
     def test_objects_comitted(self):
@@ -331,95 +280,72 @@ class TestBackup(TestBase):
 
             remote_payload = self.repo.get_object(obj.objid)
 
-            self.assertEqual(
-                obj.type,
-                umsgpack.unpack(util.BytesReader(remote_payload))
-            )
+            self.assertEqual(obj.type, umsgpack.unpack(util.BytesReader(remote_payload)))
 
     def test_backup(self):
         self.create_file("dir/file1", "file contents")
         self.create_file("dir/file2", "file contents 2")
         self.backathon.scan()
-        self.assertEqual(
-            4,
-            self.fsentry.count()
-        )
+        self.assertEqual(4, self.fsentry.count())
         self.backathon.backup()
-        self.assertTrue(
-            all(entry.obj is not None for entry in
-                self.fsentry.all())
-        )
-        self.assertEqual(
-            6,
-            self.object.count()
-        )
+        self.assertTrue(all(entry.obj is not None for entry in self.fsentry.all()))
+        self.assertEqual(6, self.object.count())
 
-        self.assert_backupsets({
-            self.backupdir: {
-                'dir': {
-                    'file1': 'file contents',
-                    'file2': 'file contents 2',
+        self.assert_backupsets(
+            {
+                self.backupdir: {
+                    "dir": {
+                        "file1": "file contents",
+                        "file2": "file contents 2",
+                    }
                 }
             }
-        })
+        )
 
     def test_backup_identical_files(self):
         self.create_file("file1", "file contents")
         self.create_file("file2", "file contents")
         self.backathon.scan()
         self.backathon.backup()
-        self.assert_backupsets({
-            self.backupdir: {
-                'file1': 'file contents',
-                'file2': 'file contents',
+        self.assert_backupsets(
+            {
+                self.backupdir: {
+                    "file1": "file contents",
+                    "file2": "file contents",
+                }
             }
-        })
-        # Inode objects differ, so 4 total objects uploaded
-        self.assertEqual(
-            4,
-            self.object.count()
         )
+        # Inode objects differ, so 4 total objects uploaded
+        self.assertEqual(4, self.object.count())
 
     def test_backup_hardlinked_files(self):
         file = self.create_file("file1", "file contents")
-        os.link(
-            file,
-            file.parent / "file2"
-        )
+        os.link(file, file.parent / "file2")
         self.backathon.scan()
         self.backathon.backup()
-        self.assert_backupsets({
-            self.backupdir: {
-                'file1': 'file contents',
-                'file2': 'file contents',
+        self.assert_backupsets(
+            {
+                self.backupdir: {
+                    "file1": "file contents",
+                    "file2": "file contents",
+                }
             }
-        })
-        # The inode objects should be identical, so 3 total objects uploaded
-        self.assertEqual(
-            3,
-            self.object.count()
         )
+        # The inode objects should be identical, so 3 total objects uploaded
+        self.assertEqual(3, self.object.count())
 
     def test_file_disappeared(self):
         file = self.create_file("dir/file1", "file contents")
         self.backathon.scan()
-        self.assertEqual(
-            3,
-            self.fsentry.count()
-        )
+        self.assertEqual(3, self.fsentry.count())
         file.unlink()
         self.backathon.backup()
-        self.assertEqual(
-            2,
-            self.fsentry.count()
-        )
+        self.assertEqual(2, self.fsentry.count())
         self.assertEqual(
             2,
             self.object.count(),
         )
-        self.assert_backupsets({
-            self.backupdir: {'dir': {}}
-        })
+        self.assert_backupsets({self.backupdir: {"dir": {}}})
 
     def test_file_changes_to_dir(self):
         """Tests if a file changes to a directory after scan before backup
@@ -430,29 +356,15 @@ class TestBackup(TestBase):
         """
         file = self.create_file("dir/file1", "file contents")
         self.backathon.scan()
-        self.assertEqual(
-            3,
-            self.fsentry.count()
-        )
-        self.assertTrue(
-            stat.S_ISREG(
-                self.fsentry.get(path=str(file)).st_mode
-            )
-        )
+        self.assertEqual(3, self.fsentry.count())
+        self.assertTrue(stat.S_ISREG(self.fsentry.get(path=str(file)).st_mode))
 
         file.unlink()
         file.mkdir()
         self.backathon.backup()
 
-        self.assertEqual(
-            3,
-            self.fsentry.count()
-        )
-        self.assertTrue(
-            stat.S_ISDIR(
-                self.fsentry.get(path=str(file)).st_mode
-            )
-        )
+        self.assertEqual(3, self.fsentry.count())
+        self.assertTrue(stat.S_ISDIR(self.fsentry.get(path=str(file)).st_mode))
 
         self.assertEqual(
             3,
@@ -466,18 +378,18 @@ class TestBackup(TestBase):
         # the lstat call.
         file = self.create_file("dir/file1", "file contents")
         self.backathon.scan()
-        self.assertEqual(
-            3,
-            self.fsentry.count()
-        )
+        self.assertEqual(3, self.fsentry.count())
 
         import os
+
         real_lstat = os.lstat
+
         def lstat(path):
             stat_result = real_lstat(path)
             if path == str(file):
                 file.unlink()
             return stat_result
+
         self.stack.enter_context(
             mock.patch(
                 "os.lstat",
@@ -486,27 +398,19 @@ class TestBackup(TestBase):
         )
 
         self.backathon.backup()
-        self.assertEqual(
-            2,
-            self.fsentry.count()
-        )
+        self.assertEqual(2, self.fsentry.count())
         self.assertEqual(
             2,
             self.object.count(),
         )
-        self.assert_backupsets({
-            self.backupdir: {'dir': {}}
-        })
+        self.assert_backupsets({self.backupdir: {"dir": {}}})
 
     def test_permission_denied_file(self):
         """A permission denied error when reading a file shouldn't cause the
         backup to fail, and other files should still get backed up"""
         file = self.create_file("dir/file1", "file contents")
         self.backathon.scan()
-        self.assertEqual(
-            3,
-            self.fsentry.count()
-        )
+        self.assertEqual(3, self.fsentry.count())
 
         def raise_permissiondeined(path):
             raise PermissionError()
@@ -514,17 +418,12 @@ class TestBackup(TestBase):
         with mock.patch("backathon.backup._open_file", raise_permissiondeined):
             self.backathon.backup()
 
-        self.assertEqual(
-            2,
-            self.fsentry.count()
-        )
+        self.assertEqual(2, self.fsentry.count())
         self.assertEqual(
             2,
             self.object.count(),
         )
-        self.assert_backupsets({
-            self.backupdir: {'dir': {}}
-        })
+        self.assert_backupsets({self.backupdir: {"dir": {}}})
 
     def test_invalid_utf8_filename(self):
         """Tests that a file with invalid utf-8 in the name can be backed up"""
@@ -533,9 +432,7 @@ class TestBackup(TestBase):
         self.backathon.scan()
         self.backathon.backup()
 
-        self.assert_backupsets({
-            self.backupdir: {name: "file contents"}
-        })
+        self.assert_backupsets({self.backupdir: {name: "file contents"}})
 
     def test_symlink(self):
         """Tests that symlinks are saved properly"""
@@ -547,12 +444,9 @@ class TestBackup(TestBase):
         self.backathon.scan()
         self.backathon.backup()
 
-        self.assert_backupsets({
-            self.backupdir: {
-                "file1": "file contents",
-                "file2": ('s', "file1")
-            }
-        })
+        self.assert_backupsets(
+            {self.backupdir: {"file1": "file contents", "file2": ("s", "file1")}}
+        )
 
     def test_invalid_utf8_symlink(self):
         """Similar to the test for invalid filenames, but for symlinks: make
@@ -567,6 +461,4 @@ class TestBackup(TestBase):
         self.backathon.scan()
         self.backathon.backup()
 
-        self.assert_backupsets({
-            self.backupdir: {"badsymlink": ('s', target)}
-        })
+        self.assert_backupsets({self.backupdir: {"badsymlink": ("s", target)}})

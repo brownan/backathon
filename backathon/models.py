@@ -40,7 +40,7 @@ class Object(models.Model):
         symmetrical=False,
         related_name="parents",
         through="ObjectRelation",
-        through_fields=('parent', 'child'),
+        through_fields=("parent", "child"),
     )
 
     # These fields are cached about the object. They may or may not have
@@ -49,20 +49,23 @@ class Object(models.Model):
     # and decoded.
     type = models.CharField(
         max_length=16,
-        blank=True, null=True, default=None,
+        blank=True,
+        null=True,
+        default=None,
     )
     uploaded_size = models.PositiveIntegerField(
         blank=True,
         null=True,
-        help_text="Size of the uploaded payload, after compression and "
-                  "encryption",
+        help_text="Size of the uploaded payload, after compression and " "encryption",
     )
     file_size = models.PositiveIntegerField(
-        blank=True, null=True,
+        blank=True,
+        null=True,
         help_text="For inode objects, this is the file's size",
     )
     last_modified_time = models.DateTimeField(
-        blank=True, null=True,
+        blank=True,
+        null=True,
         help_text="For inode and tree objects, this is the last modified time",
     )
 
@@ -71,6 +74,7 @@ class Object(models.Model):
 
     def __str__(self):
         return self.objid.hex()[:7]
+
 
 class ObjectRelation(models.Model):
     """Keeps track of the dependency graph between objects
@@ -88,6 +92,7 @@ class ObjectRelation(models.Model):
     objects on demand. But full restores of an entire snapshot are still
     possible.
     """
+
     class Meta:
         db_table = "object_relations"
 
@@ -105,9 +110,11 @@ class ObjectRelation(models.Model):
     name = models.CharField(
         max_length=4096,
         help_text="The decoded name of this directory entry if parent is a "
-                  "tree object. Names are decoded using the 'ignore' error "
-                  "handler",
-        blank=True, null=True, default=None,
+        "tree object. Names are decoded using the 'ignore' error "
+        "handler",
+        blank=True,
+        null=True,
+        default=None,
     )
 
     def __repr__(self):
@@ -115,6 +122,7 @@ class ObjectRelation(models.Model):
             self.parent_id.hex()[:7],
             self.child_id.hex()[:7],
         )
+
 
 class FSEntry(models.Model):
     """Keeps track of an entry in the local filesystem, either a directory,
@@ -127,12 +135,14 @@ class FSEntry(models.Model):
     this object. If obj is null, then this entry is considered "dirty"
     and needs to be uploaded.
     """
+
     class Meta:
         db_table = "fsentry"
 
     obj = models.ForeignKey(
         "Object",
-        null=True, blank=True,
+        null=True,
+        blank=True,
         on_delete=models.SET_NULL,
     )
 
@@ -164,20 +174,21 @@ class FSEntry(models.Model):
     # set into memory. For memory efficiency, we tell Django to do nothing
     # and let SQLite take care of it.
     parent = models.ForeignKey(
-        'self',
+        "self",
         related_name="children",
         on_delete=models.DO_NOTHING,
-        null=True, blank=True,
+        null=True,
+        blank=True,
         help_text="The parent FSEntry. This relation defines the hierarchy of "
-                  "the filesystem. It is null for the root entry of the "
-                  "backup set."
+        "the filesystem. It is null for the root entry of the "
+        "backup set.",
     )
 
     new = models.BooleanField(
         default=True,
         db_index=True,
         help_text="Indicates this is a new entry and needs scanning. "
-                  "It forces an update to the metadata next scan.",
+        "It forces an update to the metadata next scan.",
     )
 
     # These fields are used to determine if an entry has changed
@@ -192,9 +203,9 @@ class FSEntry(models.Model):
 
     def compare_stat_info(self, stat_result: os.stat_result):
         return (
-            self.st_mode == stat_result.st_mode and
-            self.st_mtime_ns == stat_result.st_mtime_ns and
-            self.st_size == stat_result.st_size
+            self.st_mode == stat_result.st_mode
+            and self.st_mtime_ns == stat_result.st_mtime_ns
+            and self.st_size == stat_result.st_size
         )
 
     def __repr__(self):
@@ -204,11 +215,10 @@ class FSEntry(models.Model):
         return self.printablepath
 
     def invalidate(self):
-        """Runs a query to invalidate this node and all parents up to the root
-
-        """
+        """Runs a query to invalidate this node and all parents up to the root"""
         with connections[self._state.db].cursor() as cursor:
-            cursor.execute("""
+            cursor.execute(
+                """
             WITH RECURSIVE ancestors(id) AS (
               SELECT id FROM fsentry WHERE id=%s
               UNION ALL
@@ -217,7 +227,9 @@ class FSEntry(models.Model):
               WHERE fsentry.parent_id IS NOT NULL
             ) UPDATE fsentry SET obj_id=NULL
               WHERE fsentry.id IN ancestors
-            """, (self.id,))
+            """,
+                (self.id,),
+            )
 
     def scan(self):
         """Scans this entry for changes
@@ -247,9 +259,9 @@ class FSEntry(models.Model):
                 return
 
             if (
-                    self.st_mode is not None and
-                    stat.S_ISDIR(self.st_mode) and
-                    not stat.S_ISDIR(stat_result.st_mode)
+                self.st_mode is not None
+                and stat.S_ISDIR(self.st_mode)
+                and not stat.S_ISDIR(stat_result.st_mode)
             ):
                 # The type of entry has changed from directory to something else.
                 # Normally, directories when they are deleted will hit the
@@ -271,7 +283,6 @@ class FSEntry(models.Model):
             self.update_stat_info(stat_result)
 
             if stat.S_ISDIR(self.st_mode):
-
                 children = list(self.children.all())
 
                 # Check the directory entries against the database.
@@ -280,8 +291,7 @@ class FSEntry(models.Model):
                 try:
                     entries = set(os.listdir(self.path))
                 except PermissionError:
-                    scanlogger.warning("Permission denied: {}".format(
-                        self))
+                    scanlogger.warning("Permission denied: {}".format(self))
                     entries = set()
 
                 # Create new entries
@@ -303,20 +313,20 @@ class FSEntry(models.Model):
                         newentry = FSEntry.objects.using(self._state.db).get(path=newpath)
                         scanlogger.warning(
                             "Trying to create path but already exists. "
-                            "Reparenting: {}".format(newentry))
+                            "Reparenting: {}".format(newentry)
+                        )
                         # If this isn't a root, something is really wrong with
                         # our tree!
                         assert newentry.parent_id is None
                         newentry.parent = self
-                        newentry.save(update_fields=['parent'])
+                        newentry.save(update_fields=["parent"])
                     else:
                         scanlogger.info("New path     : {}".format(newentry))
 
                 # Delete old entries
                 for child in children:
                     if child.name not in entries:
-                        scanlogger.info("deleting from dir: {}".format(
-                            child))
+                        scanlogger.info("deleting from dir: {}".format(child))
                         child.delete()
 
             scanlogger.info("Entry updated: {}".format(self))
@@ -324,8 +334,10 @@ class FSEntry(models.Model):
             self.invalidate()
             return
 
+
 class Snapshot(models.Model):
     """A snapshot of a filesystem at a particular time"""
+
     class Meta:
         db_table = "snapshots"
 
@@ -346,8 +358,10 @@ class Snapshot(models.Model):
         bytepath = os.fsencode(self.path)
         return bytepath.decode("utf-8", errors="replace")
 
+
 class Setting(models.Model):
     """Configuration table for settings set at runtime"""
+
     class Meta:
         db_table = "settings"
 
@@ -355,6 +369,7 @@ class Setting(models.Model):
     value = models.TextField()
 
     _empty = object()
+
     @classmethod
     def get(cls, key, default=_empty, using=None):
         try:

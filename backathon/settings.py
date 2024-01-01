@@ -5,9 +5,9 @@ DATABASES = {
     # Default database is used for process-wide configuration. Separate DB
     # connections are used for the cache tables, initialized by the
     # Repository class.
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': ":memory:",
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": ":memory:",
     }
 }
 
@@ -16,11 +16,11 @@ DEBUG = True
 USE_TZ = True
 
 INSTALLED_APPS = [
-    'backathon',
+    "backathon",
 ]
 
 DATABASE_ROUTERS = [
-    'backathon.dbrouter.BackathonRouter',
+    "backathon.dbrouter.BackathonRouter",
 ]
 
 LOGGING = {
@@ -29,12 +29,14 @@ LOGGING = {
     "formatters": {
         "color": {
             "()": "colorlog.ColoredFormatter",
-            "format": "%(log_color)s%(levelname)-8s%(reset)s "
-                      "%(message)s",
-            "log_colors": {"DEBUG": "cyan", "INFO": "white",
-                           "WARNING": "yellow", "ERROR": "red",
-                           "CRITICAL": "white,bg_red",
-                           },
+            "format": "%(log_color)s%(levelname)-8s%(reset)s " "%(message)s",
+            "log_colors": {
+                "DEBUG": "cyan",
+                "INFO": "white",
+                "WARNING": "yellow",
+                "ERROR": "red",
+                "CRITICAL": "white,bg_red",
+            },
         },
         "nocolor": {
             "format": "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
@@ -42,7 +44,7 @@ LOGGING = {
         },
         "scanlog": {
             "format": "%(levelname)-8s %(message)s",
-        }
+        },
     },
     "handlers": {
         "stderr": {
@@ -59,13 +61,12 @@ LOGGING = {
         },
         "django": {
             "handlers": [],
-        }
+        },
     },
     "root": {
         "level": "WARNING",
         "handlers": ["stderr"],
-    }
-
+    },
 }
 
 # Set a secret key for this session

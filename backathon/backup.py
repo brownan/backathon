@@ -24,6 +24,7 @@ logger = getLogger("backathon.backup")
 BATCH_SIZE = 100
 NUM_WORKERS = os.cpu_count()
 
+
 def backup(repo, progress=None, single=False):
     """Perform a backup
 
@@ -87,17 +88,20 @@ def backup(repo, progress=None, single=False):
         def on_exit():
             for t in tasks:
                 t.cancel()
+
         contexts.callback(on_exit)
 
         def catch_sigint(exc_type, exc_value, traceback):
             if exc_type and issubclass(exc_type, KeyboardInterrupt):
                 print()
-                print("Ctrl-C caught. Finishing the current batch of "
-                      "uploads, please wait...")
+                print(
+                    "Ctrl-C caught. Finishing the current batch of "
+                    "uploads, please wait..."
+                )
+
         contexts.push(catch_sigint)
 
         while to_backup.exists():
-
             ct = 0
             last_checkpoint = time.monotonic()
 
@@ -110,15 +114,13 @@ def backup(repo, progress=None, single=False):
                 # re-appearing later in the same query)
                 assert all(entry.obj_id is None for entry in entry_batch)
 
-                tasks.add(
-                    executor.submit(backup_entry, repo, entry_batch)
-                )
+                tasks.add(executor.submit(backup_entry, repo, entry_batch))
 
                 # Don't put the entire to_backup result set in the queue at
                 # once, to save memory.
                 # If there are too many unfinished tasks, wait for one to
                 # finish.
-                if len(tasks) >= NUM_WORKERS+1 or single:
+                if len(tasks) >= NUM_WORKERS + 1 or single:
                     done, tasks = concurrent.futures.wait(
                         tasks,
                         timeout=None,
@@ -171,9 +173,7 @@ def backup(repo, progress=None, single=False):
     # run. There's one snapshot per root, but we give them all the same datetime
     # so they can still be grouped together in queries.
     now = timezone.now()
-    for root in models.FSEntry.objects.using(repo.db).filter(
-        parent__isnull=True
-    ):
+    for root in models.FSEntry.objects.using(repo.db).filter(parent__isnull=True):
         assert root.obj_id is not None
         with atomic_immediate(using=repo.db):
             ss = models.Snapshot.objects.using(repo.db).create(
@@ -188,6 +188,8 @@ def backup(repo, progress=None, single=False):
 
 
 _worker_repo = None
+
+
 def backup_entry(repo, entry_batch):
     """Entry point for each worker process
 
@@ -229,7 +231,7 @@ def backup_entry(repo, entry_batch):
     return len(entry_batch)
 
 
-def backup_iterator(fsentry, inline_threshold=2 ** 21):
+def backup_iterator(fsentry, inline_threshold=2**21):
     """Back up an FSEntry object
 
     :type fsentry: models.FSEntry
@@ -289,7 +291,7 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
     fsentry.update_stat_info(stat_result)
 
     obj = models.Object()
-    relations = [] # type: list[models.ObjectRelation]
+    relations = []  # type: list[models.ObjectRelation]
 
     if stat.S_ISREG(fsentry.st_mode):
         # Regular File
@@ -335,9 +337,7 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
                         buf.seek(0)
                         chunk_obj = yield (buf, models.Object(type="blob"), [])
                         chunk_list.append((pos, chunk_obj.objid))
-                        relations.append(
-                            models.ObjectRelation(child=chunk_obj)
-                        )
+                        relations.append(models.ObjectRelation(child=chunk_obj))
                     umsgpack.pack(("chunklist", chunk_list), inode_buf)
 
         except FileNotFoundError:
@@ -346,8 +346,7 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
             return
         except OSError:
             # This happens with permission denied errors
-            logger.error("Error in system call when reading file "
-                             "{}".format(fsentry))
+            logger.error("Error in system call when reading file " "{}".format(fsentry))
             # In order to not crash the entire backup, we must delete
             # this entry so that the parent directory can still be backed
             # up. This code path may leave one or more objects saved to
@@ -362,10 +361,9 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
 
         # Pass the object and payload to the caller for uploading
         fsentry.obj = yield (inode_buf, obj, relations)
-        logger.info("Backed up file into {} objects: {}".format(
-            len(relations)+1,
-            fsentry
-        ))
+        logger.info(
+            "Backed up file into {} objects: {}".format(len(relations) + 1, fsentry)
+        )
 
     elif stat.S_ISDIR(fsentry.st_mode):
         # Directory
@@ -390,8 +388,7 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
                 "backed up yet. This is a bug. {}"
                 "".format(
                     fsentry.printablepath,
-                    ", ".join(c.printablepath
-                              for c in children if c.obj_id is None),
+                    ", ".join(c.printablepath for c in children if c.obj_id is None),
                 )
             )
 
@@ -434,9 +431,7 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
 
         fsentry.obj = yield (buf, obj, relations)
 
-        logger.info("Backed up dir: {}".format(
-            fsentry
-        ))
+        logger.info("Backed up dir: {}".format(fsentry))
 
     elif stat.S_ISLNK(fsentry.st_mode):
         buf = io.BytesIO()
@@ -452,10 +447,7 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
 
         # Symlinks may be invalid utf-8 sequences. Make sure we re-encode
         # them to their original byte representation before saving
-        umsgpack.pack(
-            os.fsencode(os.readlink(fsentry.path)),
-            buf
-        )
+        umsgpack.pack(os.fsencode(os.readlink(fsentry.path)), buf)
 
         buf.seek(0)
         obj = models.Object()
@@ -467,13 +459,13 @@ def backup_iterator(fsentry, inline_threshold=2 ** 21):
         fsentry.obj = yield (buf, obj, [])
 
     else:
-        logger.warning("Unknown file type, not backing up {}".format(
-            fsentry))
+        logger.warning("Unknown file type, not backing up {}".format(fsentry))
         fsentry.delete()
         return
 
     fsentry.save()
     return
+
 
 def _open_file(path):
     """Opens this file for reading
@@ -499,6 +491,7 @@ def _open_file(path):
         pass
     return os.fdopen(os.open(path, flags), "rb")
 
+
 class DummyExecutor(concurrent.futures._base.Executor):
     """A dummy executor that implements the standard Executor interface but
     runs its tasks immediately
@@ -506,15 +499,15 @@ class DummyExecutor(concurrent.futures._base.Executor):
     Used as a drop in replacement for an Executor when single threaded
     execution is required. This is useful when running under a debugger.
     """
+
     def submit(self, fn, *args, **kwargs):
         f = concurrent.futures.Future()
         try:
-            f.set_result(
-                fn(*args, **kwargs)
-            )
+            f.set_result(fn(*args, **kwargs))
         except BaseException as e:
             f.set_exception(e)
         return f
+
 
 def batcher(iterator, batchsize):
     """Yields tuples of items from the given iterator until the iterator is

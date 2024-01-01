@@ -23,6 +23,7 @@ class PathField(models.CharField):
     never match because SQLite doesn't implement the LIKE operator for BLOB
     types.
     """
+
     def __init__(self, **kwargs):
         kwargs.setdefault("max_length", 4096)
         super().__init__(**kwargs)

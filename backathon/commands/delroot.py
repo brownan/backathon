@@ -7,14 +7,14 @@ from ..util import atomic_immediate
 from .. import models
 from . import CommandBase, CommandError
 
+
 class Command(CommandBase):
-    help="Adds the given filesystem path as a backup root"
+    help = "Adds the given filesystem path as a backup root"
 
     def add_arguments(self, parser):
         parser.add_argument("root", type=str, nargs="+")
 
     def handle(self, options):
-
         repo = self.get_repo()
 
         with atomic_immediate(using=repo.db):
@@ -34,7 +34,7 @@ class Command(CommandBase):
 
             after_count = models.FSEntry.objects.using(repo.db).count()
 
-        if before_count-after_count > 1:
+        if before_count - after_count > 1:
             print("Running database vacuum... ", end="")
             sys.stdout.flush()
             with connections[repo.db].cursor() as cursor:
@@ -42,9 +42,13 @@ class Command(CommandBase):
             print("Done")
 
         print()
-        print("Root{} removed:\n{}".format(
-            "s" if len(options.root) != 1 else "",
-            "\n".join("* "+s for s in options.root)
-        ))
-        print("{} files and directories removed from backup "
-              "set".format(before_count - after_count))
+        print(
+            "Root{} removed:\n{}".format(
+                "s" if len(options.root) != 1 else "",
+                "\n".join("* " + s for s in options.root),
+            )
+        )
+        print(
+            "{} files and directories removed from backup "
+            "set".format(before_count - after_count)
+        )

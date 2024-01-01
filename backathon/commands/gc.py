@@ -10,6 +10,7 @@ from ..util import atomic_immediate
 from . import CommandBase
 from .. import garbage
 
+
 class TQDMSpinner(tqdm.tqdm):
     def __new__(cls, *args, **kwargs):
         # The tqdm class wasn't designed for subclassing in mind. To make
@@ -28,15 +29,23 @@ class TQDMSpinner(tqdm.tqdm):
         return instance
 
     @staticmethod
-    def format_meter(n, total, elapsed, ncols=None, prefix='', ascii=False,
-                     unit='it', unit_scale=False, rate=None, bar_format=None,
-                     postfix=None, unit_divisor=1000):
+    def format_meter(
+        n,
+        total,
+        elapsed,
+        ncols=None,
+        prefix="",
+        ascii=False,
+        unit="it",
+        unit_scale=False,
+        rate=None,
+        bar_format=None,
+        postfix=None,
+        unit_divisor=1000,
+    ):
         spin_chars = r"\|/-"
         spin_pos = spin_chars[n % len(spin_chars)]
-        return "{}: {}".format(
-            prefix,
-            spin_pos
-        )
+        return "{}: {}".format(prefix, spin_pos)
 
     def __repr__(self, elapsed=None):
         if self.disable:
@@ -53,14 +62,17 @@ class Command(CommandBase):
         repo = self.get_repo()
 
         filter_progress = TQDMSpinner(desc="Finding garbage", position=None)
-        collect_progress = tqdm.tqdm(desc="Collecting garbage",
-                                     unit=" objects", position=None)
+        collect_progress = tqdm.tqdm(
+            desc="Collecting garbage", unit=" objects", position=None
+        )
 
         class ProgressIndicator(garbage.ProgressIndicator):
             def build_filter_progress(self):
                 filter_progress.update(1)
+
             def delete_progress(self, s):
                 collect_progress.update(1)
+
             def close(self):
                 filter_progress.close()
                 collect_progress.close()
@@ -77,13 +89,11 @@ class Command(CommandBase):
 
         if num_deleted > 0:
             with connections[repo.db].cursor() as cursor:
-                print("Running database vacuum...",end="")
+                print("Running database vacuum...", end="")
                 sys.stdout.flush()
                 cursor.execute("VACUUM")
                 print(" Done")
 
         print()
         print("Deleted {} objects of garbage".format(num_deleted))
-        print("Recovered {} of storage space".format(
-            filesizeformat(size_recovered)
-        ))
+        print("Recovered {} of storage space".format(filesizeformat(size_recovered)))

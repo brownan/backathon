@@ -4,30 +4,23 @@ from ..encryption import DecryptionError
 from .. import models
 from . import CommandBase, CommandError
 
+
 class Command(CommandBase):
     help = "Restore one or more files or directories"
 
     def handle(self, options):
-
         repo = self.get_repo()
 
         print("All snapshots:")
         print("ID\tSnapshot Name")
         print("--\t-------------")
-        for ss in models.Snapshot.objects\
-                .using(repo.db)\
-                .order_by("date"):
-            print("{}\t{}".format(
-                ss.id,
-                "{} of {}".format(ss.date, ss.printablepath)
-            ))
+        for ss in models.Snapshot.objects.using(repo.db).order_by("date"):
+            print("{}\t{}".format(ss.id, "{} of {}".format(ss.date, ss.printablepath)))
 
         while True:
             num = input("Choose a snapshot to restore from> ")
             try:
-                ss = models.Snapshot.objects\
-                    .using(repo.db)\
-                    .get(id=num)
+                ss = models.Snapshot.objects.using(repo.db).get(id=num)
                 break
             except models.Snapshot.DoesNotExist:
                 print("No such snapshot")
@@ -42,9 +35,7 @@ class Command(CommandBase):
 
         if repo.encrypter.password_required:
             while True:
-                pwd = getpass.getpass(
-                    "Enter your repository password: "
-                )
+                pwd = getpass.getpass("Enter your repository password: ")
                 print("Decrypting key...")
                 try:
                     key = repo.encrypter.get_decryption_key(pwd)

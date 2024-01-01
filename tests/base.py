@@ -57,6 +57,7 @@ class TestBase(TestCase):
         # will hopefully free the resources, but the important thing is we get a
         # fresh database for each test
         import django.db
+
         del django.db.connections[self.repo.db]
         del django.db.connections.databases[self.repo.db]
 
@@ -89,12 +90,15 @@ class TestBase(TestCase):
                 obj = self.object.create(
                     objid=objid,
                 )
-                self.obj_relation.bulk_create([
-                    models.ObjectRelation(
-                        parent=obj,
-                        child_id=c.encode("ASCII") if isinstance(c,str) else c
-                    ) for c in children
-                ])
+                self.obj_relation.bulk_create(
+                    [
+                        models.ObjectRelation(
+                            parent=obj,
+                            child_id=c.encode("ASCII") if isinstance(c, str) else c,
+                        )
+                        for c in children
+                    ]
+                )
 
     def assert_objects(self, objs, roots=None, no_extras=True):
         """Asserts that the given hierarchy exists in the database and that
@@ -115,8 +119,4 @@ class TestBase(TestCase):
             )
 
         if no_extras:
-            self.assertDictEqual(
-                rootmap,
-                {},
-                "Unexpected object found"
-            )
+            self.assertDictEqual(rootmap, {}, "Unexpected object found")

@@ -11,14 +11,13 @@ from . import CommandBase, CommandError
 
 
 class Command(CommandBase):
-    help="Adds the given filesystem path as a backup root"
+    help = "Adds the given filesystem path as a backup root"
 
     def add_arguments(self, parser):
         parser.add_argument("root", type=str, nargs="+")
-        parser.add_argument("--skip-scan", action='store_true')
+        parser.add_argument("--skip-scan", action="store_true")
 
     def handle(self, options):
-
         repo = self.get_repo()
 
         with atomic_immediate(using=repo.db):
@@ -29,8 +28,9 @@ class Command(CommandBase):
                     raise CommandError("Not a directory: {}".format(root_path))
 
                 num_files_before = models.FSEntry.objects.using(repo.db).count()
-                size_before = models.FSEntry.objects.using(repo.db)\
-                    .aggregate(size=Sum("st_size"))['size']
+                size_before = models.FSEntry.objects.using(repo.db).aggregate(
+                    size=Sum("st_size")
+                )["size"]
                 if not size_before:
                     # On first add, there will only be one item and it won't have a
                     # size yet
@@ -41,10 +41,12 @@ class Command(CommandBase):
                 except IntegrityError:
                     raise CommandError("Path is already being backed up")
 
-        print("Backup root{} added:\n{}".format(
-            "s" if len(options.root) != 1 else "",
-            "\n".join("* "+s for s in options.root)
-        ))
+        print(
+            "Backup root{} added:\n{}".format(
+                "s" if len(options.root) != 1 else "",
+                "\n".join("* " + s for s in options.root),
+            )
+        )
 
         if options.skip_scan:
             print("Skipping scan. Make sure you run a scan before a backup")
@@ -71,17 +73,19 @@ class Command(CommandBase):
                 if pbar is not None:
                     pbar.close()
         except KeyboardInterrupt:
-            print("Scan canceled. Make sure to run a scan operation before a "
-                  "backup")
+            print("Scan canceled. Make sure to run a scan operation before a " "backup")
             print("or not all your files will be backed up")
             return
 
         num_files_after = models.FSEntry.objects.using(repo.db).count()
-        size_after = models.FSEntry.objects.using(repo.db)\
-            .aggregate(size=Sum("st_size"))['size']
+        size_after = models.FSEntry.objects.using(repo.db).aggregate(size=Sum("st_size"))[
+            "size"
+        ]
 
-        print("{} new entries (totaling {}) added to backup "
-                          "set".format(
-            num_files_after - num_files_before,
-            filesizeformat(size_after-size_before)
-        ))
+        print(
+            "{} new entries (totaling {}) added to backup "
+            "set".format(
+                num_files_after - num_files_before,
+                filesizeformat(size_after - size_before),
+            )
+        )

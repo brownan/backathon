@@ -3,6 +3,7 @@ import json
 from django.db import DEFAULT_DB_ALIAS
 from django.db.transaction import Atomic, get_connection
 
+
 class BytesReader:
     """A file-like object that reads from a bytes-like object
 
@@ -21,6 +22,7 @@ class BytesReader:
     copied to a byte object when returned from read().
 
     """
+
     def __init__(self, byteslike):
         self.buf = byteslike
         self.pos = 0
@@ -41,8 +43,8 @@ class BytesReader:
         return self.pos
 
     def readinto(self, b):
-        size = min(len(b), len(self.buf)-self.pos)
-        b[:] = self.buf[self.pos:size]
+        size = min(len(b), len(self.buf) - self.pos)
+        b[:] = self.buf[self.pos : size]
         return size
 
     def read(self, size=None):
@@ -55,7 +57,7 @@ class BytesReader:
         if size is None:
             size = len(self.buf)
 
-        endpos = self.pos+size
+        endpos = self.pos + size
 
         self.pos += size
         if self.pos > len(self.buf):
@@ -95,6 +97,7 @@ class AtomicImmediate(Atomic):
     mode should try to keep its transactions quick, and avoid opening
     long-running write transactions.
     """
+
     def __init__(self, *args, **kwargs):
         self.set_begin_immediate = False
         super().__init__(*args, **kwargs)
@@ -113,14 +116,17 @@ class AtomicImmediate(Atomic):
             connection.begin_immediate = False
         super().__exit__(exc_type, exc_val, exc_tb)
 
+
 def atomic_immediate(using=None, savepoint=True):
     if callable(using):
         return AtomicImmediate(DEFAULT_DB_ALIAS, savepoint)(using)
     else:
         return AtomicImmediate(using, savepoint)
 
+
 # This is imported here to avoid an import loop
 from . import models
+
 
 class Settings:
     """A loose proxy for the Settings database model that does json

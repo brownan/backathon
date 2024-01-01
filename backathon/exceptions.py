@@ -6,6 +6,7 @@ class CorruptedRepository(Exception):
     due to a bug or perhaps could indicate someone has manually messed with
     some files. In either case, it may not be recoverable.
     """
+
     pass
 
 

@@ -8,6 +8,7 @@ from . import models
 
 logger = logging.getLogger("backathon.garbage")
 
+
 class GarbageCollector:
     """Finds garbage objects in the Object table
 
@@ -30,6 +31,7 @@ class GarbageCollector:
     row on the first pass, which is a lot more IO and would probably be
     slower.
     """
+
     def __init__(self, repo, progress=None):
         """
 
@@ -44,19 +46,20 @@ class GarbageCollector:
         self.progress = progress or ProgressIndicator()
 
     def build_filter(self):
-        """Builds the bloom filter
-
-        """
+        """Builds the bloom filter"""
         num_objects = models.Object.objects.using(self.db).all().count()
 
         # m - number of bits in the filter. Depends on num_objects
         # k - number of hash functions needed. Should be 4 for p=0.05
         p = 0.05
-        m = int(math.ceil((num_objects * math.log(p)) / math.log(1 / math.pow(
-            2, math.log(2)))))
-        k = 4 # = int(round(math.log(2) * m / num_objects))
+        m = int(
+            math.ceil(
+                (num_objects * math.log(p)) / math.log(1 / math.pow(2, math.log(2)))
+            )
+        )
+        k = 4  # = int(round(math.log(2) * m / num_objects))
 
-        arr_size = int(math.ceil(m/8))
+        arr_size = int(math.ceil(m / 8))
         bloom = bytearray(arr_size)
 
         # The "hash" functions will just be a random number that will be
@@ -80,7 +83,7 @@ class GarbageCollector:
         with connections[self.db].cursor() as c:
             c.execute(query)
             for row in c:
-                objid_int = int.from_bytes(row[0], 'little')
+                objid_int = int.from_bytes(row[0], "little")
 
                 for h in hashes:
                     h ^= objid_int
@@ -116,7 +119,7 @@ class GarbageCollector:
         # Now we can iterate over all objects. If an object does not appear
         # in the bloom filter, we can guarantee it's not reachable.
         for obj in models.Object.objects.using(self.db).all().iterator():
-            objid = int.from_bytes(obj.objid, 'little')
+            objid = int.from_bytes(obj.objid, "little")
 
             if not all(hash_match(h, objid) for h in hashes):
                 yield obj
@@ -140,7 +143,7 @@ class GarbageCollector:
         n = 0
         s = 0
         try:
-            for obj in self._iter_garbage(): # type: models.Object
+            for obj in self._iter_garbage():  # type: models.Object
                 self.repo.delete_object(obj)
                 n += 1
                 s += obj.uploaded_size
@@ -156,8 +159,8 @@ class GarbageCollector:
 
         return n, s
 
-class ProgressIndicator:
 
+class ProgressIndicator:
     def build_filter_progress(self):
         """Called for each step of building the filter"""
         pass
