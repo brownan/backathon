@@ -1,14 +1,13 @@
+import logging
 import os
 import os.path
 import stat
-import logging
 
-from django.db import models, IntegrityError
+from django.db import IntegrityError, connections, models
 from django.db.transaction import atomic
-from django.db import connections
 
-from .util import atomic_immediate
-from .fields import PathField
+from backathon.fields import PathField
+from backathon.util import atomic_immediate
 
 scanlogger = logging.getLogger("backathon.scan")
 

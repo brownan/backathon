@@ -1,6 +1,6 @@
 import argparse
-import os.path
 import logging
+import os.path
 import pkgutil
 import sys
 from importlib import import_module
@@ -8,7 +8,7 @@ from importlib import import_module
 import django
 from django.apps import apps
 
-from backathon.commands import CommandError, CommandBase
+from backathon.commands import CommandBase, CommandError
 
 logger = logging.getLogger("backathon.main")
 

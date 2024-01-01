@@ -1,15 +1,12 @@
-import tempfile
-import pathlib
-import logging
-import stat
-import os
-import unittest.mock
 import hashlib
+import logging
+import os
+import pathlib
+import stat
+import tempfile
+import unittest.mock
 
-from django.db import connections
-
-from backathon import models
-from .base import TestBase
+from tests.base import TestBase
 
 
 class AssertionHandler(logging.Handler):

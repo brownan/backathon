@@ -34,7 +34,7 @@ class BytesReader:
         return True
 
     def writable(self):
-        raise False
+        return False
 
     def close(self):
         self.buf = None
@@ -125,7 +125,7 @@ def atomic_immediate(using=None, savepoint=True):
 
 
 # This is imported here to avoid an import loop
-from . import models
+from backathon import models  # noqa: E402
 
 
 class Settings:

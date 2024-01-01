@@ -1,23 +1,21 @@
+import concurrent.futures
+import datetime
+import io
 import itertools
+import os
+import stat
 import time
 from contextlib import ExitStack
 from logging import getLogger
-import os
-import stat
-import io
-import datetime
-import concurrent.futures
 
+import pytz
+import umsgpack
 from django.db import connections
 from django.utils import timezone
-import pytz
 
-import umsgpack
-
+from backathon import chunker, models
+from backathon.exceptions import DependencyError
 from backathon.util import atomic_immediate
-from . import models
-from . import chunker
-from .exceptions import DependencyError
 
 logger = getLogger("backathon.backup")
 

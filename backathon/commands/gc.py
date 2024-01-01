@@ -1,14 +1,13 @@
-import sys
 import logging
+import sys
 
+import tqdm
 from django.db import connections
 from django.template.defaultfilters import filesizeformat
 
-import tqdm
-
-from ..util import atomic_immediate
-from . import CommandBase
-from .. import garbage
+from backathon import garbage
+from backathon.commands import CommandBase
+from backathon.util import atomic_immediate
 
 
 class TQDMSpinner(tqdm.tqdm):

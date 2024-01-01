@@ -58,20 +58,20 @@ b2_get_download_authorization
 
 """
 import base64
-import io
-import os
-import time
-import urllib.parse
 import hashlib
 import hmac
+import io
+import os
 import tempfile
 import threading
+import time
+import urllib.parse
 from logging import getLogger
 
 import requests.exceptions
 from django.utils.functional import cached_property
 
-from .storage import StorageBase
+from backathon.storage import StorageBase
 
 logger = getLogger("backathon.b2")
 

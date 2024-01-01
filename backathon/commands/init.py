@@ -1,8 +1,7 @@
 import getpass
 
-from . import CommandBase
-from .. import repository
-from .. import encryption
+from backathon import encryption, repository
+from backathon.commands import CommandBase
 
 
 class Command(CommandBase):

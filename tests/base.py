@@ -1,14 +1,14 @@
-from contextlib import ExitStack
-import tempfile
 import os.path
 import pathlib
+import tempfile
+from contextlib import ExitStack
 
 from django.db.transaction import atomic
 from django.test import TestCase
 
+import backathon.encryption
 from backathon import models
 from backathon.repository import Backathon
-import backathon.encryption
 
 
 class TestBase(TestCase):

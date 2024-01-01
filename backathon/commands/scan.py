@@ -1,12 +1,10 @@
-import time
 
+import tqdm
 from django.db.models import Sum
 from django.template.defaultfilters import filesizeformat
 
-import tqdm
-
-from .. import models
-from . import CommandBase
+from backathon import models
+from backathon.commands import CommandBase
 
 
 class Command(CommandBase):

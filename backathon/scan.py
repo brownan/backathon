@@ -2,8 +2,8 @@ import time
 
 from django.db import connections
 
-from .util import atomic_immediate
-from . import models
+from backathon import models
+from backathon.util import atomic_immediate
 
 
 def scan(alias, progress=None, skip_existing=False):

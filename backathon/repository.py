@@ -1,24 +1,20 @@
-import io
-import uuid
 import hmac
+import io
 import json
 import os.path
+import uuid
 import zlib
 
 import django.core.files.storage
 import django.db
+import umsgpack
 from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError
 from django.utils.functional import cached_property
 
-import umsgpack
-
-from .util import Settings, SimpleSetting, atomic_immediate
-from . import models
-from . import util
-from .exceptions import CorruptedRepository
-from . import encryption
-from . import storage
+from backathon import encryption, models, storage, util
+from backathon.exceptions import CorruptedRepository
+from backathon.util import Settings, SimpleSetting, atomic_immediate
 
 
 class Backathon:
@@ -42,7 +38,7 @@ class Backathon:
 
         See more info in the backathon.scan module
         """
-        from . import scan
+        from backathon import scan
 
         scan.scan(alias=self.db, progress=progress, skip_existing=skip_existing)
 
@@ -87,7 +83,7 @@ class Backathon:
         except KeyError:
             raise ImproperlyConfigured("You must configure the storage " "backend first")
 
-        from . import backup
+        from backathon import backup
 
         backup.backup(self.repository, **kwargs)
 
@@ -114,7 +110,7 @@ class Backathon:
         You can give either the key or the password. To get the key,
         call repo.encrypter.get_decryption_key(). This can take a few seconds.
         """
-        from . import restore
+        from backathon import restore
 
         if password is not None:
             key = self.repository.encrypter.get_decryption_key(password)
@@ -261,7 +257,7 @@ class Repository:
         if cls_name == "local":
             cls = storage.FilesystemStorage
         elif cls_name == "b2":
-            from .b2 import B2Bucket
+            from backathon.b2 import B2Bucket
 
             cls = B2Bucket
         else:

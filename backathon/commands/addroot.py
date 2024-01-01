@@ -5,9 +5,9 @@ from django.db import IntegrityError
 from django.db.models import Sum
 from django.template.defaultfilters import filesizeformat
 
+from backathon import models
+from backathon.commands import CommandBase, CommandError
 from backathon.util import atomic_immediate
-from .. import models
-from . import CommandBase, CommandError
 
 
 class Command(CommandBase):

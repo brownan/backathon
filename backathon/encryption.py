@@ -1,11 +1,11 @@
 import hashlib
 import hmac
 
-import nacl.utils
+import nacl.exceptions
+import nacl.public
 import nacl.pwhash
 import nacl.secret
-import nacl.public
-import nacl.exceptions
+import nacl.utils
 
 
 class DecryptionError(Exception):

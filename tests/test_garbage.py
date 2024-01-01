@@ -3,8 +3,8 @@ import datetime
 import pytz
 from django.db.transaction import atomic
 
-from .base import TestBase
 import backathon.garbage
+from tests.base import TestBase
 
 
 class TestGarbage(TestBase):

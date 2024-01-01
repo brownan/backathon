@@ -18,7 +18,7 @@ class CommandBase:
         raise NotImplementedError()
 
     def get_repo(self):
-        from .. import repository
+        from backathon import repository
 
         return repository.Repository(self.config)
 

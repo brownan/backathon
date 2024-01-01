@@ -4,6 +4,7 @@ a few customizations for this application.
 
 """
 from logging import getLogger
+
 from django.db.backends.sqlite3 import base, schema
 
 logger = getLogger("django.db")

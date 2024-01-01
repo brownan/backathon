@@ -1,10 +1,10 @@
+import logging
 import math
 import random
-import logging
 
 from django.db import connections
 
-from . import models
+from backathon import models
 
 logger = logging.getLogger("backathon.garbage")
 

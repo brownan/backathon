@@ -3,9 +3,9 @@ import sys
 
 from django.db import connections
 
-from ..util import atomic_immediate
-from .. import models
-from . import CommandBase, CommandError
+from backathon import models
+from backathon.commands import CommandBase, CommandError
+from backathon.util import atomic_immediate
 
 
 class Command(CommandBase):

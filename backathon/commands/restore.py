@@ -1,8 +1,8 @@
 import getpass
 
-from ..encryption import DecryptionError
-from .. import models
-from . import CommandBase, CommandError
+from backathon import models
+from backathon.commands import CommandBase
+from backathon.encryption import DecryptionError
 
 
 class Command(CommandBase):

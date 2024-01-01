@@ -1,11 +1,11 @@
-import pathlib
 import logging
 import os
+import pathlib
 
 import umsgpack
 
-from .exceptions import CorruptedRepository
-from . import util
+from backathon import util
+from backathon.exceptions import CorruptedRepository
 
 logger = logging.getLogger("backathon.restore")
 

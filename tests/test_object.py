@@ -1,7 +1,7 @@
 from django.db import IntegrityError
 from django.test import TransactionTestCase
 
-from .base import TestBase
+from tests.base import TestBase
 
 
 class TestObject(TestBase, TransactionTestCase):

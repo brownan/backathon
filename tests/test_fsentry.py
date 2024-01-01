@@ -1,13 +1,13 @@
-import stat
-from unittest import mock
 import os
 import pathlib
+import stat
+from unittest import mock
 
 import umsgpack
 
 from backathon import models, util
-from .base import TestBase
 from backathon.restore import unpack_payload
+from tests.base import TestBase
 
 
 class FSEntryTest(TestBase):
@@ -173,7 +173,7 @@ class TestBackup(TestBase):
         target"""
         payload = unpack_payload(self.repo.get_object(obj.objid))
         self.assertEqual("symlink", next(payload))
-        info = next(payload)
+        next(payload)
         self.assertEqual(os.fsencode(target), next(payload))
 
     def _assert_dir(self, obj, contents):
@@ -182,7 +182,7 @@ class TestBackup(TestBase):
         payload = unpack_payload(self.repo.get_object(obj.objid))
         self.assertEqual("tree", next(payload))
 
-        info = next(payload)
+        next(payload)
         children = next(payload)
         self.assertRaises(StopIteration, next, payload)
 
@@ -408,7 +408,7 @@ class TestBackup(TestBase):
     def test_permission_denied_file(self):
         """A permission denied error when reading a file shouldn't cause the
         backup to fail, and other files should still get backed up"""
-        file = self.create_file("dir/file1", "file contents")
+        self.create_file("dir/file1", "file contents")
         self.backathon.scan()
         self.assertEqual(3, self.fsentry.count())
 
