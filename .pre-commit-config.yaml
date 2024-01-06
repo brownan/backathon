@@ -16,6 +16,8 @@ repos:
       - id: mypy
         additional_dependencies:
           - types-requests
+          - types-pytz
+          - django-stubs[compatible-mypy]
 
 -   repo: https://github.com/pre-commit/mirrors-prettier
     rev: 'v3.0.0'  # Use the sha / tag you want to point at
