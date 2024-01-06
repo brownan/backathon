@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import hashlib
 import hmac
+from typing import Any, Dict, Optional
 
 import nacl.exceptions
 import nacl.public
@@ -25,12 +28,12 @@ class BaseEncryption:
     password_required = True
 
     @classmethod
-    def init_new(cls, password):
+    def init_new(cls, password: str) -> BaseEncryption:
         """Generate new encryption keys using the given password"""
         raise NotImplementedError()
 
     @classmethod
-    def init_from_public(cls, params, password):
+    def init_from_public(cls, params: Dict[str, Any], password: str) -> BaseEncryption:
         """Initialize this object from the public parameters
 
         The public parameters are stored in the remote repository and are
@@ -40,7 +43,7 @@ class BaseEncryption:
         raise NotImplementedError()
 
     @classmethod
-    def init_from_private(cls, params):
+    def init_from_private(cls, params: Dict[str, Any]) -> BaseEncryption:
         """Initialize this object from the private parameters
 
         The private parameters are stored locally and may contain more
@@ -52,7 +55,7 @@ class BaseEncryption:
         """
         raise NotImplementedError()
 
-    def get_public_params(self):
+    def get_public_params(self) -> Dict[str, Any]:
         """Return the parameters that should be stored in the remote repository
 
         These parameters are stored in the remote repository which is
@@ -70,7 +73,7 @@ class BaseEncryption:
         """
         raise NotImplementedError()
 
-    def get_private_params(self):
+    def get_private_params(self) -> Dict[str, Any]:
         """Return the parameters to store locally
 
         These parameters are stored on the local filesystem, which is
@@ -83,7 +86,7 @@ class BaseEncryption:
         """
         raise NotImplementedError()
 
-    def encrypt_bytes(self, plaintext):
+    def encrypt_bytes(self, plaintext: bytes | memoryview) -> bytes:
         """Encrypt a byte-like object
 
         :returns: A byte-like object containing the cyphertext
@@ -94,7 +97,7 @@ class BaseEncryption:
         """
         raise NotImplementedError()
 
-    def get_decryption_key(self, password):
+    def get_decryption_key(self, password: str) -> Optional[nacl.public.PrivateKey]:
         """This returns the decryption key to use for decrypt_bytes
 
         The API is designed with this call because the key derivation may be
@@ -104,7 +107,9 @@ class BaseEncryption:
         """
         raise NotImplementedError()
 
-    def decrypt_bytes(self, cyphertext, key):
+    def decrypt_bytes(
+        self, cyphertext: bytes, key: Optional[nacl.public.PrivateKey]
+    ) -> bytes:
         """Decrypt a byte-like object
 
         :returns: A byte-like object containing the plain text
@@ -113,7 +118,7 @@ class BaseEncryption:
         """
         raise NotImplementedError()
 
-    def calculate_objid(self, content):
+    def calculate_objid(self, content: bytes) -> bytes:
         """Hash the given object contents into an object ID
 
         This must return a secure hash of the given byte-like object.
@@ -124,7 +129,6 @@ class BaseEncryption:
 
         :return: The byte string hash of the contents. Do not return the hex
             representation.
-        :rtype: bytes
         """
         raise NotImplementedError()
 
@@ -139,33 +143,35 @@ class NullEncryption(BaseEncryption):
     password_required = False
 
     @classmethod
-    def init_new(cls, password=None):
+    def init_new(cls, password: str = "") -> NullEncryption:
         return cls()
 
     @classmethod
-    def init_from_private(cls, params):
+    def init_from_private(cls, params: Dict[str, Any]) -> NullEncryption:
         return cls()
 
     @classmethod
-    def init_from_public(cls, params, password):
+    def init_from_public(cls, params: Dict[str, Any], password: str) -> NullEncryption:
         return cls()
 
-    def get_public_params(self):
+    def get_public_params(self) -> Dict[str, Any]:
         return {}
 
-    def get_private_params(self):
+    def get_private_params(self) -> Dict[str, Any]:
         return {}
 
-    def encrypt_bytes(self, plaintext):
+    def encrypt_bytes(self, plaintext: bytes) -> bytes:
         return plaintext
 
-    def get_decryption_key(self, password):
+    def get_decryption_key(self, password: str) -> Optional[nacl.public.PrivateKey]:
         return None
 
-    def decrypt_bytes(self, cyphertext, key):
+    def decrypt_bytes(
+        self, cyphertext: bytes, key: Optional[nacl.public.PrivateKey]
+    ) -> bytes:
         return cyphertext
 
-    def calculate_objid(self, content):
+    def calculate_objid(self, content: bytes) -> bytes:
         return hashlib.sha256(content).digest()
 
 
@@ -175,14 +181,24 @@ class NaclSealedBox(BaseEncryption):
     OPSLIMIT = nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE
     MEMLIMIT = nacl.pwhash.argon2id.MEMLIMIT_SENSITIVE
 
-    def __init__(self, salt, ops, mem, pubkey, enc_privkey):
-        self.salt = salt  # type: bytes
-        self.ops = ops  # type: int
-        self.mem = mem  # type: int
-        self.pubkey = pubkey  # type: nacl.public.PublicKey
-        self.enc_privkey = enc_privkey  # type: bytes
+    def __init__(
+        self,
+        salt: bytes,
+        ops: int,
+        mem: int,
+        pubkey: nacl.public.PublicKey,
+        enc_privkey: bytes,
+    ):
+        self.salt = salt
+        self.ops = ops
+        self.mem = mem
+        self.pubkey = pubkey
+        self.enc_privkey = enc_privkey
 
-    def _get_symmetric_key(self, password):
+    @staticmethod
+    def _get_symmetric_key(
+        password: str, salt: bytes, opslimit: int, memlimit: int
+    ) -> bytes:
         # This key is derived from the password and is used to encrypt
         # the private part of the generated public/private key. The encrypted
         # private key is then stored in the remote repository for recovery
@@ -192,45 +208,44 @@ class NaclSealedBox(BaseEncryption):
         return nacl.pwhash.argon2id.kdf(
             nacl.secret.SecretBox.KEY_SIZE,
             password.encode("utf-8"),
-            salt=self.salt,
-            opslimit=self.ops,
-            memlimit=self.mem,
+            salt=salt,
+            opslimit=opslimit,
+            memlimit=memlimit,
         )
 
-    def _decrypt_privkey(self, password):
-        symmetric_key = self._get_symmetric_key(password)
+    @classmethod
+    def _decrypt_privkey(
+        cls, password: str, salt: bytes, ops: int, mem: int, enc_privkey: bytes
+    ) -> nacl.public.PrivateKey:
+        symmetric_key = cls._get_symmetric_key(password, salt, ops, mem)
 
         try:
             return nacl.public.PrivateKey(
-                nacl.secret.SecretBox(symmetric_key).decrypt(self.enc_privkey)
+                nacl.secret.SecretBox(symmetric_key).decrypt(enc_privkey)
             )
         except nacl.exceptions.CryptoError as e:
             raise DecryptionError(str(e)) from e
 
     @classmethod
-    def init_new(cls, password):
-        self = cls(
-            salt=nacl.utils.random(nacl.pwhash.argon2id.SALTBYTES),
-            ops=cls.OPSLIMIT,
-            mem=cls.MEMLIMIT,
-            pubkey=None,
-            enc_privkey=None,
-        )
+    def init_new(cls, password: str) -> NaclSealedBox:
+        salt = nacl.utils.random(nacl.pwhash.argon2id.SALTBYTES)
 
-        symmetric_key = self._get_symmetric_key(password)
+        symmetric_key = cls._get_symmetric_key(password, salt, cls.OPSLIMIT, cls.MEMLIMIT)
 
         # This is the master key that will be used to encrypt all the
         # repository contents
         key = nacl.public.PrivateKey.generate()
 
-        self.pubkey = key.public_key
-
-        self.enc_privkey = nacl.secret.SecretBox(symmetric_key).encrypt(bytes(key))
-
-        return self
+        return cls(
+            salt,
+            ops=cls.OPSLIMIT,
+            mem=cls.MEMLIMIT,
+            pubkey=key.public_key,
+            enc_privkey=nacl.secret.SecretBox(symmetric_key).encrypt(bytes(key)),
+        )
 
     @classmethod
-    def init_from_private(cls, params):
+    def init_from_private(cls, params: Dict[str, Any]) -> NaclSealedBox:
         return cls(
             salt=bytes.fromhex(params["salt"]),
             ops=params["ops"],
@@ -240,20 +255,22 @@ class NaclSealedBox(BaseEncryption):
         )
 
     @classmethod
-    def init_from_public(cls, params, password):
-        self = cls(
+    def init_from_public(cls, params: Dict[str, Any], password: str) -> NaclSealedBox:
+        return cls(
             salt=bytes.fromhex(params["salt"]),
             ops=params["ops"],
             mem=params["mem"],
-            pubkey=None,
+            pubkey=cls._decrypt_privkey(
+                password,
+                params["salt"],
+                params["ops"],
+                params["mem"],
+                bytes.fromhex(params["key"]),
+            ).public_key,
             enc_privkey=bytes.fromhex(params["key"]),
         )
 
-        self.pubkey = self._decrypt_privkey(password).public_key
-
-        return self
-
-    def get_public_params(self):
+    def get_public_params(self) -> Dict[str, Any]:
         return {
             "salt": self.salt.hex(),
             "ops": self.ops,
@@ -261,7 +278,7 @@ class NaclSealedBox(BaseEncryption):
             "key": self.enc_privkey.hex(),
         }
 
-    def get_private_params(self):
+    def get_private_params(self) -> Dict[str, Any]:
         return {
             "salt": self.salt.hex(),
             "ops": self.ops,
@@ -270,7 +287,7 @@ class NaclSealedBox(BaseEncryption):
             "key": self.enc_privkey.hex(),
         }
 
-    def encrypt_bytes(self, plaintext):
+    def encrypt_bytes(self, plaintext: bytes | memoryview) -> bytes:
         # Note: pynacl currently cannot encrypt byte-like objects like
         # memoryviews, so we must read it into a proper bytes object. This is
         # not a technical restriction as far as I can tell, just a bug.
@@ -278,16 +295,22 @@ class NaclSealedBox(BaseEncryption):
             plaintext = bytes(plaintext)
         return nacl.public.SealedBox(self.pubkey).encrypt(plaintext)
 
-    def get_decryption_key(self, password):
-        return self._decrypt_privkey(password)
+    def get_decryption_key(self, password: str) -> nacl.public.PrivateKey:
+        return self._decrypt_privkey(
+            password, self.salt, self.ops, self.mem, self.enc_privkey
+        )
 
-    def decrypt_bytes(self, cyphertext, key: nacl.public.PrivateKey):
+    def decrypt_bytes(
+        self, cyphertext: bytes, key: Optional[nacl.public.PrivateKey]
+    ) -> bytes:
+        if key is None:
+            raise DecryptionError("No key provided")
         try:
             return nacl.public.SealedBox(key).decrypt(cyphertext)
         except nacl.exceptions.CryptoError as e:
             raise DecryptionError(str(e)) from e
 
-    def calculate_objid(self, content):
+    def calculate_objid(self, content: bytes) -> bytes:
         # Since the public key is not actually public, this should serve as a
         # good hmac key. While not usually a good idea to use an encryption
         # key for a different purpose like this, I doubt there are any odd
