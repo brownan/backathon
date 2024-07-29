@@ -1,4 +1,5 @@
 import itertools
+import json
 import logging
 import pathlib
 import sqlite3
@@ -152,6 +153,15 @@ class Database:
         cursor = self.conn.cursor()
         cursor.execute("INSERT INTO config (key, value) VALUES (?, ?)", (key, value))
         cursor.close()
+
+    def config_get_json(self, key: str, default: Any = None) -> Any:
+        data = self.config_get(key, None)
+        if data is None:
+            return default
+        return json.loads(data)
+
+    def config_set_json(self, key: str, value: Any):
+        self.config_set(key, json.dumps(value))
 
     @contextmanager
     def atomic(self, *, immediate: bool = False):

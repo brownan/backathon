@@ -3,12 +3,16 @@ import os
 import sqlite3
 import stat
 import time
-from typing import Callable
+from typing import Callable, NamedTuple
 
 from backathon import models
 from backathon.db import Database
 
 logger = logging.getLogger("backathon.scan")
+
+
+class ScanProgressCallbacks(NamedTuple):
+    pass
 
 
 def scan(
@@ -18,10 +22,6 @@ def scan(
     force_scan: bool = False,
 ):
     """Scans all FSEntry objects for changes
-
-    This is usually called from Repository.scan() and is tightly integrated
-    with the Repository class. It lives in its own module for organizational
-    reasons.
 
     The scan works in multiple passes. The first pass calls FSEntry.scan() on
     each existing FSEntry object in the database. During the scan, new FSEntries
@@ -36,6 +36,8 @@ def scan(
         scan.
     :param skip_existing: Only scan new entries. This is used after adding a
         new root to just scan newly added files and directories.
+    :param force_scan: Force a re-scan of all tracked files and directories, not
+        just ones that appear to have changed.
 
     The progress callback function should have this signature:
     def progress(count, total, last_file_scanned):
@@ -51,7 +53,7 @@ def scan(
 
     if not skip_existing:
         # First pass, scan all existing non-new entries
-        logger.debug("Starting initial scan of existing entries")
+        logger.info("Scanning known files for changes")
         with db.cursor() as cursor:
             total: int = cursor.execute(
                 "SELECT COUNT(*) FROM fsentry WHERE NOT new"
@@ -66,6 +68,7 @@ def scan(
                     progress(scanned, total, entry.printable_path)
 
     # Now keep scanning for new objects until there are no more new objects
+    logger.info("Scanning newly found files")
     with db.atomic(immediate=True):
         last_checkpoint = time.monotonic()
         while True:
@@ -95,12 +98,46 @@ def scan(
 
             obj_iterator.close()
             with db.cursor() as cursor:
-                print("Checkpointing")
+                logger.debug("Checkpointing")
                 cursor.execute("COMMIT")
                 cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
-                cursor.execute("ANALYZE fsentry")
+                cursor.execute("PRAGMA optimize")
                 cursor.execute("BEGIN IMMEDIATE")
         with db.cursor() as cursor:
+            # For any entries invalidated by the scan (had their obj field set to null),
+            # also invalidate all parent entries recursively up to the root. This can be
+            # done with a single recursive query.
+            logger.info("All files scanned. Collecting files needing updating")
+            cursor.execute(
+                """
+                WITH RECURSIVE ancestors(id) AS (
+                    SELECT id FROM fsentry WHERE obj IS NULL
+                    UNION ALL
+                    SELECT fsentry.parent FROM fsentry
+                        INNER JOIN ancestors ON (fsentry.id = ancestors.id)
+                        INNER JOIN fsentry AS p ON (fsentry.parent = p.id)
+                        WHERE fsentry.parent IS NOT NULL AND p.obj IS NOT NULL
+                )
+                UPDATE fsentry SET obj=NULL
+                WHERE fsentry.id IN ancestors
+            """
+            )
+            if logger.isEnabledFor(logging.INFO):
+                cursor.execute(
+                    "SELECT COUNT(*) FROM fsentry WHERE obj IS NULL AND st_mode & ?",
+                    (stat.S_IFREG,),
+                )
+                n_files = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM fsentry WHERE obj IS NULL")
+                n_entries = cursor.fetchone()[0]
+                logger.info(
+                    "{:,d} file{} and {:,d} {} need updating".format(
+                        n_files,
+                        "s" if n_files != 1 else "",
+                        n_entries,
+                        "total entries" if n_entries != 1 else "entry",
+                    )
+                )
             cursor.execute("ANALYZE fsentry")
 
 
@@ -135,7 +172,7 @@ def scan_entry(db: Database, entry: models.FSEntry, *, force_scan: bool = False)
             # up as those entries are scanned, this code goes and cleans them up.
             entry.delete_children(db)
 
-        if not entry.new and entry.compare_stat_info(stat_result):
+        if not force_scan and not entry.new and entry.compare_stat_info(stat_result):
             return
 
         if stat.S_ISDIR(stat_result.st_mode):

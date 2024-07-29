@@ -9,6 +9,7 @@ import click
 import rich
 from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
 from rich.live import Live
+from rich.logging import RichHandler
 from rich.progress import (
     BarColumn,
     Progress,
@@ -37,7 +38,7 @@ def main(
     verbose: bool,
 ):
     loglevel = logging.INFO if not verbose else logging.DEBUG
-    logging.basicConfig(format="%(message)s", level=loglevel, handlers=None)
+    logging.basicConfig(format="%(message)s", level=loglevel, handlers=[RichHandler()])
 
     ctx.ensure_object(dict)
 
@@ -114,7 +115,7 @@ class FileListRenderable:
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         max_width = options.max_width
-        for t in self.file_list:
+        for t in list(self.file_list):
             text = Text(t)
             text.truncate(max_width, overflow="ellipsis")
             yield text
@@ -136,7 +137,7 @@ def scan(ctx: click.Context, force_scan: bool, no_rich: bool = False):
             CountCompleteColumn(),
             TimerColumn(),
             SpeedColumn(),
-            speed_estimate_period=10,
+            speed_estimate_period=20,
         )
         task1 = progress.add_task("Scanning", total=0)
 
