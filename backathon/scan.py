@@ -1,12 +1,22 @@
+import logging
+import os
+import sqlite3
+import stat
 import time
-
-from django.db import connections
+from typing import Callable
 
 from backathon import models
-from backathon.util import atomic_immediate
+from backathon.db import Database
+
+logger = logging.getLogger("backathon.scan")
 
 
-def scan(alias, progress=None, skip_existing=False):
+def scan(
+    db: Database,
+    progress: None | Callable[[int, int | None, str], None] = None,
+    skip_existing: bool = False,
+    force_scan: bool = False,
+):
     """Scans all FSEntry objects for changes
 
     This is usually called from Repository.scan() and is tightly integrated
@@ -22,14 +32,13 @@ def scan(alias, progress=None, skip_existing=False):
     being very quick since the database IO is relatively low; entries can be
     fetched in batch.
 
-    :param alias: The database alias to use
     :param progress: A callback function that provides status updates on the
-        scan
+        scan.
     :param skip_existing: Only scan new entries. This is used after adding a
         new root to just scan newly added files and directories.
 
     The progress callback function should have this signature:
-    def progress(count, total):
+    def progress(count, total, last_file_scanned):
         ...
 
     Where count is the number of entries processed so far, and total is the
@@ -38,122 +47,149 @@ def scan(alias, progress=None, skip_existing=False):
 
     """
 
-    # Note about the below use of qs.iterator()
-    ###########################################
-    # Usual evaluation of a queryset will pull every single entry into
-    # memory, but we must avoid that since the table could be very large.
-    # SQLite supports streaming rows from a query in batches, and Django
-    # exposes this functionality with qs.iterator(), even though Django is
-    # documented as not supporting it for SQLite [1][2]. This may be a bug in
-    # Django or the Django docs, but it works to our advantage.
-
-    # UPDATE: I filed this as a bug [3] and qs.iterator() will officially
-    # support SQLite in Django 2.2, even though it accidentally works in
-    # previous versions.
-
-    # The caveat is that SQLite doesn't have isolation between queries on
-    # the same database connection [4]. According to the SQLite documentation,
-    # a SELECT query that runs interleaved with an INSERT, UPDATE, or DELETE
-    # on the same table results in undefined behavior. Specifically,
-    # it's undefined whether the inserted/modified/deleted rows will appear
-    # (perhaps for a second time) in the SELECT results. As long as the
-    # program can handle that possibility, there's no other problems with
-    # doing this (there's no risk of database corruption or anything).
-
-    # HOWEVER! Due to a Python bug [5] in versions <=3.5.2, Python may crash
-    # due to misuse of the SQLite API. This is caused by the Python SQLite
-    # driver resetting all SQLite statements when committing. Stepping over a
-    # statement after a reset will start it from the beginning [6], but Python
-    # keeps a cache of SQLite statements and thinks it's still reset. When
-    # Python tries to re-use that statement by binding new parameters to it,
-    # SQLite will return an error. SQLite doesn't allow binding parameters to a
-    # statement that's stepped through results without resetting it first [7],
-    # so it returns an error.
-
-    # So this code is only compatible with Python 3.5.3 and above unless
-    # someone finds another workaround.
-
-    # This took me a good 2-3 days to figure out. Phew!
-
-    # [1] https://docs.djangoproject.com/en/2.0/ref/models/querysets/#without-server-side-cursors
-    # [2] https://github.com/django/django/blob/2.0/django/db/backends/sqlite3/features.py#L9
-    # [3] https://code.djangoproject.com/ticket/29563
-    # [4] https://sqlite.org/isolation.html
-    # [5] https://bugs.python.org/issue10513
-    # [6] https://sqlite.org/c3ref/reset.html
-    # [7] https://sqlite.org/c3ref/bind_blob.html (see paragraph about SQLITE_MISUSE)
-
-    # Note about the below use of atomic blocks
-    ###########################################
-    # The atomic blocks are a performance optimization. This way
-    # entry.scan() calls are grouped in the same transaction. Without
-    # this, not only does performance suffer from lots of small
-    # transactions and extra IO, but the SQLite Write-ahead Log (WAL) grows
-    # very large (gigabytes for less than 20,000 files scanned, when the
-    # final DB size is less than 6 megabytes).
-    # That last point actually puzzled me: why should the explicit
-    # transaction make such a drastic difference in the WAL size?
-    #
-    # I believe this is due to 2 factors:
-    #
-    # 1. The WAL cannot be checkpointed while a SELECT statement is still
-    #  open. I'm guessing SQLite must keep a read lock on the database even
-    #  though the writes are still committing. This must prevent SQLite from
-    #  auto-checkpointing during the inner loop while qs.iterator() is still
-    #  open. I wasn't able to confirm this from the SQLite docs, but without
-    #  the atomic block starting an explicit transaction, I observed it
-    #  auto-checkpoint between outer loop iterations when qs.iterator()
-    #  finishes.
-    #
-    # 2. SQLite won't re-use pages in the WAL across transactions; starting a
-    #  new transaction will append new entries to the WAL. This makes sense
-    #  from a design standpoint, but I wasn't able to find this behavior
-    #  explicitly documented in the SQLite docs. So lots of small write
-    #  transactions in a situation where it can't checkpoint causes the
-    #  WAL to grow. In contrast, re-writing the DB page within a
-    #  transaction will re-write the same WAL page so the WAL stays small.
-    #  When we do the same operations in one big transaction, the WAL never
-    # grows beyond a few hundred KB.
-
     scanned = 0
 
     if not skip_existing:
         # First pass, scan all existing non-new entries
-        qs = models.FSEntry.objects.using(alias).filter(new=False)
-        total = qs.count()
-        with atomic_immediate(using=alias):
-            for entry in qs.iterator():
-                entry.scan()
-
+        logger.debug("Starting initial scan of existing entries")
+        with db.cursor() as cursor:
+            total: int = cursor.execute(
+                "SELECT COUNT(*) FROM fsentry WHERE NOT new"
+            ).fetchone()[0]
+        with db.atomic(immediate=True):
+            for entry in db.get_objects(
+                models.FSEntry, "SELECT * FROM fsentry WHERE NOT new"
+            ):
+                scan_entry(db, entry, force_scan=force_scan)
                 if progress is not None:
                     scanned += 1
-                    progress(scanned, total)
+                    progress(scanned, total, entry.printable_path)
 
     # Now keep scanning for new objects until there are no more new objects
-    # We evaluate this same queryset multiple times below. This only works
-    # because neither .exists() nor .iterator() cache their results.
-    qs = models.FSEntry.objects.using(alias).filter(new=True)
-    while qs.exists():
+    with db.atomic(immediate=True):
         last_checkpoint = time.monotonic()
-        with atomic_immediate(using=alias):
-            for entry in qs.iterator():
-                entry.scan()
-
-                if progress is not None:
-                    scanned += 1
-                    progress(scanned, None)
-
-                # Guard against bugs in scan() causing an infinite loop. If this
-                # item wasn't either deleted or marked new=False, then it would be
-                # selected next pass
-                assert entry.new is False or entry.id is None
-
-                if time.monotonic() - last_checkpoint > 30:
-                    # Checkpoint every once in a while to commit what we have so
-                    # far to the database. This saves progress and provides a
-                    # chance for other writers to write to the database.
+        while True:
+            with db.cursor() as cursor:
+                cursor.execute("SELECT 1 FROM fsentry WHERE new LIMIT 1")
+                if not cursor.fetchone():
                     break
 
-    # This seems like as good a time as any to do this.
-    with connections[alias].cursor() as cursor:
-        cursor.execute("ANALYZE fsentry")
+            obj_iterator = db.get_objects(
+                models.FSEntry, "SELECT * FROM fsentry WHERE new"
+            )
+            for entry in obj_iterator:
+                scan_entry(db, entry)
+                if progress is not None:
+                    scanned += 1
+                    progress(scanned, None, entry.printable_path)
+
+                # Detect infinite loops. Make sure entries are always marked as
+                # not new
+                if entry.new:
+                    raise RuntimeError("An entry was not properly scanned. This is a bug")
+
+                if time.monotonic() - last_checkpoint > 30:
+                    logger.debug("CHECKPOINTING")
+                    last_checkpoint = time.monotonic()
+                    break
+
+            obj_iterator.close()
+            with db.cursor() as cursor:
+                print("Checkpointing")
+                cursor.execute("COMMIT")
+                cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
+                cursor.execute("ANALYZE fsentry")
+                cursor.execute("BEGIN IMMEDIATE")
+        with db.cursor() as cursor:
+            cursor.execute("ANALYZE fsentry")
+
+
+def scan_entry(db: Database, entry: models.FSEntry, *, force_scan: bool = False):
+    logger.debug("Scanning %s", entry.printable_path)
+    times = [time.monotonic_ns()]
+    with db.atomic(immediate=True):
+        try:
+            stat_result = os.lstat(entry.path)
+        except (FileNotFoundError, NotADirectoryError):
+            # NotADirectoryError can happen when scanning a file but one of its parent
+            # directories is no longer a directory.
+            logger.debug("\t...not found, deleting")
+            with db.cursor() as cursor:
+                cursor.execute("DELETE FROM fsentry WHERE id=?", (entry.id,))
+            # Flag this entry as not new. Even though it's been deleted, the calling
+            # scan() function makes sure scanned entries are no longer new, to guard against
+            # infinite loops
+            entry.new = False
+            return
+        times.append(time.monotonic_ns())
+        if (
+            entry.st_mode is not None
+            and stat.S_ISDIR(entry.st_mode)
+            and not stat.S_ISDIR(stat_result.st_mode)
+        ):
+            # Type of entry has changed from directory to something else. Normally,
+            # directories when they are deleted will hit the FileNotFound case above,
+            # which recursively cascades and deletes all children. But if a file is
+            # recreated with the same name as the directory, it could leave orphaned
+            # children in the database. While such children would be eventually cleaned
+            # up as those entries are scanned, this code goes and cleans them up.
+            entry.delete_children(db)
+
+        if not entry.new and entry.compare_stat_info(stat_result):
+            return
+
+        if stat.S_ISDIR(stat_result.st_mode):
+            children = entry.get_children(db)
+
+            times.append(time.monotonic_ns())
+            # Check the directory entries on the filesystem against the database.
+            try:
+                entries = set(os.listdir(entry.decoded_path))
+            except PermissionError:
+                logger.debug("\t...Permission denied")
+                entries = set()
+
+            times.append(time.monotonic_ns())
+            # Create new entries
+            new_names = entries.difference(c.decoded_path.name for c in children)
+            for newname in new_names:
+                if newname == "hermes":
+                    continue
+                newpath = entry.decoded_path / newname
+                encoded_path = models.FSEntry.encode_path(newpath)
+                try:
+                    with db.atomic(), db.cursor() as cursor:
+                        cursor.execute(
+                            "INSERT INTO fsentry (path, parent, new) VALUES (?,?,?)",
+                            (encoded_path, entry.id, True),
+                        )
+
+                except sqlite3.IntegrityError:
+                    # This can happen if a new root was added to the database, but it was
+                    # an ancestor of an existing root. In this case, we re-parent the
+                    # existing root
+                    with db.cursor() as cursor:
+                        cursor.execute(
+                            "UPDATE fsentry SET parent=? WHERE path=?",
+                            (entry.id, models.FSEntry.encode_path(newpath)),
+                        )
+            if new_names:
+                logger.debug(f"\t...Found {len(new_names)} new entries in this directory")
+
+            times.append(time.monotonic_ns())
+            # Delete old entries
+            for child in children:
+                if child.decoded_path.name not in entries:
+                    with db.cursor() as cursor:
+                        cursor.execute("DELETE FROM fsentry WHERE id=?", (child.id,))
+
+        while len(times) < 5:
+            times.append(times[-1])
+
+        # Update this entry
+        times.append(time.monotonic_ns())
+        entry.update(db, None, False, stat_result)
+        times.append(time.monotonic_ns())
+        # entry.invalidate(db)
+        # times.append(time.monotonic_ns())
+        # print(*("{:12,d}".format(times[i + 1] - times[i]) for i in range(len(times) - 1)))

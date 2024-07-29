@@ -4,47 +4,53 @@
 #
 #    pip-compile --output-file=requirements.txt requirements.in
 #
-asgiref==3.7.2
-    # via django
-build==1.0.3
-    # via pip-tools
-certifi==2023.11.17
+annotated-types==0.7.0
+    # via
+    #   b2sdk
+    #   pydantic
+b2sdk==2.4.1
+    # via -r requirements.in
+certifi==2024.7.4
     # via requests
 cffi==1.16.0
     # via pynacl
 charset-normalizer==3.3.2
     # via requests
-click==8.1.7
-    # via pip-tools
-colorlog==6.8.0
+colorlog==6.8.2
     # via -r requirements.in
-django==4.2.8
-    # via -r requirements.in
-idna==3.6
+idna==3.7
     # via requests
-packaging==23.2
-    # via build
-pip-tools==7.3.0
+logfury==1.0.1
+    # via b2sdk
+markdown-it-py==3.0.0
+    # via rich
+mcon==0.0.7
     # via -r requirements.in
-pycparser==2.21
+mdurl==0.1.2
+    # via markdown-it-py
+msgpack==1.0.8
+    # via -r requirements.in
+packaging==24.1
+    # via mcon
+pycparser==2.22
     # via cffi
+pydantic==2.8.2
+    # via -r requirements.in
+pydantic-core==2.20.1
+    # via pydantic
+pygments==2.18.0
+    # via rich
 pynacl==1.5.0
     # via -r requirements.in
-pyproject-hooks==1.0.0
-    # via build
-requests==2.31.0
+requests==2.32.3
+    # via b2sdk
+rich==13.7.1
     # via -r requirements.in
-sqlparse==0.4.4
-    # via django
-tqdm==4.66.1
-    # via -r requirements.in
-u-msgpack-python==2.8.0
-    # via -r requirements.in
-urllib3==2.1.0
+toml==0.10.2
+    # via mcon
+typing-extensions==4.12.2
+    # via
+    #   pydantic
+    #   pydantic-core
+urllib3==2.2.2
     # via requests
-wheel==0.42.0
-    # via pip-tools
-
-# The following packages are considered to be unsafe in a requirements file:
-# pip
-# setuptools

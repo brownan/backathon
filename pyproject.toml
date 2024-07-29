@@ -1,27 +1,31 @@
+[build-system]
+requires = ["mcon"]
+build-backend = "mcon.pybuild"
+
+[project]
+name = "backathon"
+version = "0.2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "msgpack",
+    "PyNaCl",
+    "colorlog",
+    "rich",
+    "b2sdk",
+    "pydantic",
+    "click~=8.1.0",
+]
+
 [tool.black]
 target-version = ["py39"]
 line-length = 90
 
 [tool.ruff]
 select = ["E", "F", "W", "B", "TID25", "I"]
-# B905 only applies to python 3.10 and above
+
 ignore = ["E501", "B007", "B024", "B027", "B904", "B905"]
 unfixable = ["F841"]
 
+
 [tool.ruff.flake8-tidy-imports]
 ban-relative-imports = "all"
-
-[tool.mypy]
-show_error_codes = true
-warn_unused_ignores = true
-warn_redundant_casts = true
-check_untyped_defs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-disallow_untyped_decorators = true
-warn_unreachable = true
-
-plugins = ["mypy_django_plugin.main"]
-
-[tool.django-stubs]
-django_settings_module = "backathon.settings"

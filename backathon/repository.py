@@ -2,19 +2,15 @@ import hmac
 import io
 import json
 import os.path
+import pathlib
 import uuid
 import zlib
-
-import django.core.files.storage
-import django.db
-import umsgpack
-from django.core.exceptions import ImproperlyConfigured
-from django.db import IntegrityError
-from django.utils.functional import cached_property
+from functools import cached_property
 
 from backathon import encryption, models, storage, util
+from backathon.db import Database
 from backathon.exceptions import CorruptedRepository
-from backathon.util import Settings, SimpleSetting, atomic_immediate
+from backathon.util import Settings, SimpleSetting
 
 
 class Backathon:
@@ -26,11 +22,10 @@ class Backathon:
     functionality.
     """
 
-    def __init__(self, dbfile):
-        self.repository = Repository(dbfile)
-        self.db = self.repository.db
+    def __init__(self, db: Database):
+        self.db = db
 
-    def scan(self, skip_existing=False, progress=None):
+    def scan(self, skip_existing=False, progress=None, force_scan: bool = False):
         """Scans the backup set
 
         The backup set is the set of files and directories starting at the
@@ -40,9 +35,11 @@ class Backathon:
         """
         from backathon import scan
 
-        scan.scan(alias=self.db, progress=progress, skip_existing=skip_existing)
+        scan.scan(
+            self.db, progress=progress, skip_existing=skip_existing, force_scan=force_scan
+        )
 
-    def add_root(self, root_path):
+    def add_root(self, root_path: pathlib.Path):
         """Adds a new root path to the backup set
 
         This just adds the root. The caller may want to call
@@ -52,20 +49,25 @@ class Backathon:
         If this entry is already a root or is a descendant of an existing
         root, this call raises an IntegrityError
         """
-        root_path = os.path.abspath(root_path)
-        models.FSEntry.objects.using(self.db).create(path=root_path)
+        with self.db.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO fsentry (path) VALUES (?)",
+                (models.FSEntry.encode_path(root_path),),
+            )
 
-    def del_root(self, root_path):
-        root_path = os.path.abspath(root_path)
-        entry = (
-            models.FSEntry.objects.using(self.db)
-            .filter(parent__isnull=True)
-            .get(path=root_path)
+    def del_root(self, root_path: pathlib.Path):
+        with self.db.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM fsentry WHERE path=? AND parent IS NULL",
+                (models.FSEntry.encode_path(root_path),),
+            )
+
+    def get_roots(self) -> list[models.FSEntry]:
+        return list(
+            self.db.get_objects(
+                models.FSEntry, "SELECT * FROM fsentry WHERE parent IS NULL"
+            )
         )
-        entry.delete()
-
-    def get_roots(self):
-        return models.FSEntry.objects.using(self.db).filter(parent__isnull=True)
 
     def backup(self, **kwargs):
         """Perform a backup

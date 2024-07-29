@@ -1,8 +1,7 @@
-u-msgpack-python
+msgpack
 PyNaCl
-pip-tools
-Django~=4.2
 colorlog
-tqdm
-requests
-
+rich
+b2sdk
+mcon
+pydantic
