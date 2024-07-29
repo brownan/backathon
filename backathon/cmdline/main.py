@@ -72,6 +72,43 @@ def list_roots(ctx: click.Context):
         click.echo("no roots", err=True)
 
 
+@main.command()
+@click.pass_context
+def edit_roots(ctx: click.Context):
+    repo: backathon.repository.Backathon = ctx.obj["repo"]
+    roots = repo.get_roots()
+    text = "\n".join(str(r.decoded_path) for r in roots)
+    new_text = click.edit(text)
+    if new_text is not None:
+        old_roots_set = set(str(r.decoded_path) for r in roots)
+        new_roots = [line.strip() for line in new_text.split("\n")]
+        new_roots = [line for line in new_roots if line]
+        for to_del in set(old_roots_set).difference(new_roots):
+            repo.del_root(pathlib.Path(to_del))
+        for to_add in set(new_roots).difference(old_roots_set):
+            repo.add_root(pathlib.Path(to_add))
+        click.echo("Roots modified")
+    else:
+        click.echo("Roots unmodified")
+
+
+@main.command()
+@click.pass_context
+def edit_excludes(ctx: click.Context):
+    db: backathon.db.Database = ctx.obj["db"]
+    current = db.config_get_json("excludes", [])
+    text = """# Add excludes, one per line. Globs are supported.\n\n"""
+    text += "\n".join(current)
+    new_text = click.edit(text)
+    if new_text is not None:
+        new_lines = [line.strip() for line in new_text.split("\n")]
+        new_lines = [line for line in new_lines if line and not line.startswith("#")]
+        db.config_set_json("excludes", new_lines)
+        click.echo("Exclude list updated")
+    else:
+        click.echo("Exclude list unchanged")
+
+
 class CountCompleteColumn(ProgressColumn):
     def render(self, task: "Task") -> RenderableType:
         completed = int(task.completed)

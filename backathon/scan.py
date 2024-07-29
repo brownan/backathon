@@ -3,16 +3,12 @@ import os
 import sqlite3
 import stat
 import time
-from typing import Callable, NamedTuple
+from typing import Callable, NamedTuple, Container, Collection
 
 from backathon import models
 from backathon.db import Database
 
 logger = logging.getLogger("backathon.scan")
-
-
-class ScanProgressCallbacks(NamedTuple):
-    pass
 
 
 def scan(
@@ -51,6 +47,8 @@ def scan(
 
     scanned = 0
 
+    exclude_patterns = db.config_get_json("excludes", [])
+
     if not skip_existing:
         # First pass, scan all existing non-new entries
         logger.info("Scanning known files for changes")
@@ -62,7 +60,7 @@ def scan(
             for entry in db.get_objects(
                 models.FSEntry, "SELECT * FROM fsentry WHERE NOT new"
             ):
-                scan_entry(db, entry, force_scan=force_scan)
+                scan_entry(db, entry, force_scan=force_scan, excludes=exclude_patterns)
                 if progress is not None:
                     scanned += 1
                     progress(scanned, total, entry.printable_path)
@@ -81,7 +79,7 @@ def scan(
                 models.FSEntry, "SELECT * FROM fsentry WHERE new"
             )
             for entry in obj_iterator:
-                scan_entry(db, entry)
+                scan_entry(db, entry, excludes=exclude_patterns)
                 if progress is not None:
                     scanned += 1
                     progress(scanned, None, entry.printable_path)
@@ -111,7 +109,7 @@ def scan(
             cursor.execute(
                 """
                 WITH RECURSIVE ancestors(id) AS (
-                    SELECT id FROM fsentry
+                    SELECT fsentry.id FROM fsentry
                         INNER JOIN fsentry AS p ON (fsentry.parent = p.id)
                         WHERE fsentry.obj IS NULL AND p.obj IS NOT NULL
                     UNION ALL
@@ -142,8 +140,28 @@ def scan(
             cursor.execute("ANALYZE fsentry")
 
 
-def scan_entry(db: Database, entry: models.FSEntry, *, force_scan: bool = False):
+def scan_entry(
+    db: Database,
+    entry: models.FSEntry,
+    *,
+    force_scan: bool = False,
+    excludes: Collection[str],
+):
     logger.debug("Scanning %s", entry.printable_path)
+
+    def delete_entry():
+        with db.cursor() as inner_cursor:
+            inner_cursor.execute("DELETE FROM fsentry WHERE id=?", (entry.id,))
+        # Flag this entry as not new. Even though it's been deleted, the calling
+        # scan() function makes sure scanned entries are no longer new, to guard against
+        # infinite loops
+        entry.new = False
+
+    if entry.matches_glob(excludes):
+        logger.debug("\t...matches exclude pattern. deleting")
+        delete_entry()
+        return
+
     times = [time.monotonic_ns()]
     with db.atomic(immediate=True):
         try:
@@ -152,13 +170,9 @@ def scan_entry(db: Database, entry: models.FSEntry, *, force_scan: bool = False)
             # NotADirectoryError can happen when scanning a file but one of its parent
             # directories is no longer a directory.
             logger.debug("\t...not found, deleting")
-            with db.cursor() as cursor:
-                cursor.execute("DELETE FROM fsentry WHERE id=?", (entry.id,))
-            # Flag this entry as not new. Even though it's been deleted, the calling
-            # scan() function makes sure scanned entries are no longer new, to guard against
-            # infinite loops
-            entry.new = False
+            delete_entry()
             return
+
         times.append(time.monotonic_ns())
         if (
             entry.st_mode is not None
@@ -191,9 +205,11 @@ def scan_entry(db: Database, entry: models.FSEntry, *, force_scan: bool = False)
             # Create new entries
             new_names = entries.difference(c.decoded_path.name for c in children)
             for newname in new_names:
-                if newname == "hermes":
-                    continue
                 newpath = entry.decoded_path / newname
+
+                if any(newpath.match(p) for p in excludes):
+                    continue
+
                 encoded_path = models.FSEntry.encode_path(newpath)
                 try:
                     with db.atomic(), db.cursor() as cursor:
@@ -228,6 +244,11 @@ def scan_entry(db: Database, entry: models.FSEntry, *, force_scan: bool = False)
         times.append(time.monotonic_ns())
         entry.update(db, None, False, stat_result)
         times.append(time.monotonic_ns())
-        # entry.invalidate(db)
-        # times.append(time.monotonic_ns())
-        # print(*("{:12,d}".format(times[i + 1] - times[i]) for i in range(len(times) - 1)))
+        if logger.isEnabledFor(5):
+            logger.log(
+                5,
+                " ".join(
+                    "{:12,d}".format(times[i + 1] - times[i])
+                    for i in range(len(times) - 1)
+                ),
+            )

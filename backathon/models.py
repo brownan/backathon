@@ -4,6 +4,7 @@ import os
 import os.path
 import pathlib
 import sys
+from collections.abc import Collection
 from functools import cached_property
 
 from pydantic import BaseModel
@@ -147,22 +148,8 @@ class FSEntry(BaseModel):
     def __str__(self):
         return self.printable_path
 
-    def invalidate(self, db: Database):
-        """Runs a query to invalidate this node and all parents up to the root"""
-        with db.cursor() as cursor:
-            cursor.execute(
-                """
-            WITH RECURSIVE ancestors(id) AS (
-              SELECT id FROM fsentry WHERE id=?
-              UNION ALL
-              SELECT fsentry.parent FROM fsentry
-              INNER JOIN ancestors ON (fsentry.id=ancestors.id)
-              WHERE fsentry.parent IS NOT NULL
-            ) UPDATE fsentry SET obj=NULL
-              WHERE fsentry.id IN ancestors
-            """,
-                (self.id,),
-            )
+    def matches_glob(self, patterns: Collection[str]) -> bool:
+        return any(self.decoded_path.match(pattern) for pattern in patterns)
 
     def get_children(self, db: Database) -> list["FSEntry"]:
         return list(
