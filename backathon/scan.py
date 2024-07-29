@@ -111,12 +111,13 @@ def scan(
             cursor.execute(
                 """
                 WITH RECURSIVE ancestors(id) AS (
-                    SELECT id FROM fsentry WHERE obj IS NULL
+                    SELECT id FROM fsentry
+                        INNER JOIN fsentry AS p ON (fsentry.parent = p.id)
+                        WHERE fsentry.obj IS NULL AND p.obj IS NOT NULL
                     UNION ALL
                     SELECT fsentry.parent FROM fsentry
                         INNER JOIN ancestors ON (fsentry.id = ancestors.id)
-                        INNER JOIN fsentry AS p ON (fsentry.parent = p.id)
-                        WHERE fsentry.parent IS NOT NULL AND p.obj IS NOT NULL
+                        WHERE fsentry.parent IS NOT NULL
                 )
                 UPDATE fsentry SET obj=NULL
                 WHERE fsentry.id IN ancestors

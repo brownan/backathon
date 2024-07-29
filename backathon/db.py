@@ -77,6 +77,7 @@ class Database:
         cursor.execute("PRAGMA journal_size_limit=10000000")
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA optimize")
         cursor.close()
         conn.row_factory = sqlite3.Row
         return conn
