@@ -5,6 +5,8 @@ import stat
 import time
 from typing import Callable, NamedTuple, Container, Collection
 
+from rich import filesize
+
 from backathon import models
 from backathon.db import Database
 
@@ -136,6 +138,16 @@ def scan(
                         n_entries,
                         "total entries" if n_entries != 1 else "entry",
                     )
+                )
+                cursor.execute("SELECT SUM(st_size) FROM fsentry WHERE st_mode & ?", (stat.S_IFREG,))
+                total_size = cursor.fetchone()[0]
+                cursor.execute("SELECT SUM(st_size) FROM fsentry WHERE obj IS NULL AND st_mode & ?", (stat.S_IFREG,))
+                to_backup_size = cursor.fetchone()[0]
+                logger.info(
+                    "Total backup set size: %s", filesize.decimal(total_size)
+                )
+                logger.info(
+                    "To backup: %s", filesize.decimal(to_backup_size)
                 )
             cursor.execute("ANALYZE fsentry")
 

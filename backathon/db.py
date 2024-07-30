@@ -39,7 +39,7 @@ MIGRATIONS: list[list[str]] = [
             id INTEGER PRIMARY KEY,
             obj BLOB REFERENCES objects (objid) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
             path BLOB UNIQUE NOT NULL,
-            parent INTEGER REFERENCES fsentry (id) DEFERRABLE INITIALLY DEFERRED,
+            parent INTEGER REFERENCES fsentry (id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
             new BOOLEAN DEFAULT TRUE,
             st_mode INTEGER,
             st_mtime_ns INTEGER,
