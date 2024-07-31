@@ -11,7 +11,7 @@ class FixedChunker:
         self.pos = 0
 
     def _get_chunksize(self):
-        return 2**20
+        return 10 * 2**20
 
     def __iter__(self):
         while True:

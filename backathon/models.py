@@ -6,6 +6,7 @@ import pathlib
 import sys
 from collections.abc import Collection
 from functools import cached_property
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -39,7 +40,7 @@ class Object(BaseModel):
     # values depending on the object type. Additionally, they may not be
     # filled in after a restore, as the objects have not yet been downloaded
     # and decoded.
-    type: str | None
+    type: None | Literal["inode", "blob", "tree", "symlink"]
     uploaded_size: int | None
     file_size: int | None
     last_modified_time: datetime.datetime | None

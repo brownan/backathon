@@ -8,7 +8,17 @@ import time
 from collections.abc import ByteString
 from contextlib import ExitStack
 from logging import getLogger
-from typing import Callable, Iterator, NamedTuple
+from tempfile import SpooledTemporaryFile
+from typing import (
+    IO,
+    Callable,
+    Collection,
+    Iterator,
+    Literal,
+    NamedTuple,
+)
+
+import msgpack
 
 import backathon.repository
 from backathon import chunker, models
@@ -59,22 +69,115 @@ def get_chunks(repo: backathon.repository.Backathon) -> Iterator[Chunk]:
                 pass
 
 
+class ObjectRequest(NamedTuple):
+    type: Literal["inode", "blob", "tree", "symlink"]
+    payload: IO[bytes]
+    file_size: int | None = None
+    last_modified_time: datetime.datetime | None = None
+    children: Collection[tuple[models.Object, str | None]] = ()
+
+
 class ProcessingContext(NamedTuple):
-    upload: Callable[[Chunk], models.Object]
-    add_relation: Callable[[models.Object, models.Object], None]
-    attach_to_entry: Callable[[models.Object, models.FSEntry], None]
+    upload: Callable[[ObjectRequest], models.Object]
+    inline_threshold: int = 2**20
 
 
 def process_entry(
-    entry: models.FSEntry, children: list[models.Object], context: ProcessingContext
-) -> models.Object:
+    entry: models.FSEntry, children: list[models.FSEntry], context: ProcessingContext
+) -> models.Object | None:
     """Processes a single entry through the entire upload process
 
     This is designed to be run from a separate thread. This function therefore should not
     use any global state, and should only manipulate database / repo state via the provided
     context methods.
     """
-    ...
+    try:
+        stat_result = os.lstat(entry.path)
+    except (FileNotFoundError, NotADirectoryError):
+        logger.info("File disappeared: %s", entry.printable_path)
+        return None
+
+    if entry.st_mode != stat_result.st_mode:
+        logger.warning(
+            "%s: File has changed mode since scan. Ignoring.", entry.printable_path
+        )
+        return
+
+    if stat.S_ISREG(stat_result.st_mode):
+        # Regular file
+        payload = SpooledTemporaryFile()
+        child_chunks: list[models.Object] = []
+        packer = msgpack.Packer()
+        payload.write(packer.pack("inode"))
+        payload.write(
+            packer.pack(
+                dict(
+                    size=stat_result.st_size,
+                    inode=stat_result.st_ino,
+                    uid=stat_result.st_uid,
+                    gid=stat_result.st_gid,
+                    mode=stat_result.st_mode,
+                    mtime=stat_result.st_mtime_ns,
+                    atime=stat_result.st_atime_ns,
+                )
+            )
+        )
+
+        try:
+            with _open_file(entry.path) as fobj:
+                if stat_result.st_size < context.inline_threshold:
+                    payload.write(packer.pack(("immediate", fobj.read())))
+                else:
+                    chunk_list: list[tuple[int, bytes]] = []
+                    if stat_result.st_size <= 30 * 2**20:
+                        chunk_iter = [(0, fobj.read())]
+                    else:
+                        chunk_iter = chunker.FixedChunker(fobj)
+                    for pos, chunk in chunk_iter:
+                        buf = SpooledTemporaryFile()
+                        buf.write(packer.pack("blob"))
+                        buf.write(packer.pack(chunk))
+                        buf.seek(0)
+                        chunk_obj = context.upload(
+                            ObjectRequest(
+                                type="blob",
+                                payload=buf,
+                            )
+                        )
+                        child_chunks.append(chunk_obj)
+                        chunk_list.append((pos, chunk_obj.objid))
+                    payload.write(packer.pack(("chunklist", chunk_list)))
+
+        except FileNotFoundError:
+            logger.info("File disappeared: %s", entry.printable_path)
+            return None
+        except OSError as e:
+            logger.error("%s: Error when reading. %s", entry.printable_path, e)
+            return None
+
+        payload.seek(0)
+        entry_obj = context.upload(
+            ObjectRequest(
+                type="inode",
+                file_size=stat_result.st_size,
+                last_modified_time=datetime.datetime.fromtimestamp(
+                    stat_result.st_mtime, datetime.UTC
+                ),
+                payload=payload,
+                children=[(c, None) for c in child_chunks],
+            )
+        )
+        return entry_obj
+
+    elif stat.S_ISDIR(stat_result.st_mode):
+        # Directory
+        raise NotImplementedError
+    elif stat.S_ISLNK(stat_result.st_mode):
+        # Symlink
+        raise NotImplementedError
+    else:
+        logger.warning("%s: Unknown file type. Ignoring.", entry.printable_path)
+        return None
 
 
 def backup(repo, progress=None, single=False):
