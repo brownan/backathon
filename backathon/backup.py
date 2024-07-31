@@ -5,22 +5,76 @@ import itertools
 import os
 import stat
 import time
+from collections.abc import ByteString
 from contextlib import ExitStack
 from logging import getLogger
+from typing import Callable, Iterator, NamedTuple
 
-import pytz
-import umsgpack
-from django.db import connections
-from django.utils import timezone
-
+import backathon.repository
 from backathon import chunker, models
 from backathon.exceptions import DependencyError
-from backathon.util import atomic_immediate
 
 logger = getLogger("backathon.backup")
 
 BATCH_SIZE = 100
 NUM_WORKERS = os.cpu_count()
+
+
+class Chunk(NamedTuple):
+    fsentry: models.FSEntry
+    chunk: ByteString
+
+
+def get_chunks(repo: backathon.repository.Backathon) -> Iterator[Chunk]:
+    """Yields chunks that need to be backed up"""
+    db = repo.db
+    with db.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*) FROM fsentry WHERE obj IS NULL")
+        backup_total: int = cursor.fetchone()[0]
+        backup_count: int = 0
+
+        while True:
+            cursor.execute("SELECT 1 FROM fsentry WHERE obj IS NULL LIMIT 1")
+            if not cursor.fetchone():
+                break
+            ct = 0  # How many items were backed up this iteration
+            last_checkpoint = time.monotonic()
+
+            # Iterate over all entries that have no dependencies that aren't yet
+            # backed up. In other words, these are entries we can back up right now
+            # without waiting on another entry. The entries that have to wait are generally
+            # directories which don't yet have their files uploaded, so we can't yet build
+            # the directory listing hashes.
+            for entry in db.get_objects(
+                models.FSEntry,
+                """
+                SELECT * FROM fsentry
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM fsentry AS children
+                    WHERE children.parent = fsentry.id
+                    AND children.obj IS NULL
+                )
+            """,
+            ):
+                pass
+
+
+class ProcessingContext(NamedTuple):
+    upload: Callable[[Chunk], models.Object]
+    add_relation: Callable[[models.Object, models.Object], None]
+    attach_to_entry: Callable[[models.Object, models.FSEntry], None]
+
+
+def process_entry(
+    entry: models.FSEntry, children: list[models.Object], context: ProcessingContext
+) -> models.Object:
+    """Processes a single entry through the entire upload process
+
+    This is designed to be run from a separate thread. This function therefore should not
+    use any global state, and should only manipulate database / repo state via the provided
+    context methods.
+    """
+    ...
 
 
 def backup(repo, progress=None, single=False):

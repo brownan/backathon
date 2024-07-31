@@ -3,7 +3,7 @@ import os
 import sqlite3
 import stat
 import time
-from typing import Callable, NamedTuple, Container, Collection
+from typing import Callable, Collection
 
 from rich import filesize
 
@@ -17,7 +17,7 @@ def scan(
     db: Database,
     progress: None | Callable[[int, int | None, str], None] = None,
     skip_existing: bool = False,
-    force_scan: bool = False,
+    rescan_dirs: bool = False,
 ):
     """Scans all FSEntry objects for changes
 
@@ -34,8 +34,7 @@ def scan(
         scan.
     :param skip_existing: Only scan new entries. This is used after adding a
         new root to just scan newly added files and directories.
-    :param force_scan: Force a re-scan of all tracked files and directories, not
-        just ones that appear to have changed.
+    :param rescan_dirs: Force a re-scan of all directories for changed contents.
 
     The progress callback function should have this signature:
     def progress(count, total, last_file_scanned):
@@ -52,17 +51,13 @@ def scan(
     exclude_patterns = db.config_get_json("excludes", [])
 
     if not skip_existing:
-        # First pass, scan all existing non-new entries
+        # First pass, scan all existing entries
         logger.info("Scanning known files for changes")
         with db.cursor() as cursor:
-            total: int = cursor.execute(
-                "SELECT COUNT(*) FROM fsentry WHERE NOT new"
-            ).fetchone()[0]
+            total: int = cursor.execute("SELECT COUNT(*) FROM fsentry").fetchone()[0]
         with db.atomic(immediate=True):
-            for entry in db.get_objects(
-                models.FSEntry, "SELECT * FROM fsentry WHERE NOT new"
-            ):
-                scan_entry(db, entry, force_scan=force_scan, excludes=exclude_patterns)
+            for entry in db.get_objects(models.FSEntry, "SELECT * FROM fsentry"):
+                scan_entry(db, entry, rescan_dirs=rescan_dirs, excludes=exclude_patterns)
                 if progress is not None:
                     scanned += 1
                     progress(scanned, total, entry.printable_path)
@@ -92,13 +87,14 @@ def scan(
                     raise RuntimeError("An entry was not properly scanned. This is a bug")
 
                 if time.monotonic() - last_checkpoint > 30:
-                    logger.debug("CHECKPOINTING")
                     last_checkpoint = time.monotonic()
                     break
 
             obj_iterator.close()
             with db.cursor() as cursor:
-                logger.debug("Checkpointing")
+                # Do a periodic commit and checkpoint. This ensures the write-ahead-log won't
+                # grow unbounded, and saves our progress in case of a crash or abort.
+                # Also run optimize to make sure table metadata is updated for the query planner.
                 cursor.execute("COMMIT")
                 cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
                 cursor.execute("PRAGMA optimize")
@@ -139,16 +135,17 @@ def scan(
                         "total entries" if n_entries != 1 else "entry",
                     )
                 )
-                cursor.execute("SELECT SUM(st_size) FROM fsentry WHERE st_mode & ?", (stat.S_IFREG,))
+                cursor.execute(
+                    "SELECT SUM(st_size) FROM fsentry WHERE st_mode & ?", (stat.S_IFREG,)
+                )
                 total_size = cursor.fetchone()[0]
-                cursor.execute("SELECT SUM(st_size) FROM fsentry WHERE obj IS NULL AND st_mode & ?", (stat.S_IFREG,))
+                cursor.execute(
+                    "SELECT SUM(st_size) FROM fsentry WHERE obj IS NULL AND st_mode & ?",
+                    (stat.S_IFREG,),
+                )
                 to_backup_size = cursor.fetchone()[0]
-                logger.info(
-                    "Total backup set size: %s", filesize.decimal(total_size)
-                )
-                logger.info(
-                    "To backup: %s", filesize.decimal(to_backup_size)
-                )
+                logger.info("Total backup set size: %s", filesize.decimal(total_size))
+                logger.info("To backup: %s", filesize.decimal(to_backup_size))
             cursor.execute("ANALYZE fsentry")
 
 
@@ -156,7 +153,7 @@ def scan_entry(
     db: Database,
     entry: models.FSEntry,
     *,
-    force_scan: bool = False,
+    rescan_dirs: bool = False,
     excludes: Collection[str],
 ):
     logger.debug("Scanning %s", entry.printable_path)
@@ -199,10 +196,16 @@ def scan_entry(
             # up as those entries are scanned, this code goes and cleans them up.
             entry.delete_children(db)
 
-        if not force_scan and not entry.new and entry.compare_stat_info(stat_result):
+        is_dir = stat.S_ISDIR(stat_result.st_mode)
+
+        if (
+            not (rescan_dirs and is_dir)
+            and not entry.new
+            and entry.compare_stat_info(stat_result)
+        ):
             return
 
-        if stat.S_ISDIR(stat_result.st_mode):
+        if is_dir:
             children = entry.get_children(db)
 
             times.append(time.monotonic_ns())

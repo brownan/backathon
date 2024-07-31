@@ -83,11 +83,32 @@ def edit_roots(ctx: click.Context):
         old_roots_set = set(str(r.decoded_path) for r in roots)
         new_roots = [line.strip() for line in new_text.split("\n")]
         new_roots = [line for line in new_roots if line]
+        roots_deleted = 0
+        roots_added = 0
         for to_del in set(old_roots_set).difference(new_roots):
             repo.del_root(pathlib.Path(to_del))
+            roots_deleted += 1
         for to_add in set(new_roots).difference(old_roots_set):
             repo.add_root(pathlib.Path(to_add))
-        click.echo("Roots modified")
+            roots_added += 1
+        if roots_added:
+            click.echo(
+                "{} root{} added".format(roots_added, "s" if roots_added != 1 else "")
+            )
+        if roots_deleted:
+            click.echo(
+                "{} root{} removed".format(
+                    roots_deleted, "s" if roots_deleted != 1 else ""
+                )
+            )
+        if roots_deleted:
+            # Deleting a root can cascade to a lot of metadata in the fsentry table. Recover
+            # a bit of space if there are any empty pages
+            click.echo("Cleaning up database...")
+            with repo.db.cursor() as cursor:
+                cursor.execute("PRAGMA incremental_vacuum")
+                cursor.fetchall()
+
     else:
         click.echo("Roots unmodified")
 
@@ -103,6 +124,10 @@ def edit_excludes(ctx: click.Context):
     if new_text is not None:
         new_lines = [line.strip() for line in new_text.split("\n")]
         new_lines = [line for line in new_lines if line and not line.startswith("#")]
+        # TODO: if any excludes were removed, mark all directory entries as new so that
+        # they are forced rescanned next scan
+        # TODO: if excludes were added, we can do a single pass over the fsentry table
+        # to remove any entries that are now excluded
         db.config_set_json("excludes", new_lines)
         click.echo("Exclude list updated")
     else:
@@ -159,13 +184,13 @@ class FileListRenderable:
 
 
 @main.command()
-@click.option("--force-scan", is_flag=True)
+@click.option("--rescan-dirs", is_flag=True)
 @click.option("--no-rich", is_flag=True)
 @click.pass_context
-def scan(ctx: click.Context, force_scan: bool, no_rich: bool = False):
+def scan(ctx: click.Context, rescan_dirs: bool, no_rich: bool = False):
     repo: backathon.repository.Backathon = ctx.obj["repo"]
     if no_rich:
-        repo.scan(force_scan=force_scan)
+        repo.scan(rescan_dirs=rescan_dirs)
     else:
         progress = Progress(
             TextColumn("[progress.description]{task.description}"),
@@ -187,7 +212,7 @@ def scan(ctx: click.Context, force_scan: bool, no_rich: bool = False):
 
         try:
             with Live(group, refresh_per_second=5, transient=True):
-                repo.scan(progress=update, force_scan=force_scan)
+                repo.scan(progress=update, rescan_dirs=rescan_dirs)
         finally:
             rich.print(progress)
 

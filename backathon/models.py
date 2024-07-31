@@ -42,7 +42,8 @@ class Object(BaseModel):
     type: str | None
     uploaded_size: int | None
     file_size: int | None
-    last_modified_time: datetime.datetime
+    last_modified_time: datetime.datetime | None
+    sha1: bytes | None
 
     def __str__(self):
         return self.objid.hex()[:7]

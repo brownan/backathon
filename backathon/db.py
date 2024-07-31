@@ -1,9 +1,9 @@
 import itertools
 import json
 import logging
+import os
 import pathlib
 import sqlite3
-import time
 from contextlib import contextmanager
 from operator import itemgetter
 from os import PathLike
@@ -28,7 +28,8 @@ MIGRATIONS: list[list[str]] = [
             type TEXT NOT NULL,
             uploaded_size INTEGER,
             file_size INTEGER,
-            last_modified_time TEXT
+            last_modified_time TEXT,
+            sha1 BLOB
         )""",
         """CREATE TABLE object_relations (
             parent BLOB NOT NULL REFERENCES objects (objid) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
@@ -62,8 +63,6 @@ class Database:
         self.path = pathlib.Path(path)
         self.conn = self._open_db()
         self._setup_db()
-        self._transaction_level: int = 0
-
         self._savepoint_num: int = 1
 
     def _open_db(self) -> sqlite3.Connection:
@@ -77,7 +76,10 @@ class Database:
         cursor.execute("PRAGMA journal_size_limit=10000000")
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.execute("PRAGMA optimize")
+        cursor.execute("PRAGMA auto_vacuum=INCREMENTAL")
+        if os.cpu_count() or 0 > 2:
+            cursor.execute("PRAGMA threads=2")
+        cursor.execute("PRAGMA optimize=0x10002")
         cursor.close()
         conn.row_factory = sqlite3.Row
         return conn
@@ -122,24 +124,14 @@ class Database:
     def get_objects(
         self, model_cls: Type[M], query: str, args: tuple[Any, ...] = ()
     ) -> Generator[M, None, None]:
-        t_execute = 0
-        t_fetch = 0
-        try:
-            with self.cursor(retdict=True) as cursor:
-                cursor.arraysize = 2048
-                t1 = time.monotonic_ns()
-                cursor.execute(query, args)
-                t_execute = time.monotonic_ns() - t1
-                while True:
-                    t2 = time.monotonic_ns()
-                    rows = cursor.fetchmany()
-                    t_fetch += time.monotonic_ns() - t2
-                    if not rows:
-                        break
-                    yield from map(model_cls.model_validate, rows)
-        finally:
-            pass
-            # print(f"{t_execute:11,d} {t_fetch:11,d}")
+        with self.cursor(retdict=True) as cursor:
+            cursor.arraysize = 2048
+            cursor.execute(query, args)
+            while True:
+                rows = cursor.fetchmany()
+                if not rows:
+                    break
+                yield from map(model_cls.model_validate, rows)
 
     def config_get(self, key: str, default: Any = None) -> Any:
         cursor = self.conn.cursor()

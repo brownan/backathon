@@ -25,7 +25,7 @@ class Backathon:
     def __init__(self, db: Database):
         self.db = db
 
-    def scan(self, skip_existing=False, progress=None, force_scan: bool = False):
+    def scan(self, skip_existing=False, progress=None, rescan_dirs: bool = False):
         """Scans the backup set
 
         The backup set is the set of files and directories starting at the
@@ -36,7 +36,10 @@ class Backathon:
         from backathon import scan
 
         scan.scan(
-            self.db, progress=progress, skip_existing=skip_existing, force_scan=force_scan
+            self.db,
+            progress=progress,
+            skip_existing=skip_existing,
+            rescan_dirs=rescan_dirs,
         )
 
     def add_root(self, root_path: pathlib.Path):
