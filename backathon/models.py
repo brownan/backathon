@@ -153,31 +153,17 @@ class FSEntry(BaseModel):
     def matches_glob(self, patterns: Collection[str]) -> bool:
         return any(self.decoded_path.match(pattern) for pattern in patterns)
 
-    def get_children(self, db: Database) -> list["FSEntry"]:
-        return list(
-            db.get_objects(FSEntry, "SELECT * FROM fsentry WHERE parent=?", (self.id,))
-        )
-
-    def delete_children(self, db: Database):
-        with db.cursor() as cursor:
-            cursor.execute(
-                """
-                DELETE FROM fsentry WHERE parent = ?
-            """,
-                (self.id,),
-            )
-
     def update(
-        self, db: Database, obj: bytes | None, new: bool, stat_result: os.stat_result
+        self, db: Database, objid: bytes | None, new: bool, stat_result: os.stat_result
     ):
         with db.cursor() as cursor:
             cursor.execute(
                 """
-                UPDATE fsentry SET obj=?, new=?, st_mode=?, st_mtime_ns=?, st_size=?
+                UPDATE fsentry SET objid=?, new=?, st_mode=?, st_mtime_ns=?, st_size=?
                 WHERE id=?
             """,
                 (
-                    obj,
+                    objid,
                     new,
                     stat_result.st_mode,
                     stat_result.st_mtime_ns,
@@ -185,7 +171,7 @@ class FSEntry(BaseModel):
                     self.id,
                 ),
             )
-        self.obj = obj
+        self.objid = objid
         self.new = new
         self._update_stat_info(stat_result)
 
@@ -203,4 +189,4 @@ class Snapshot(BaseModel):
         # Use the replacement error handler to turn any surrogate codepoints
         # into something that won't crash attempts to encode them
         bytepath = os.fsencode(self.path)
-        return bytepath.decode("utf-8", errors="replace")
+        return bytepath.decode(sys.getfilesystemencoding(), errors="replace")

@@ -96,9 +96,10 @@ def scan(
                 # grow unbounded, and saves our progress in case of a crash or abort.
                 # Also run optimize to make sure table metadata is updated for the query planner.
                 cursor.execute("COMMIT")
-                cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
                 cursor.execute("PRAGMA optimize")
+                cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
                 cursor.execute("BEGIN IMMEDIATE")
+
         with db.cursor() as cursor:
             # For any entries invalidated by the scan (had their obj field set to null),
             # also invalidate all parent entries recursively up to the root. This can be
@@ -144,8 +145,11 @@ def scan(
                     (stat.S_IFREG,),
                 )
                 to_backup_size = cursor.fetchone()[0]
-                logger.info("Total backup set size: %s", filesize.decimal(total_size))
-                logger.info("To backup: %s", filesize.decimal(to_backup_size))
+                if not total_size:
+                    logger.info("Empty backup set")
+                else:
+                    logger.info("Total backup set size: %s", filesize.decimal(total_size))
+                    logger.info("To backup: %s", filesize.decimal(to_backup_size))
             cursor.execute("ANALYZE fsentry")
 
 
@@ -193,8 +197,10 @@ def scan_entry(
             # which recursively cascades and deletes all children. But if a file is
             # recreated with the same name as the directory, it could leave orphaned
             # children in the database. While such children would be eventually cleaned
-            # up as those entries are scanned, this code goes and cleans them up.
-            entry.delete_children(db)
+            # up as those entries are scanned, this code goes and cleans them up
+            # preemptively.
+            with db.cursor() as cursor:
+                cursor.execute("DELETE FROM fsentry WHERE parent=?", (entry.id,))
 
         is_dir = stat.S_ISDIR(stat_result.st_mode)
 
@@ -206,7 +212,11 @@ def scan_entry(
             return
 
         if is_dir:
-            children = entry.get_children(db)
+            children = list(
+                db.get_objects(
+                    models.FSEntry, "SELECT * FROM fsentry WHERE parent=?", (entry.id,)
+                )
+            )
 
             times.append(time.monotonic_ns())
             # Check the directory entries on the filesystem against the database.

@@ -5,7 +5,6 @@ import itertools
 import os
 import stat
 import time
-from collections.abc import ByteString
 from contextlib import ExitStack
 from logging import getLogger
 from tempfile import SpooledTemporaryFile
@@ -13,7 +12,6 @@ from typing import (
     IO,
     Callable,
     Collection,
-    Iterator,
     Literal,
     NamedTuple,
     cast,
@@ -21,53 +19,13 @@ from typing import (
 
 import msgpack
 
-import backathon.repository
 from backathon import chunker, models
+from backathon.db import Database
 from backathon.exceptions import DependencyError
 
 logger = getLogger("backathon.backup")
 
-BATCH_SIZE = 100
-NUM_WORKERS = os.cpu_count()
-
-
-class Chunk(NamedTuple):
-    fsentry: models.FSEntry
-    chunk: ByteString
-
-
-def get_chunks(repo: backathon.repository.Backathon) -> Iterator[Chunk]:
-    """Yields chunks that need to be backed up"""
-    db = repo.db
-    with db.cursor() as cursor:
-        cursor.execute("SELECT COUNT(*) FROM fsentry WHERE obj IS NULL")
-        backup_total: int = cursor.fetchone()[0]
-        backup_count: int = 0
-
-        while True:
-            cursor.execute("SELECT 1 FROM fsentry WHERE obj IS NULL LIMIT 1")
-            if not cursor.fetchone():
-                break
-            ct = 0  # How many items were backed up this iteration
-            last_checkpoint = time.monotonic()
-
-            # Iterate over all entries that have no dependencies that aren't yet
-            # backed up. In other words, these are entries we can back up right now
-            # without waiting on another entry. The entries that have to wait are generally
-            # directories which don't yet have their files uploaded, so we can't yet build
-            # the directory listing hashes.
-            for entry in db.get_objects(
-                models.FSEntry,
-                """
-                SELECT * FROM fsentry
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM fsentry AS children
-                    WHERE children.parent = fsentry.id
-                    AND children.obj IS NULL
-                )
-            """,
-            ):
-                pass
+NUM_WORKERS = os.cpu_count() or 2
 
 
 class ObjectRequest(NamedTuple):
@@ -86,6 +44,140 @@ class ProcessingContext(NamedTuple):
 class ProcessingResult(NamedTuple):
     obj: models.Object
     stat_result: os.stat_result
+
+
+def backup(db: Database, context: ProcessingContext):
+    """Performs a backup of all outstanding files in the backup set"""
+
+    def backup_items_remain() -> bool:
+        with db.cursor() as c:
+            c.execute("SELECT 1 FROM fsentry WHERE objid IS NULL LIMIT 1")
+            return bool(c.fetchone())
+
+    def finalize_entry(t: concurrent.futures.Future):
+        nonlocal backup_count
+        backup_count += 1
+        entry: models.FSEntry = entries_by_task.pop(t)
+        result: ProcessingResult = t.result()
+        with db.atomic():
+            if result is None:
+                # Item was not backed up. We need to delete its entry
+                cursor.execute("DELETE FROM fsentry WHERE id=?", (entry.id,))
+            else:
+                # Update the fsentry
+                if result.obj.objid is None:
+                    raise RuntimeError(
+                        f"process_entry() returned an object with no id: {result.obj}"
+                    )
+                entry.update(
+                    db,
+                    result.obj.objid,
+                    new=False,
+                    stat_result=result.stat_result,
+                )
+
+    with ExitStack() as exitstack:
+        cursor = exitstack.enter_context(db.cursor())
+        cursor.execute("SELECT COUNT(*) FROM fsentry WHERE objid IS NULL")
+        backup_total = cursor.fetchone()[0]
+        backup_count = 0
+
+        tasks: set[concurrent.futures.Future] = set()
+        entries_by_task: dict[concurrent.futures.Future, models.FSEntry] = {}
+
+        executor = exitstack.enter_context(
+            concurrent.futures.ThreadPoolExecutor(max_workers=NUM_WORKERS)
+        )
+        exitstack.enter_context(db.atomic(immediate=True))
+        while backup_items_remain():
+            ct = 0
+            last_checkpoint = time.monotonic()
+
+            obj_iterator = db.get_objects(
+                models.Object,
+                """SELECT * FROM fsentry WHERE
+                objid IS NULL
+                AND NOT EXISTS (
+                    SELECT 1 FROM fsentry AS children WHERE
+                    children.parent = fsentry.id
+                    AND children.objid IS NULL
+                ) """,
+            )
+            for entry in obj_iterator:
+                ct += 1
+                if entry.objid is not None:
+                    raise RuntimeError(
+                        f"Backup query received entry already backed up! {entry}"
+                    )
+
+                child_entries = list(
+                    db.get_objects(
+                        models.FSEntry,
+                        "SELECT * FROM fsentry WHERE parent=?",
+                        (entry.id,),
+                    )
+                )
+
+                task = executor.submit(process_entry, entry, child_entries, context)
+                entries_by_task[task] = entry
+                tasks.add(task)
+
+                if len(tasks) >= NUM_WORKERS + 1:
+                    done, tasks = concurrent.futures.wait(
+                        tasks,
+                        timeout=None,
+                        return_when=concurrent.futures.FIRST_COMPLETED,
+                    )
+
+                    for task in done:
+                        finalize_entry(task)
+
+                if time.monotonic() - last_checkpoint > 30:
+                    # Perform a periodic checkpoint. We have to break out of the inner
+                    # loop because the iterator holds a db cursor open.
+                    break
+
+            obj_iterator.close()
+            # Checkpoint now that the object iterator cursor has closed
+            cursor.execute("COMMIT")
+            cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
+            cursor.execute("PRAGMA optimize")
+            cursor.execute("BEGIN IMMEDIATE")
+
+            # Make sure we're making progress and at least one item was backed up this
+            # iteration, or items are still being processed. Otherwise we may be caught in an
+            # infinite loop.
+            if ct == 0 and not tasks:
+                raise RuntimeError("Backup loop found no items")
+
+            # Collect any remaining tasks from this loop iteration before moving on to the next.
+            # We have to make sure all tasks are finished before performing another query for
+            # new ready-to-backup entries, because any entries currently being processed would
+            # show up in that query again and get backed up a second time.
+            # This flushes the queue and stalls the workers briefly, but it doesn't end up costing
+            # all that much time compared to the time spent working. If this is turns out to be a
+            # problem, then it may be better to find a different periodic-checkpoint strategy or
+            # forego the periodic checkpointing altogether.
+            for task in concurrent.futures.as_completed(tasks):
+                finalize_entry(task)
+            tasks.clear()
+
+    # Exiting the outer "while" loop and the context with the executor
+
+    # Add a snapshot object for each root
+    now = datetime.datetime.now(tz=datetime.UTC)
+    with db.atomic(immediate=True), db.cursor() as cursor:
+        for entry in db.get_objects(
+            models.FSEntry, "SELECT * FROM fsentry WHERE parent IS NULL"
+        ):
+            if entry.objid is None:
+                raise RuntimeError(f"Root not backed up {entry}")
+            cursor.execute(
+                "INSERT INTO snapshots (path, root, date) VALUES (?,?,?)",
+                (entry.path, entry.objid, now),
+            )
+        cursor.execute("PRAGMA optimize")
+        cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
 
 
 def process_entry(
@@ -271,7 +363,7 @@ def process_entry(
         return None
 
 
-def backup(repo, progress=None, single=False):
+def backup_old(repo, progress=None, single=False):
     """Perform a backup
 
     This is usually called from Repository.backup() and is tightly integrated
