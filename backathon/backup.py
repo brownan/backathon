@@ -16,6 +16,7 @@ from typing import (
     Iterator,
     Literal,
     NamedTuple,
+    cast,
 )
 
 import msgpack
@@ -74,7 +75,7 @@ class ObjectRequest(NamedTuple):
     payload: IO[bytes]
     file_size: int | None = None
     last_modified_time: datetime.datetime | None = None
-    children: Collection[tuple[models.Object, str | None]] = ()
+    children: Collection[tuple[bytes, str | None]] = ()
 
 
 class ProcessingContext(NamedTuple):
@@ -82,19 +83,38 @@ class ProcessingContext(NamedTuple):
     inline_threshold: int = 2**20
 
 
+class ProcessingResult(NamedTuple):
+    obj: models.Object
+    stat_result: os.stat_result
+
+
 def process_entry(
     entry: models.FSEntry, children: list[models.FSEntry], context: ProcessingContext
-) -> models.Object | None:
-    """Processes a single entry through the entire upload process
+) -> ProcessingResult | None:
+    """Prepares the payloads for an FSEntry and performs the calls to upload them
 
     This is designed to be run from a separate thread. This function therefore should not
     use any global state, and should only manipulate database / repo state via the provided
     context methods.
+
+    This function may call context.upload() one or more times to upload new objects to the remote
+    repository. The context.upload() implementation is responsible for:
+    * Uploading the object
+    * Adding an entry to the objects table corresponding to the uploaded object
+    * Adding any given child relations to the object_relations table
+    * Creating the models.Object instance
+    * Returning the models.Object from the context.upload() call
+
+    When this function returns an Object, the caller is responsible for updating the FSEntry
+    row in the database with the new Object's objid and new stat info.
+
+    When this function returns None, the caller is responsible for deleting the FSEntry row from
+    the database.
     """
     try:
         stat_result = os.lstat(entry.path)
     except (FileNotFoundError, NotADirectoryError):
-        logger.info("File disappeared: %s", entry.printable_path)
+        logger.info("%s: File disappeared", entry.printable_path)
         return None
 
     if entry.st_mode != stat_result.st_mode:
@@ -103,11 +123,11 @@ def process_entry(
         )
         return
 
+    packer = msgpack.Packer()
     if stat.S_ISREG(stat_result.st_mode):
         # Regular file
         payload = SpooledTemporaryFile()
         child_chunks: list[models.Object] = []
-        packer = msgpack.Packer()
         payload.write(packer.pack("inode"))
         payload.write(
             packer.pack(
@@ -149,14 +169,14 @@ def process_entry(
                     payload.write(packer.pack(("chunklist", chunk_list)))
 
         except FileNotFoundError:
-            logger.info("File disappeared: %s", entry.printable_path)
+            logger.info("%s: File disappeared", entry.printable_path)
             return None
         except OSError as e:
-            logger.error("%s: Error when reading. %s", entry.printable_path, e)
+            logger.error("%s: Error when reading: %s", entry.printable_path, e)
             return None
 
         payload.seek(0)
-        entry_obj = context.upload(
+        file_obj = context.upload(
             ObjectRequest(
                 type="inode",
                 file_size=stat_result.st_size,
@@ -164,17 +184,88 @@ def process_entry(
                     stat_result.st_mtime, datetime.UTC
                 ),
                 payload=payload,
-                children=[(c, None) for c in child_chunks],
+                children=[(c.objid, None) for c in child_chunks],
             )
         )
-        return entry_obj
+        return ProcessingResult(
+            obj=file_obj,
+            stat_result=stat_result,
+        )
 
     elif stat.S_ISDIR(stat_result.st_mode):
         # Directory
-        raise NotImplementedError
+        if any(c.objid is None for c in children):
+            raise DependencyError(
+                "{} depends on these paths, but they haven't been backed up yet. This is "
+                "a bug. {}".format(
+                    entry.printable_path,
+                    ", ".join(c.printable_path for c in children if c.objid is None),
+                )
+            )
+        buf = io.BytesIO()
+        buf.write(packer.pack("tree"))
+        buf.write(
+            packer.pack(
+                dict(
+                    uid=stat_result.st_uid,
+                    gid=stat_result.st_gid,
+                    mode=stat_result.st_mode,
+                    mtime=stat_result.st_mtime_ns,
+                    atime=stat_result.st_atime_ns,
+                )
+            )
+        )
+        buf.write(packer.pack([((e.path, e.objid) for e in children)]))
+        buf.seek(0)
+        dir_obj = context.upload(
+            ObjectRequest(
+                type="tree",
+                last_modified_time=datetime.datetime.fromtimestamp(
+                    stat_result.st_mtime, tz=datetime.UTC
+                ),
+                payload=buf,
+                children=[
+                    (cast(bytes, c.objid), os.path.basename(c.printable_path))
+                    for c in children
+                ],
+            )
+        )
+        return ProcessingResult(
+            obj=dir_obj,
+            stat_result=stat_result,
+        )
+
     elif stat.S_ISLNK(stat_result.st_mode):
         # Symlink
-        raise NotImplementedError
+        buf = io.BytesIO()
+        buf.write(packer.pack("symlink"))
+        buf.write(
+            packer.pack(
+                dict(
+                    uid=stat_result.st_uid,
+                    gid=stat_result.st_gid,
+                    mode=stat_result.st_mode,
+                    mtime=stat_result.st_mtime_ns,
+                    atime=stat_result.st_atime_ns,
+                )
+            )
+        )
+        buf.write(packer.pack(os.readlink(entry.path)))
+        buf.seek(0)
+        symlink_obj = context.upload(
+            ObjectRequest(
+                type="symlink",
+                last_modified_time=datetime.datetime.fromtimestamp(
+                    stat_result.st_mtime, tz=datetime.UTC
+                ),
+                payload=buf,
+            )
+        )
+        return ProcessingResult(
+            obj=symlink_obj,
+            stat_result=stat_result,
+        )
+
     else:
         logger.warning("%s: Unknown file type. Ignoring.", entry.printable_path)
         return None

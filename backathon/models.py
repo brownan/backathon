@@ -95,7 +95,7 @@ class FSEntry(BaseModel):
     """
 
     id: int
-    obj: bytes | None = None
+    objid: bytes | None = None
 
     # Paths are stored as bytes here and in the database as a reminder that the
     # decoded strings may not be printable due to decoding errors -- we can't

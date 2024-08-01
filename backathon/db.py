@@ -38,7 +38,7 @@ MIGRATIONS: list[list[str]] = [
         )""",
         """CREATE TABLE fsentry (
             id INTEGER PRIMARY KEY,
-            obj BLOB REFERENCES objects (objid) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
+            objid BLOB REFERENCES objects (objid) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
             path BLOB UNIQUE NOT NULL,
             parent INTEGER REFERENCES fsentry (id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
             new BOOLEAN DEFAULT TRUE,

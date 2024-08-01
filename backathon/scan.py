@@ -109,23 +109,23 @@ def scan(
                 WITH RECURSIVE ancestors(id) AS (
                     SELECT fsentry.id FROM fsentry
                         INNER JOIN fsentry AS p ON (fsentry.parent = p.id)
-                        WHERE fsentry.obj IS NULL AND p.obj IS NOT NULL
+                        WHERE fsentry.objid IS NULL AND p.objid IS NOT NULL
                     UNION ALL
                     SELECT fsentry.parent FROM fsentry
                         INNER JOIN ancestors ON (fsentry.id = ancestors.id)
                         WHERE fsentry.parent IS NOT NULL
                 )
-                UPDATE fsentry SET obj=NULL
+                UPDATE fsentry SET objid=NULL
                 WHERE fsentry.id IN ancestors
             """
             )
             if logger.isEnabledFor(logging.INFO):
                 cursor.execute(
-                    "SELECT COUNT(*) FROM fsentry WHERE obj IS NULL AND st_mode & ?",
+                    "SELECT COUNT(*) FROM fsentry WHERE objid IS NULL AND st_mode & ?",
                     (stat.S_IFREG,),
                 )
                 n_files = cursor.fetchone()[0]
-                cursor.execute("SELECT COUNT(*) FROM fsentry WHERE obj IS NULL")
+                cursor.execute("SELECT COUNT(*) FROM fsentry WHERE objid IS NULL")
                 n_entries = cursor.fetchone()[0]
                 logger.info(
                     "{:,d} file{} and {:,d} {} need updating".format(
@@ -140,7 +140,7 @@ def scan(
                 )
                 total_size = cursor.fetchone()[0]
                 cursor.execute(
-                    "SELECT SUM(st_size) FROM fsentry WHERE obj IS NULL AND st_mode & ?",
+                    "SELECT SUM(st_size) FROM fsentry WHERE objid IS NULL AND st_mode & ?",
                     (stat.S_IFREG,),
                 )
                 to_backup_size = cursor.fetchone()[0]
