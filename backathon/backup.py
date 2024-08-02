@@ -38,6 +38,7 @@ class ObjectRequest(NamedTuple):
 
 class ProcessingContext(NamedTuple):
     upload: Callable[[ObjectRequest], models.Object]
+    put_snapshot: Callable[[bytes, bytes, datetime.datetime], None]
     inline_threshold: int = 2**20
 
 
@@ -180,10 +181,7 @@ def backup(db: Database, context: ProcessingContext):
         ):
             if entry.objid is None:
                 raise RuntimeError(f"Root not backed up {entry}")
-            cursor.execute(
-                "INSERT INTO snapshots (path, root, date) VALUES (?,?,?)",
-                (entry.path, entry.objid, now),
-            )
+            context.put_snapshot(entry.path, entry.objid, now)
         cursor.execute("PRAGMA optimize")
         cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
 
