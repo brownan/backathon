@@ -9,7 +9,7 @@ import time
 from asyncio import Future
 from contextlib import ExitStack
 from logging import getLogger
-from tempfile import SpooledTemporaryFile
+from tempfile import SpooledTemporaryFile, TemporaryFile
 from typing import (
     IO,
     Awaitable,
@@ -297,7 +297,7 @@ def process_entry(
                     else:
                         chunk_iter = chunker.FixedChunker(fobj)
                     for pos, chunk in chunk_iter:
-                        buf = SpooledTemporaryFile()
+                        buf = TemporaryFile()
                         buf.write(packer.pack("blob"))
                         buf.write(packer.pack(chunk))
                         buf.seek(0)
