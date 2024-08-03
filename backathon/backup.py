@@ -1,3 +1,4 @@
+import asyncio
 import concurrent.futures
 import datetime
 import io
@@ -5,11 +6,13 @@ import itertools
 import os
 import stat
 import time
+from asyncio import Future
 from contextlib import ExitStack
 from logging import getLogger
 from tempfile import SpooledTemporaryFile
 from typing import (
     IO,
+    Awaitable,
     Callable,
     Collection,
     Literal,
@@ -26,6 +29,7 @@ from backathon.exceptions import DependencyError
 logger = getLogger("backathon.backup")
 
 NUM_WORKERS = os.cpu_count() or 2
+INLINE_THRESHOLD = 2**20
 
 
 class ObjectRequest(NamedTuple):
@@ -47,7 +51,11 @@ class ProcessingResult(NamedTuple):
     stat_result: os.stat_result
 
 
-def backup(db: Database, context: ProcessingContext):
+async def backup(
+    db: Database,
+    put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
+    put_snapshot: Callable[[bytes, bytes, datetime.datetime], None],
+):
     """Performs a backup of all outstanding files in the backup set"""
 
     def backup_items_remain() -> bool:
@@ -55,22 +63,24 @@ def backup(db: Database, context: ProcessingContext):
             c.execute("SELECT 1 FROM fsentry WHERE objid IS NULL LIMIT 1")
             return bool(c.fetchone())
 
-    def finalize_entry(t: concurrent.futures.Future):
+    def finalize_entry(t: Future):
         nonlocal backup_count
         backup_count += 1
-        entry: models.FSEntry = entries_by_task.pop(t)
-        result: ProcessingResult = t.result()
+        e: models.FSEntry
+        result: ProcessingResult | None
+        # Caller must ensure the future's result is available
+        e, result = t.result()
         with db.atomic():
             if result is None:
                 # Item was not backed up. We need to delete its entry
-                cursor.execute("DELETE FROM fsentry WHERE id=?", (entry.id,))
+                cursor.execute("DELETE FROM fsentry WHERE id=?", (e.id,))
             else:
                 # Update the fsentry
                 if result.obj.objid is None:
                     raise RuntimeError(
                         f"process_entry() returned an object with no id: {result.obj}"
                     )
-                entry.update(
+                e.update(
                     db,
                     result.obj.objid,
                     new=False,
@@ -83,8 +93,7 @@ def backup(db: Database, context: ProcessingContext):
         backup_total = cursor.fetchone()[0]
         backup_count = 0
 
-        tasks: set[concurrent.futures.Future] = set()
-        entries_by_task: dict[concurrent.futures.Future, models.FSEntry] = {}
+        tasks: set[Future] = set()
 
         executor = exitstack.enter_context(
             concurrent.futures.ThreadPoolExecutor(max_workers=NUM_WORKERS)
@@ -124,15 +133,22 @@ def backup(db: Database, context: ProcessingContext):
                     )
                 )
 
-                task = executor.submit(process_entry, entry, child_entries, context)
-                entries_by_task[task] = entry
-                tasks.add(task)
+                tasks.add(
+                    asyncio.create_task(
+                        _dispatch(
+                            executor,
+                            entry,
+                            child_entries,
+                            put_object,
+                        )
+                    )
+                )
 
                 if len(tasks) >= 100:
-                    done, tasks = concurrent.futures.wait(
+                    done, tasks = await asyncio.wait(
                         tasks,
                         timeout=None,
-                        return_when=concurrent.futures.FIRST_COMPLETED,
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
 
                     for task in done:
@@ -166,7 +182,7 @@ def backup(db: Database, context: ProcessingContext):
             # problem, then it may be better to find a different periodic-checkpoint strategy or
             # forego the periodic checkpointing altogether.
             logger.debug("Flushing queue")
-            for task in concurrent.futures.as_completed(tasks):
+            for task in asyncio.as_completed(tasks):
                 finalize_entry(task)
             tasks.clear()
 
@@ -181,13 +197,42 @@ def backup(db: Database, context: ProcessingContext):
         ):
             if entry.objid is None:
                 raise RuntimeError(f"Root not backed up {entry}")
-            context.put_snapshot(entry.path, entry.objid, now)
+            put_snapshot(entry.path, entry.objid, now)
         cursor.execute("PRAGMA optimize")
         cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
 
 
+async def _dispatch(
+    executor: concurrent.futures.Executor,
+    entry: models.FSEntry,
+    child_entries: list[models.FSEntry],
+    put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
+) -> tuple[models.FSEntry, ProcessingResult | None]:
+    """Shim to dispatch a sub-thread to process an entry
+
+    Returns a tuple of the FSEntry that was processed and the ProcessingResult from
+    process_entry()
+
+    """
+    loop = asyncio.get_running_loop()
+
+    # Called from the sub-threads to upload an object, scheduling the upload code to run
+    # in this thread
+    def upload(req: ObjectRequest) -> models.Object:
+        fut = asyncio.run_coroutine_threadsafe(put_object(req), loop)
+        return fut.result()
+
+    result: ProcessingResult | None
+    result = await loop.run_in_executor(
+        executor, process_entry, entry, child_entries, upload
+    )
+    return entry, result
+
+
 def process_entry(
-    entry: models.FSEntry, children: list[models.FSEntry], context: ProcessingContext
+    entry: models.FSEntry,
+    children: list[models.FSEntry],
+    upload: Callable[[ObjectRequest], models.Object],
 ) -> ProcessingResult | None:
     """Prepares the payloads for an FSEntry and performs the calls to upload them
 
@@ -243,7 +288,7 @@ def process_entry(
 
         try:
             with _open_file(entry.path) as fobj:
-                if stat_result.st_size < context.inline_threshold:
+                if stat_result.st_size < INLINE_THRESHOLD:
                     payload.write(packer.pack(("immediate", fobj.read())))
                 else:
                     chunk_list: list[tuple[int, bytes]] = []
@@ -256,7 +301,7 @@ def process_entry(
                         buf.write(packer.pack("blob"))
                         buf.write(packer.pack(chunk))
                         buf.seek(0)
-                        chunk_obj = context.upload(
+                        chunk_obj = upload(
                             ObjectRequest(
                                 type="blob",
                                 payload=buf,
@@ -274,7 +319,7 @@ def process_entry(
             return None
 
         payload.seek(0)
-        file_obj = context.upload(
+        file_obj = upload(
             ObjectRequest(
                 type="inode",
                 file_size=stat_result.st_size,
@@ -315,7 +360,7 @@ def process_entry(
         )
         buf.write(packer.pack([((e.path, e.objid) for e in children)]))
         buf.seek(0)
-        dir_obj = context.upload(
+        dir_obj = upload(
             ObjectRequest(
                 type="tree",
                 last_modified_time=datetime.datetime.fromtimestamp(
@@ -350,7 +395,7 @@ def process_entry(
         )
         buf.write(packer.pack(os.readlink(entry.path)))
         buf.seek(0)
-        symlink_obj = context.upload(
+        symlink_obj = upload(
             ObjectRequest(
                 type="symlink",
                 last_modified_time=datetime.datetime.fromtimestamp(
