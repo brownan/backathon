@@ -51,9 +51,8 @@ MIGRATIONS: list[list[str]] = [
         """CREATE TABLE snapshots (
             path BLOB NOT NULL,
             root BLOB NOT NULL REFERENCES objects (objid) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
-            date TEXT
+            timestamp TEXT
         )""",
-        """CREATE INDEX snapshots_date ON snapshots(date)""",
     ]
 ]
 

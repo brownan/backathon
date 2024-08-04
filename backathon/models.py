@@ -6,13 +6,15 @@ import pathlib
 import sys
 from collections.abc import Collection
 from functools import cached_property
-from typing import Literal
+from typing import Literal, NewType
 
 from pydantic import BaseModel
 
 from backathon.db import Database
 
 scanlogger = logging.getLogger("backathon.scan")
+
+ObjIDType = NewType("ObjIDType", bytes)
 
 
 class Object(BaseModel):
@@ -34,7 +36,7 @@ class Object(BaseModel):
     # To get the hex representation, use objid.hex()
     # To create a bytes representation from a hex representation,
     # use bytes.fromhex(hex_representation)
-    objid: bytes
+    objid: ObjIDType
 
     # These fields are cached about the object. They may or may not have
     # values depending on the object type. Additionally, they may not be
@@ -46,8 +48,16 @@ class Object(BaseModel):
     last_modified_time: datetime.datetime | None
     sha1: bytes | None
 
+    @property
+    def objid_hex(self):
+        return self.objid.hex()
+
+    @property
+    def objid_int(self):
+        return int.from_bytes(self.objid, "little")
+
     def __str__(self):
-        return self.objid.hex()[:7]
+        return self.objid_hex[:7]
 
 
 class ObjectRelation(BaseModel):
@@ -69,8 +79,8 @@ class ObjectRelation(BaseModel):
     possible.
     """
 
-    parent: bytes
-    child: bytes
+    parent: ObjIDType
+    child: ObjIDType
     name: str | None
 
     def __repr__(self):
@@ -95,7 +105,7 @@ class FSEntry(BaseModel):
     """
 
     id: int
-    objid: bytes | None = None
+    objid: ObjIDType | None = None
 
     # Paths are stored as bytes here and in the database as a reminder that the
     # decoded strings may not be printable due to decoding errors -- we can't
@@ -154,7 +164,11 @@ class FSEntry(BaseModel):
         return any(self.decoded_path.match(pattern) for pattern in patterns)
 
     def update(
-        self, db: Database, objid: bytes | None, new: bool, stat_result: os.stat_result
+        self,
+        db: Database,
+        objid: ObjIDType | None,
+        new: bool,
+        stat_result: os.stat_result,
     ):
         with db.cursor() as cursor:
             cursor.execute(
@@ -180,8 +194,8 @@ class Snapshot(BaseModel):
     """A snapshot of a filesystem at a particular time"""
 
     path: bytes
-    root: bytes
-    date: datetime.datetime
+    root: ObjIDType
+    timestamp: datetime.datetime
 
     @property
     def printablepath(self):

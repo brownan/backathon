@@ -1,30 +1,30 @@
 import asyncio
 import concurrent.futures
 import datetime
+import enum
 import io
-import itertools
 import os
 import stat
 import time
 from asyncio import Future
 from contextlib import ExitStack
 from logging import getLogger
-from tempfile import SpooledTemporaryFile
 from typing import (
     IO,
     Awaitable,
     Callable,
-    Collection,
-    Literal,
     NamedTuple,
+    Self,
     cast,
 )
 
 import msgpack
+from pydantic import BaseModel
 
 from backathon import chunker, models
 from backathon.db import Database
 from backathon.exceptions import DependencyError
+from backathon.models import ObjIDType
 
 logger = getLogger("backathon.backup")
 
@@ -32,21 +32,97 @@ NUM_WORKERS = os.cpu_count() or 2
 INLINE_THRESHOLD = 2**20
 
 
+class ObjectType(str, enum.Enum):
+    INODE = "inode"
+    BLOB = "blob"
+    TREE = "tree"
+    SYMLINK = "symlink"
+
+
+class ObjectStats(BaseModel):
+    """Information in the object payload header related to entries on the filesystem
+
+    e.g. inode, tree, and symlink all have these fields in common, but blobs don't
+
+    """
+
+    size: int
+    inode: int
+    uid: int
+    gid: int
+    mode: int
+    # in nanoseconds since the epoch
+    mtime: int
+    atime: int
+
+    @classmethod
+    def from_stat_result(cls, stat_result: os.stat_result):
+        return cls(
+            size=stat_result.st_size,
+            inode=stat_result.st_ino,
+            uid=stat_result.st_uid,
+            gid=stat_result.st_gid,
+            mode=stat_result.st_mode,
+            mtime=stat_result.st_mtime_ns,
+            atime=stat_result.st_atime_ns,
+        )
+
+
+class BlobRef(NamedTuple):
+    pos: int
+    objid: ObjIDType
+
+
+class EntryRef(NamedTuple):
+    name: str
+    objid: ObjIDType
+
+
+class ObjectHeader(BaseModel):
+    """Information that gets serialized into the top of every object payload"""
+
+    type: ObjectType
+    payload_size: int = 0
+    stats: ObjectStats | None = None
+    blobs: list[BlobRef] | None = None
+    entries: list[EntryRef] | None = None
+
+    def model_dump_msgpack(self) -> bytes:
+        return cast(bytes, msgpack.packb(self.model_dump(exclude_defaults=True)))
+
+    @classmethod
+    def model_load_msgpack(cls, data: bytes) -> Self:
+        return cls.model_validate(msgpack.unpackb(data))
+
+    @classmethod
+    def read_header(cls, buf: IO[bytes]) -> Self:
+        """Reads the header from the stream and returns the ObjectHeader instance
+
+        Leaves the stream open for reading at the position directly after the header
+
+        """
+        unpacker = msgpack.Unpacker(buf)
+        header_data = unpacker.unpack()
+        return cls.model_validate(header_data)
+
+
 class ObjectRequest(NamedTuple):
-    type: Literal["inode", "blob", "tree", "symlink"]
-    payload: IO[bytes]
-    file_size: int | None = None
-    last_modified_time: datetime.datetime | None = None
-    children: Collection[tuple[bytes, str | None]] = ()
+    """Used by the backup code to pass information about an object to be uploaded to the upload
+    code
+
+    """
+
+    # This doesn't just hold an ObjectHeader because the payload size isn't
+    # known yet. The payload here is the raw data, but it may still be compressed and
+    # encrypted. So the final payload size and final ObjectHeader will be calculated later.
+    type: ObjectType
+    stats: ObjectStats | None
+    payload: IO[bytes] | None
+    blobs: list[BlobRef] | None = None
+    entries: list[EntryRef] | None = None
 
 
-class ProcessingContext(NamedTuple):
-    upload: Callable[[ObjectRequest], models.Object]
-    put_snapshot: Callable[[bytes, bytes, datetime.datetime], None]
-    inline_threshold: int = 2**20
-
-
-class ProcessingResult(NamedTuple):
+class _ProcessingResult(NamedTuple):
     obj: models.Object
     stat_result: os.stat_result
 
@@ -54,7 +130,7 @@ class ProcessingResult(NamedTuple):
 async def backup(
     db: Database,
     put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
-    put_snapshot: Callable[[bytes, bytes, datetime.datetime], None],
+    put_snapshot: Callable[[models.Snapshot], None],
 ):
     """Performs a backup of all outstanding files in the backup set"""
 
@@ -63,11 +139,9 @@ async def backup(
             c.execute("SELECT 1 FROM fsentry WHERE objid IS NULL LIMIT 1")
             return bool(c.fetchone())
 
-    def finalize_entry(t: Future):
+    def finalize_entry(t: Future[tuple[models.FSEntry, _ProcessingResult | None]]):
         nonlocal backup_count
         backup_count += 1
-        e: models.FSEntry
-        result: ProcessingResult | None
         # Caller must ensure the future's result is available
         e, result = t.result()
         with db.atomic():
@@ -93,7 +167,7 @@ async def backup(
         backup_total = cursor.fetchone()[0]
         backup_count = 0
 
-        tasks: set[Future] = set()
+        tasks: set[Future[tuple[models.FSEntry, _ProcessingResult | None]]] = set()
 
         executor = exitstack.enter_context(
             concurrent.futures.ThreadPoolExecutor(max_workers=NUM_WORKERS)
@@ -197,7 +271,9 @@ async def backup(
         ):
             if entry.objid is None:
                 raise RuntimeError(f"Root not backed up {entry}")
-            put_snapshot(entry.path, entry.objid, now)
+            put_snapshot(
+                models.Snapshot(path=entry.path, root=entry.objid, timestamp=now)
+            )
         cursor.execute("PRAGMA optimize")
         cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
 
@@ -207,7 +283,7 @@ async def _dispatch(
     entry: models.FSEntry,
     child_entries: list[models.FSEntry],
     put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
-) -> tuple[models.FSEntry, ProcessingResult | None]:
+) -> tuple[models.FSEntry, _ProcessingResult | None]:
     """Shim to dispatch a sub-thread to process an entry
 
     Returns a tuple of the FSEntry that was processed and the ProcessingResult from
@@ -222,7 +298,7 @@ async def _dispatch(
         fut = asyncio.run_coroutine_threadsafe(put_object(req), loop)
         return fut.result()
 
-    result: ProcessingResult | None
+    result: _ProcessingResult | None
     result = await loop.run_in_executor(
         executor, process_entry, entry, child_entries, upload
     )
@@ -233,7 +309,7 @@ def process_entry(
     entry: models.FSEntry,
     children: list[models.FSEntry],
     upload: Callable[[ObjectRequest], models.Object],
-) -> ProcessingResult | None:
+) -> _ProcessingResult | None:
     """Prepares the payloads for an FSEntry and performs the calls to upload them
 
     This is designed to be run from a separate thread. This function therefore should not
@@ -266,50 +342,32 @@ def process_entry(
         )
         return
 
-    packer = msgpack.Packer()
     if stat.S_ISREG(stat_result.st_mode):
         # Regular file
-        payload = SpooledTemporaryFile()
-        child_chunks: list[models.Object] = []
-        payload.write(packer.pack("inode"))
-        payload.write(
-            packer.pack(
-                dict(
-                    size=stat_result.st_size,
-                    inode=stat_result.st_ino,
-                    uid=stat_result.st_uid,
-                    gid=stat_result.st_gid,
-                    mode=stat_result.st_mode,
-                    mtime=stat_result.st_mtime_ns,
-                    atime=stat_result.st_atime_ns,
-                )
-            )
-        )
+        payload: IO[bytes] | None
+        blob_objs: list[tuple[int, models.Object]] = []
 
         try:
             with _open_file(entry.path) as fobj:
                 if stat_result.st_size < INLINE_THRESHOLD:
-                    payload.write(packer.pack(("immediate", fobj.read())))
+                    # Upload the file as a payload in this object
+                    payload = fobj
                 else:
-                    chunk_list: list[tuple[int, bytes]] = []
+                    # Upload the file as blob objects and reference them from this one
+                    payload = None
                     if stat_result.st_size <= 30 * 2**20:
                         chunk_iter = [(0, fobj.read())]
                     else:
                         chunk_iter = chunker.FixedChunker(fobj)
                     for pos, chunk in chunk_iter:
-                        buf = SpooledTemporaryFile()
-                        buf.write(packer.pack("blob"))
-                        buf.write(packer.pack(chunk))
-                        buf.seek(0)
                         chunk_obj = upload(
                             ObjectRequest(
-                                type="blob",
-                                payload=buf,
+                                type=ObjectType.BLOB,
+                                stats=None,
+                                payload=io.BytesIO(chunk),
                             )
                         )
-                        child_chunks.append(chunk_obj)
-                        chunk_list.append((pos, chunk_obj.objid))
-                    payload.write(packer.pack(("chunklist", chunk_list)))
+                        blob_objs.append((pos, chunk_obj))
 
         except FileNotFoundError:
             logger.info("%s: File disappeared", entry.printable_path)
@@ -318,19 +376,15 @@ def process_entry(
             logger.error("%s: Error when reading: %s", entry.printable_path, e)
             return None
 
-        payload.seek(0)
         file_obj = upload(
             ObjectRequest(
-                type="inode",
-                file_size=stat_result.st_size,
-                last_modified_time=datetime.datetime.fromtimestamp(
-                    stat_result.st_mtime, datetime.UTC
-                ),
+                type=ObjectType.INODE,
+                stats=ObjectStats.from_stat_result(stat_result),
                 payload=payload,
-                children=[(c.objid, None) for c in child_chunks],
+                blobs=[BlobRef(objid=obj.objid, pos=pos) for pos, obj in blob_objs],
             )
         )
-        return ProcessingResult(
+        return _ProcessingResult(
             obj=file_obj,
             stat_result=stat_result,
         )
@@ -345,66 +399,35 @@ def process_entry(
                     ", ".join(c.printable_path for c in children if c.objid is None),
                 )
             )
-        buf = io.BytesIO()
-        buf.write(packer.pack("tree"))
-        buf.write(
-            packer.pack(
-                dict(
-                    uid=stat_result.st_uid,
-                    gid=stat_result.st_gid,
-                    mode=stat_result.st_mode,
-                    mtime=stat_result.st_mtime_ns,
-                    atime=stat_result.st_atime_ns,
-                )
-            )
-        )
-        buf.write(packer.pack([((e.path, e.objid) for e in children)]))
-        buf.seek(0)
         dir_obj = upload(
             ObjectRequest(
-                type="tree",
-                last_modified_time=datetime.datetime.fromtimestamp(
-                    stat_result.st_mtime, tz=datetime.UTC
-                ),
-                payload=buf,
-                children=[
-                    (cast(bytes, c.objid), os.path.basename(c.printable_path))
+                type=ObjectType.TREE,
+                stats=ObjectStats.from_stat_result(stat_result),
+                payload=None,
+                entries=[
+                    EntryRef(
+                        name=os.path.basename(c.printable_path),
+                        objid=cast(ObjIDType, c.objid),
+                    )
                     for c in children
                 ],
             )
         )
-        return ProcessingResult(
+        return _ProcessingResult(
             obj=dir_obj,
             stat_result=stat_result,
         )
 
     elif stat.S_ISLNK(stat_result.st_mode):
         # Symlink
-        buf = io.BytesIO()
-        buf.write(packer.pack("symlink"))
-        buf.write(
-            packer.pack(
-                dict(
-                    uid=stat_result.st_uid,
-                    gid=stat_result.st_gid,
-                    mode=stat_result.st_mode,
-                    mtime=stat_result.st_mtime_ns,
-                    atime=stat_result.st_atime_ns,
-                )
-            )
-        )
-        buf.write(packer.pack(os.readlink(entry.path)))
-        buf.seek(0)
         symlink_obj = upload(
             ObjectRequest(
-                type="symlink",
-                last_modified_time=datetime.datetime.fromtimestamp(
-                    stat_result.st_mtime, tz=datetime.UTC
-                ),
-                payload=buf,
+                type=ObjectType.SYMLINK,
+                stats=ObjectStats.from_stat_result(stat_result),
+                payload=io.BytesIO(os.readlink(entry.path)),
             )
         )
-        return ProcessingResult(
+        return _ProcessingResult(
             obj=symlink_obj,
             stat_result=stat_result,
         )
@@ -412,6 +435,9 @@ def process_entry(
     else:
         logger.warning("%s: Unknown file type. Ignoring.", entry.printable_path)
         return None
+
+
+_has_noatime = True
 
 
 def _open_file(path):
@@ -425,17 +451,20 @@ def _open_file(path):
     # Add O_BINARY on windows
     flags |= getattr(os, "O_BINARY", 0)
 
-    try:
-        flags_noatime = flags | os.O_NOATIME
-    except AttributeError:
-        return os.fdopen(os.open(path, flags), "rb")
+    global _has_noatime
+    if _has_noatime:
+        try:
+            flags_noatime = flags | os.O_NOATIME
+        except AttributeError:
+            _has_noatime = False
+        else:
+            # Add O_NOATIME if available. This may fail with permission denied,
+            # so try again without it if failed
+            try:
+                return os.fdopen(os.open(path, flags_noatime), "rb")
+            except PermissionError:
+                _has_noatime = False
 
-    # Add O_NOATIME if available. This may fail with permission denied,
-    # so try again without it if failed
-    try:
-        return os.fdopen(os.open(path, flags_noatime), "rb")
-    except PermissionError:
-        pass
     return os.fdopen(os.open(path, flags), "rb")
 
 
@@ -454,17 +483,3 @@ class DummyExecutor(concurrent.futures._base.Executor):
         except BaseException as e:
             f.set_exception(e)
         return f
-
-
-def batcher(iterator, batchsize):
-    """Yields tuples of items from the given iterator until the iterator is
-    exhausted
-
-    Yielded tuples are at most batchsize in length
-    """
-    it = iter(iterator)
-    while True:
-        batch = tuple(itertools.islice(it, batchsize))
-        if not batch:
-            return
-        yield batch
