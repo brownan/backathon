@@ -10,9 +10,7 @@ import nacl.pwhash
 import nacl.secret
 import nacl.utils
 
-
-class DecryptionError(Exception):
-    pass
+from backathon.encryption.base import EncrypterBase, DecryptionError
 
 
 class BaseEncryption:

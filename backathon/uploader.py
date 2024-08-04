@@ -14,29 +14,6 @@ from backathon.backup import ObjectRequest
 from backathon.db import Database
 
 
-class EncryptedPayload(NamedTuple):
-    buf: IO[bytes]
-    size: int
-    sha1: bytes
-
-
-class UploaderContext(NamedTuple):
-    db: Database
-    make_objid: Callable[[IO[bytes]], bytes]
-    encrypt: Callable[[IO[bytes]], EncryptedPayload]
-
-
-class UploaderBase(ABC):
-    def __init__(self, context: UploaderContext):
-        self.db = context.db
-        self.make_objid = context.make_objid
-        self.encrypt = context.encrypt
-
-    @abstractmethod
-    def upload(self, request: ObjectRequest) -> models.Object:
-        ...
-
-
 class FilesystemUploader(UploaderBase):
     def __init__(self, context: UploaderContext, path: pathlib.Path):
         super().__init__(context)
