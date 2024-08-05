@@ -9,6 +9,7 @@ import time
 from asyncio import Future
 from contextlib import ExitStack
 from logging import getLogger
+from operator import itemgetter, attrgetter
 from typing import (
     IO,
     Awaitable,
@@ -74,7 +75,7 @@ class BlobRef(NamedTuple):
 
 
 class EntryRef(NamedTuple):
-    name: str
+    name: bytes
     objid: ObjIDType
 
 
@@ -117,7 +118,7 @@ class ObjectRequest(NamedTuple):
     # encrypted. So the final payload size and final ObjectHeader will be calculated later.
     type: ObjectType
     stats: ObjectStats | None
-    payload: IO[bytes] | None
+    data: IO[bytes] | None
     blobs: list[BlobRef] | None = None
     entries: list[EntryRef] | None = None
 
@@ -182,8 +183,8 @@ async def backup(
                 backup_count,
                 backup_total,
             )
-            obj_iterator = db.get_objects(
-                models.Object,
+            entry_iterator = db.get_objects(
+                models.FSEntry,
                 """SELECT * FROM fsentry WHERE
                 objid IS NULL
                 AND NOT EXISTS (
@@ -192,7 +193,7 @@ async def backup(
                     AND children.objid IS NULL
                 ) """,
             )
-            for entry in obj_iterator:
+            for entry in entry_iterator:
                 ct += 1
                 if entry.objid is not None:
                     raise RuntimeError(
@@ -206,6 +207,9 @@ async def backup(
                         (entry.id,),
                     )
                 )
+                # Order child entries consistently so database ordering differences
+                # doesn't result in different tree objects
+                child_entries.sort(key=attrgetter("name"))
 
                 tasks.add(
                     asyncio.create_task(
@@ -234,7 +238,7 @@ async def backup(
                     logger.debug("Breaking to checkpoint")
                     break
 
-            obj_iterator.close()
+            entry_iterator.close()
             # Checkpoint now that the object iterator cursor has closed
             cursor.execute("COMMIT")
             cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
@@ -364,7 +368,7 @@ def process_entry(
                             ObjectRequest(
                                 type=ObjectType.BLOB,
                                 stats=None,
-                                payload=io.BytesIO(chunk),
+                                data=io.BytesIO(chunk),
                             )
                         )
                         blob_objs.append((pos, chunk_obj))
@@ -380,7 +384,7 @@ def process_entry(
             ObjectRequest(
                 type=ObjectType.INODE,
                 stats=ObjectStats.from_stat_result(stat_result),
-                payload=payload,
+                data=payload,
                 blobs=[BlobRef(objid=obj.objid, pos=pos) for pos, obj in blob_objs],
             )
         )
@@ -403,10 +407,10 @@ def process_entry(
             ObjectRequest(
                 type=ObjectType.TREE,
                 stats=ObjectStats.from_stat_result(stat_result),
-                payload=None,
+                data=None,
                 entries=[
                     EntryRef(
-                        name=os.path.basename(c.printable_path),
+                        name=c.name,
                         objid=cast(ObjIDType, c.objid),
                     )
                     for c in children
@@ -424,7 +428,7 @@ def process_entry(
             ObjectRequest(
                 type=ObjectType.SYMLINK,
                 stats=ObjectStats.from_stat_result(stat_result),
-                payload=io.BytesIO(os.readlink(entry.path)),
+                data=io.BytesIO(os.readlink(entry.path)),
             )
         )
         return _ProcessingResult(

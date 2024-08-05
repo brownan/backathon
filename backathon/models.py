@@ -123,6 +123,10 @@ class FSEntry(BaseModel):
         return os.fsencode(path.absolute())
 
     @cached_property
+    def name(self) -> bytes:
+        return os.path.basename(self.path)
+
+    @cached_property
     def decoded_path(self) -> pathlib.Path:
         return pathlib.Path(os.fsdecode(self.path))
 

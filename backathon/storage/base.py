@@ -4,7 +4,7 @@ from typing import Any, Type
 
 from pydantic import BaseModel
 
-from backathon.encryption import Payload
+from backathon.encryption.base import Payload
 
 
 class StorageBase(ABC):

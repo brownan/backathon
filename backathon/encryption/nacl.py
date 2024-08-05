@@ -1,3 +1,5 @@
+import hashlib
+import io
 from tempfile import SpooledTemporaryFile
 from typing import Type, IO, Any, cast, Annotated
 
@@ -37,6 +39,10 @@ class NaclEncrypter(EncrypterBase):
     def __init__(self, state: NaclState):
         self.state = state
         self.privkey: nacl.public.PrivateKey | None = None
+
+    @property
+    def pubkey(self) -> nacl.public.PublicKey:
+        return nacl.public.PublicKey(self.state.pubkey)
 
     @staticmethod
     def _derive_symmetric_key(password: str, salt: bytes, ops: int, mem: int) -> bytes:
@@ -93,9 +99,21 @@ class NaclEncrypter(EncrypterBase):
         self.privkey = nacl.public.PrivateKey(privkey_bytes)
 
     def encrypt(self, buf: IO[bytes]) -> Payload:
-        outbuf = SpooledTemporaryFile(max_size=10 * 2**20)
+        sealed_box = nacl.public.SealedBox(self.pubkey)
+        encrypted_bytes = sealed_box.encrypt(buf.read())
+        hasher = hashlib.sha1()
+        hasher.update(encrypted_bytes)
+        return Payload(
+            buf=io.BytesIO(encrypted_bytes),
+            size=len(encrypted_bytes),
+            sha1=hasher.digest(),
+        )
+
+    def decrypt(self, buf: IO[bytes]) -> IO[bytes]:
         if self.privkey is None:
             raise KeyNotDecrypted
 
-    def decrypt(self, buf: IO[bytes]) -> IO[bytes]:
-        raise NotImplementedError
+        sealed_box = nacl.public.SealedBox(self.privkey)
+        decrypted_bytes = sealed_box.decrypt(buf.read())
+        return io.BytesIO(decrypted_bytes)
+
