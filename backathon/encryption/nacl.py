@@ -116,4 +116,3 @@ class NaclEncrypter(EncrypterBase):
         sealed_box = nacl.public.SealedBox(self.privkey)
         decrypted_bytes = sealed_box.decrypt(buf.read())
         return io.BytesIO(decrypted_bytes)
-

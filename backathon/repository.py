@@ -102,20 +102,28 @@ class Backathon:
                 and len(obj_req.body.getbuffer()) != obj_req.header.length
             ):
                 raise RuntimeError("Size mismatch between header and body")
-            # Form the payload
-            raw_payload = SpooledTemporaryFile(max_size=32 * 2**20)
+
+            # Build the object contents
+            raw_payload = io.BytesIO()
             raw_payload.write(obj_req.header.model_dump_msgpack())
             if obj_req.body is not None:
                 if isinstance(obj_req.body, io.BytesIO):
                     raw_payload.write(obj_req.body.getbuffer())
                 else:
                     raw_payload.write(obj_req.body.read())
-
             raw_payload.seek(0)
+
+            # Compress
+            # TODO
+
+            # Encrypt
             encrypted_payload = encrypter.encrypt(raw_payload)
 
             # Make the objid
             objid: ObjIDType = ...
+            # TODO
+
+            # Check if the object already exists for deduplication
             # TODO
 
             objid_hex = objid.hex()
@@ -133,12 +141,15 @@ class Backathon:
                     (
                         objid,
                         obj_req.header.type,
-                        payload.size,
+                        encrypted_payload.size,
                         obj_req.header.file_size,
                         obj_req.header.last_modified_time,
                         encrypted_payload.sha1,
                     ),
                 )
+
+                # Add object relations
+                # TODO
 
     def get_encrypter(self) -> EncrypterBase:
         return NullEncrypter({})

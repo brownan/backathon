@@ -15,12 +15,12 @@ from typing import (
     Awaitable,
     Callable,
     NamedTuple,
-    Self,
     cast,
 )
 
 import msgpack
 from pydantic import BaseModel
+from typing_extensions import Self
 
 from backathon import chunker, models
 from backathon.db import Database
@@ -116,7 +116,7 @@ class ObjectHeader(BaseModel):
         """Convenience property to get the mtime of a file (inode) object"""
         return (
             datetime.datetime.fromtimestamp(
-                self.stats.mtime / 1_000_000_000, tz=datetime.UTC
+                self.stats.mtime / 1_000_000_000, tz=datetime.timezone.utc
             )
             if self.stats is not None
             else None
@@ -278,7 +278,7 @@ async def backup(
 
     # Add a snapshot object for each root
     logger.debug("Backup finished. Creating snapshot objects")
-    now = datetime.datetime.now(tz=datetime.UTC)
+    now = datetime.datetime.now(tz=datetime.timezone.utc)
     with db.atomic(immediate=True), db.cursor() as cursor:
         for entry in db.get_objects(
             models.FSEntry, "SELECT * FROM fsentry WHERE parent IS NULL"
