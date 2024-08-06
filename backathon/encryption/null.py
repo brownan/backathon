@@ -5,6 +5,7 @@ import io
 from typing import IO, Any
 
 from backathon.encryption.base import EncrypterBase, Payload
+from backathon.models import ObjIDType
 
 
 class NullEncrypter(EncrypterBase):
@@ -25,3 +26,10 @@ class NullEncrypter(EncrypterBase):
 
     def decrypt(self, buf: IO[bytes]) -> IO[bytes]:
         return buf
+
+    def make_objid(self, buf: IO[bytes]) -> ObjIDType:
+        hasher = hashlib.sha256()
+        while chunk := buf.read(io.DEFAULT_BUFFER_SIZE):
+            hasher.update(chunk)
+        buf.seek(0)
+        return ObjIDType(hasher.digest())

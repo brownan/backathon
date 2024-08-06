@@ -6,10 +6,11 @@ import pathlib
 import sys
 from collections.abc import Collection
 from functools import cached_property
-from typing import Literal, NewType
+from typing import NewType
 
 from pydantic import BaseModel
 
+from backathon.backup import ObjectType
 from backathon.db import Database
 
 scanlogger = logging.getLogger("backathon.scan")
@@ -42,7 +43,7 @@ class Object(BaseModel):
     # values depending on the object type. Additionally, they may not be
     # filled in after a restore, as the objects have not yet been downloaded
     # and decoded.
-    type: None | Literal["inode", "blob", "tree", "symlink"]
+    type: None | ObjectType
     uploaded_size: int | None
     file_size: int | None
     last_modified_time: datetime.datetime | None

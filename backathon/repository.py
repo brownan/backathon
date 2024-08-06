@@ -6,7 +6,6 @@ import pathlib
 import uuid
 import zlib
 from functools import cached_property
-from tempfile import SpooledTemporaryFile
 
 from backathon import encryption, models, storage, util
 from backathon.backup import ObjectRequest
@@ -79,7 +78,33 @@ class Backathon:
             )
         )
 
-    def backup(self, **kwargs):
+    def _make_obj_payload(self, obj_req: ObjectRequest) -> io.BytesIO:
+        # Build the object contents
+        if (
+            isinstance(obj_req.body, io.BytesIO)
+            and len(obj_req.body.getbuffer()) != obj_req.header.length
+        ):
+            raise RuntimeError("Size mismatch between header and body")
+
+        raw_payload = io.BytesIO()
+        raw_payload.write(obj_req.header.model_dump_msgpack())
+        if obj_req.body is not None:
+            if isinstance(obj_req.body, io.BytesIO):
+                raw_payload.write(obj_req.body.getbuffer())
+            else:
+                raw_payload.write(obj_req.body.read())
+        raw_payload.seek(0)
+        return raw_payload
+
+    def _compress_payload(self, raw: io.BytesIO) -> io.BytesIO:
+        buf = raw.getbuffer()
+        compressed_bytes = zlib.compress(buf)
+        if len(compressed_bytes) < len(buf):
+            return io.BytesIO(compressed_bytes)
+        else:
+            return raw
+
+    def backup(self):
         """Perform a backup
 
         See documentation in the backathon.backup module
@@ -97,34 +122,26 @@ class Backathon:
             * Adding any object relations to the relations table
             * creating the models.Object instance and returning it
             """
-            if (
-                isinstance(obj_req.body, io.BytesIO)
-                and len(obj_req.body.getbuffer()) != obj_req.header.length
-            ):
-                raise RuntimeError("Size mismatch between header and body")
 
-            # Build the object contents
-            raw_payload = io.BytesIO()
-            raw_payload.write(obj_req.header.model_dump_msgpack())
-            if obj_req.body is not None:
-                if isinstance(obj_req.body, io.BytesIO):
-                    raw_payload.write(obj_req.body.getbuffer())
-                else:
-                    raw_payload.write(obj_req.body.read())
-            raw_payload.seek(0)
-
-            # Compress
-            # TODO
-
-            # Encrypt
-            encrypted_payload = encrypter.encrypt(raw_payload)
+            raw_payload = self._make_obj_payload(obj_req)
 
             # Make the objid
-            objid: ObjIDType = ...
-            # TODO
+            objid = encrypter.make_objid(raw_payload)
 
-            # Check if the object already exists for deduplication
-            # TODO
+            # Check if this object already exists
+            with self.db.cursor(retdict=True) as cursor:
+                cursor.execute("SELECT * FROM objects WHERE objid=?", (objid,))
+                row = cursor.fetchone()
+                if row is not None:
+                    return models.Object.model_validate(row)
+
+            # Compress
+            compressed_payload = self._compress_payload(raw_payload)
+            del raw_payload
+
+            # Encrypt
+            encrypted_payload = encrypter.encrypt(compressed_payload)
+            del compressed_payload
 
             objid_hex = objid.hex()
             path = pathlib.Path("objects", objid_hex[:2], objid_hex)
@@ -149,7 +166,26 @@ class Backathon:
                 )
 
                 # Add object relations
-                # TODO
+                children: list[tuple[ObjIDType, ObjIDType, bytes | None]] = []
+                if obj_req.header.blobs:
+                    children.extend((objid, b.objid, None) for b in obj_req.header.blobs)
+                if obj_req.header.entries:
+                    children.extend(
+                        (objid, e.objid, e.name) for e in obj_req.header.entries
+                    )
+                cursor.executemany(
+                    "INSERT INTO object_relations (parent, child, name) VALUES (?,?,?)",
+                    children,
+                )
+
+                return models.Object(
+                    objid=objid,
+                    type=obj_req.header.type,
+                    uploaded_size=encrypted_payload.size,
+                    file_size=obj_req.header.file_size,
+                    last_modified_time=obj_req.header.last_modified_time,
+                    sha1=encrypted_payload.sha1,
+                )
 
     def get_encrypter(self) -> EncrypterBase:
         return NullEncrypter({})

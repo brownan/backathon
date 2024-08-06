@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import NamedTuple, IO, Any, Type
+from typing import IO, Any, NamedTuple
 
-from pydantic import BaseModel
+from backathon.models import ObjIDType
 
 
 class Payload(NamedTuple):
@@ -18,16 +18,24 @@ class KeyNotDecrypted(Exception):
 
 class EncrypterBase(ABC):
     @abstractmethod
-    def __init__(self, state: dict[str, Any]): ...
+    def __init__(self, state: dict[str, Any]):
+        ...
 
     @abstractmethod
-    def unlock(self, password: str): ...
+    def unlock(self, password: str):
+        ...
 
     @abstractmethod
-    def encrypt(self, buf: IO[bytes]) -> Payload: ...
+    def encrypt(self, buf: IO[bytes]) -> Payload:
+        ...
 
     @abstractmethod
-    def decrypt(self, buf: IO[bytes]) -> IO[bytes]: ...
+    def decrypt(self, buf: IO[bytes]) -> IO[bytes]:
+        ...
+
+    @abstractmethod
+    def make_objid(self, buf: IO[bytes]) -> ObjIDType:
+        ...
 
 
 class DecryptionError(Exception):

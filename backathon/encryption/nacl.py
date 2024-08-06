@@ -1,16 +1,16 @@
 import hashlib
+import hmac
 import io
-from tempfile import SpooledTemporaryFile
-from typing import Type, IO, Any, cast, Annotated
+from typing import IO, Annotated
 
-import msgpack
+import nacl.public
 import nacl.pwhash.argon2id
 import nacl.secret
 import nacl.utils
-import nacl.public
-from pydantic import BaseModel, EncoderProtocol, EncodedBytes
+from pydantic import BaseModel, EncodedBytes, EncoderProtocol
 
-from backathon.encryption.base import EncrypterBase, Payload, KeyNotDecrypted
+from backathon.encryption.base import EncrypterBase, KeyNotDecrypted, Payload
+from backathon.models import ObjIDType
 
 
 class BytesHexEncoder(EncoderProtocol):
@@ -116,3 +116,10 @@ class NaclEncrypter(EncrypterBase):
         sealed_box = nacl.public.SealedBox(self.privkey)
         decrypted_bytes = sealed_box.decrypt(buf.read())
         return io.BytesIO(decrypted_bytes)
+
+    def make_objid(self, buf: IO[bytes]) -> ObjIDType:
+        h = hmac.new(bytes(self.pubkey), digestmod="sha256")
+        while chunk := buf.read(io.DEFAULT_BUFFER_SIZE):
+            h.update(chunk)
+        buf.seek(0)
+        return ObjIDType(h.digest())
