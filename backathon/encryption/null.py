@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import io
-from typing import IO
+from typing import IO, Any
 
 from backathon.encryption.base import EncrypterBase, Payload
 
 
 class NullEncrypter(EncrypterBase):
+    def __init__(self, state: dict[str, Any]):
+        pass
+
+    def unlock(self, password: str):
+        pass
+
     def encrypt(self, buf: IO[bytes]) -> Payload:
         hasher = hashlib.sha1()
         size = 0

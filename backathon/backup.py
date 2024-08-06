@@ -9,7 +9,7 @@ import time
 from asyncio import Future
 from contextlib import ExitStack
 from logging import getLogger
-from operator import itemgetter, attrgetter
+from operator import attrgetter
 from typing import (
     IO,
     Awaitable,
@@ -83,7 +83,7 @@ class ObjectHeader(BaseModel):
     """Information that gets serialized into the top of every object payload"""
 
     type: ObjectType
-    payload_size: int = 0
+    length: int
     stats: ObjectStats | None = None
     blobs: list[BlobRef] | None = None
     entries: list[EntryRef] | None = None
@@ -106,6 +106,22 @@ class ObjectHeader(BaseModel):
         header_data = unpacker.unpack()
         return cls.model_validate(header_data)
 
+    @property
+    def file_size(self) -> int | None:
+        """Convenience property to get the file size of file (inode) objects"""
+        return self.stats.size if self.stats is not None else None
+
+    @property
+    def last_modified_time(self) -> datetime.datetime | None:
+        """Convenience property to get the mtime of a file (inode) object"""
+        return (
+            datetime.datetime.fromtimestamp(
+                self.stats.mtime / 1_000_000_000, tz=datetime.UTC
+            )
+            if self.stats is not None
+            else None
+        )
+
 
 class ObjectRequest(NamedTuple):
     """Used by the backup code to pass information about an object to be uploaded to the upload
@@ -113,14 +129,8 @@ class ObjectRequest(NamedTuple):
 
     """
 
-    # This doesn't just hold an ObjectHeader because the payload size isn't
-    # known yet. The payload here is the raw data, but it may still be compressed and
-    # encrypted. So the final payload size and final ObjectHeader will be calculated later.
-    type: ObjectType
-    stats: ObjectStats | None
-    data: IO[bytes] | None
-    blobs: list[BlobRef] | None = None
-    entries: list[EntryRef] | None = None
+    header: ObjectHeader
+    body: IO[bytes] | None
 
 
 class _ProcessingResult(NamedTuple):
@@ -348,14 +358,16 @@ def process_entry(
 
     if stat.S_ISREG(stat_result.st_mode):
         # Regular file
-        payload: IO[bytes] | None
+        payload: io.BytesIO | None
         blob_objs: list[tuple[int, models.Object]] = []
 
         try:
             with _open_file(entry.path) as fobj:
                 if stat_result.st_size < INLINE_THRESHOLD:
                     # Upload the file as a payload in this object
-                    payload = fobj
+                    # We read the entire file into memory here because it's not huge, and to
+                    # make sure the ObjectHeader length field is correct.
+                    payload = io.BytesIO(fobj.read())
                 else:
                     # Upload the file as blob objects and reference them from this one
                     payload = None
@@ -366,9 +378,12 @@ def process_entry(
                     for pos, chunk in chunk_iter:
                         chunk_obj = upload(
                             ObjectRequest(
-                                type=ObjectType.BLOB,
-                                stats=None,
-                                data=io.BytesIO(chunk),
+                                header=ObjectHeader(
+                                    type=ObjectType.BLOB,
+                                    stats=None,
+                                    length=len(chunk),
+                                ),
+                                body=io.BytesIO(chunk),
                             )
                         )
                         blob_objs.append((pos, chunk_obj))
@@ -382,10 +397,13 @@ def process_entry(
 
         file_obj = upload(
             ObjectRequest(
-                type=ObjectType.INODE,
-                stats=ObjectStats.from_stat_result(stat_result),
-                data=payload,
-                blobs=[BlobRef(objid=obj.objid, pos=pos) for pos, obj in blob_objs],
+                header=ObjectHeader(
+                    type=ObjectType.INODE,
+                    length=len(payload.getbuffer()) if payload is not None else 0,
+                    stats=ObjectStats.from_stat_result(stat_result),
+                    blobs=[BlobRef(objid=obj.objid, pos=pos) for pos, obj in blob_objs],
+                ),
+                body=payload,
             )
         )
         return _ProcessingResult(
@@ -405,16 +423,19 @@ def process_entry(
             )
         dir_obj = upload(
             ObjectRequest(
-                type=ObjectType.TREE,
-                stats=ObjectStats.from_stat_result(stat_result),
-                data=None,
-                entries=[
-                    EntryRef(
-                        name=c.name,
-                        objid=cast(ObjIDType, c.objid),
-                    )
-                    for c in children
-                ],
+                header=ObjectHeader(
+                    type=ObjectType.TREE,
+                    length=0,
+                    stats=ObjectStats.from_stat_result(stat_result),
+                    entries=[
+                        EntryRef(
+                            name=c.name,
+                            objid=cast(ObjIDType, c.objid),
+                        )
+                        for c in children
+                    ],
+                ),
+                body=None,
             )
         )
         return _ProcessingResult(
@@ -424,11 +445,15 @@ def process_entry(
 
     elif stat.S_ISLNK(stat_result.st_mode):
         # Symlink
+        link_target = os.readlink(entry.path)
         symlink_obj = upload(
             ObjectRequest(
-                type=ObjectType.SYMLINK,
-                stats=ObjectStats.from_stat_result(stat_result),
-                data=io.BytesIO(os.readlink(entry.path)),
+                header=ObjectHeader(
+                    type=ObjectType.SYMLINK,
+                    length=len(link_target),
+                    stats=ObjectStats.from_stat_result(stat_result),
+                ),
+                body=io.BytesIO(link_target),
             )
         )
         return _ProcessingResult(

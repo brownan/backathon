@@ -6,10 +6,17 @@ import pathlib
 import uuid
 import zlib
 from functools import cached_property
+from tempfile import SpooledTemporaryFile
 
 from backathon import encryption, models, storage, util
+from backathon.backup import ObjectRequest
 from backathon.db import Database
+from backathon.encryption.base import EncrypterBase
+from backathon.encryption.null import NullEncrypter
 from backathon.exceptions import CorruptedRepository
+from backathon.models import ObjIDType
+from backathon.storage.base import StorageBase
+from backathon.storage.local import LocalStorage
 from backathon.util import Settings, SimpleSetting
 
 
@@ -78,19 +85,67 @@ class Backathon:
         See documentation in the backathon.backup module
 
         """
-        try:
-            _ = self.repository.encrypter
-        except KeyError:
-            raise ImproperlyConfigured("You must configure the encryption " "first")
+        encrypter: EncrypterBase = self.get_encrypter()
+        storage: StorageBase = self.get_storage()
 
-        try:
-            _ = self.repository.storage
-        except KeyError:
-            raise ImproperlyConfigured("You must configure the storage " "backend first")
+        async def put_object(obj_req: ObjectRequest) -> models.Object:
+            """Called from the backup code to upload an object to the remote repository
 
-        from backathon import backup
+            Responsible for:
+            * Uploading the object
+            * Adding the entry to the objects table
+            * Adding any object relations to the relations table
+            * creating the models.Object instance and returning it
+            """
+            if (
+                isinstance(obj_req.body, io.BytesIO)
+                and len(obj_req.body.getbuffer()) != obj_req.header.length
+            ):
+                raise RuntimeError("Size mismatch between header and body")
+            # Form the payload
+            raw_payload = SpooledTemporaryFile(max_size=32 * 2**20)
+            raw_payload.write(obj_req.header.model_dump_msgpack())
+            if obj_req.body is not None:
+                if isinstance(obj_req.body, io.BytesIO):
+                    raw_payload.write(obj_req.body.getbuffer())
+                else:
+                    raw_payload.write(obj_req.body.read())
 
-        backup.backup(self.repository, **kwargs)
+            raw_payload.seek(0)
+            encrypted_payload = encrypter.encrypt(raw_payload)
+
+            # Make the objid
+            objid: ObjIDType = ...
+            # TODO
+
+            objid_hex = objid.hex()
+            path = pathlib.Path("objects", objid_hex[:2], objid_hex)
+
+            storage.put_object(path, encrypted_payload)
+
+            with self.db.atomic(), self.db.cursor() as cursor:
+                cursor.execute(
+                    """
+                INSERT INTO objects
+                (objid, type, uploaded_size, file_size, last_modified_time, sha1)
+                VALUES (?,?,?,?,?,?)
+                """,
+                    (
+                        objid,
+                        obj_req.header.type,
+                        payload.size,
+                        obj_req.header.file_size,
+                        obj_req.header.last_modified_time,
+                        encrypted_payload.sha1,
+                    ),
+                )
+
+    def get_encrypter(self) -> EncrypterBase:
+        return NullEncrypter({})
+
+    def get_storage(self) -> StorageBase:
+        local_storage_config = self.db.config_get_json("local_storage_config")
+        return LocalStorage(local_storage_config)
 
     def save_metadata(self):
         """Updates the metadata file in the remote repository
