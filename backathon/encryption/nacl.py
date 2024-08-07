@@ -7,21 +7,10 @@ import nacl.public
 import nacl.pwhash.argon2id
 import nacl.secret
 import nacl.utils
-from pydantic import BaseModel, EncodedBytes, EncoderProtocol
+from pydantic import BaseModel, EncodedBytes
 
 from backathon.encryption.base import EncrypterBase, KeyNotDecrypted, Payload
-from backathon.models import ObjIDType
-
-
-class BytesHexEncoder(EncoderProtocol):
-    @classmethod
-    def decode(cls, data: bytes) -> bytes:
-        str_data = data.decode("ascii")
-        return bytes.fromhex(str_data)
-
-    @classmethod
-    def encode(cls, value: bytes) -> bytes:
-        return value.hex().upper().encode("ascii")
+from backathon.models import BytesHexEncoder, ObjIDType
 
 
 class NaclState(BaseModel):

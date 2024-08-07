@@ -1,4 +1,5 @@
 import datetime
+import enum
 import logging
 import os
 import os.path
@@ -6,16 +7,43 @@ import pathlib
 import sys
 from collections.abc import Collection
 from functools import cached_property
-from typing import NewType
+from typing import IO, TYPE_CHECKING, Annotated, NamedTuple, NewType, cast
 
-from pydantic import BaseModel
+import msgpack
+from pydantic import (
+    BaseModel,
+    EncodedBytes,
+    EncoderProtocol,
+    WrapSerializer,
+)
+from typing_extensions import Self
 
-from backathon.backup import ObjectType
 from backathon.db import Database
+
+if TYPE_CHECKING:
+    pass
 
 scanlogger = logging.getLogger("backathon.scan")
 
 ObjIDType = NewType("ObjIDType", bytes)
+
+
+class ObjectType(str, enum.Enum):
+    INODE = "inode"
+    BLOB = "blob"
+    TREE = "tree"
+    SYMLINK = "symlink"
+
+
+class BytesHexEncoder(EncoderProtocol):
+    @classmethod
+    def decode(cls, data: bytes) -> bytes:
+        str_data = data.decode("ascii")
+        return bytes.fromhex(str_data)
+
+    @classmethod
+    def encode(cls, value: bytes) -> bytes:
+        return value.hex().lower().encode("ascii")
 
 
 class Object(BaseModel):
@@ -47,7 +75,10 @@ class Object(BaseModel):
     uploaded_size: int | None
     file_size: int | None
     last_modified_time: datetime.datetime | None
-    sha1: bytes | None
+    sha1: Annotated[
+        bytes | None,
+        WrapSerializer(func=lambda b, _: b.hex(), when_used="json-unless-none"),
+    ]
 
     @property
     def objid_hex(self):
@@ -85,7 +116,7 @@ class ObjectRelation(BaseModel):
     name: str | None
 
     def __repr__(self):
-        return "<ObjectRelation {}→{}>".format(
+        return "<ObjectRelation {} - {}>".format(
             self.parent.hex()[:7],
             self.child.hex()[:7],
         )
@@ -198,14 +229,119 @@ class FSEntry(BaseModel):
 class Snapshot(BaseModel):
     """A snapshot of a filesystem at a particular time"""
 
-    path: bytes
-    root: ObjIDType
+    path: str
+    root: Annotated[ObjIDType, EncodedBytes(encoder=BytesHexEncoder)]
     timestamp: datetime.datetime
 
+
+class ObjectStats(BaseModel):
+    """Information in the object payload header related to entries on the filesystem
+
+    e.g. inode, tree, and symlink all have these fields in common, but blobs don't
+
+    """
+
+    size: int
+    inode: int
+    uid: int
+    gid: int
+    mode: int
+    # in nanoseconds since the epoch
+    mtime: int
+    atime: int
+
+    @classmethod
+    def from_stat_result(cls, stat_result: os.stat_result):
+        return cls(
+            size=stat_result.st_size,
+            inode=stat_result.st_ino,
+            uid=stat_result.st_uid,
+            gid=stat_result.st_gid,
+            mode=stat_result.st_mode,
+            mtime=stat_result.st_mtime_ns,
+            atime=stat_result.st_atime_ns,
+        )
+
+    def __rich_repr__(self):
+        yield "size", self.size
+        yield "inode", self.inode
+        yield "uid", self.uid
+        yield "gid", self.gid
+        yield "mode", oct(self.mode)
+        yield "mtime", datetime.datetime.fromtimestamp(
+            self.mtime / 1000000000, tz=datetime.timezone.utc
+        ).astimezone().strftime("%c %Z")
+        yield "atime", datetime.datetime.fromtimestamp(
+            self.atime / 1000000000, tz=datetime.timezone.utc
+        ).astimezone().strftime("%c %Z")
+
+
+class BlobRef(NamedTuple):
+    pos: int
+    objid: ObjIDType
+
+    def __rich_repr__(self):
+        yield "pos", self.pos
+        yield "objid", self.objid.hex().lower()
+
+
+class EntryRef(NamedTuple):
+    name: bytes
+    objid: ObjIDType
+
+    def __rich_repr__(self):
+        yield "name", self.name.decode(sys.getfilesystemencoding(), errors="replace")
+        yield "objid", self.objid.hex().lower()
+
+
+class ObjectHeader(BaseModel):
+    """Information that gets serialized into the top of every object payload"""
+
+    type: ObjectType
+    length: int
+    stats: ObjectStats | None = None
+    blobs: list[BlobRef] | None = None
+    entries: list[EntryRef] | None = None
+
+    def __rich_repr__(self):
+        yield "type", self.type.name
+        yield "length", self.length
+        yield "stats", self.stats
+        if self.blobs:
+            yield "blobs", self.blobs
+        if self.entries:
+            yield "entries", self.entries
+
+    def model_dump_msgpack(self) -> bytes:
+        return cast(bytes, msgpack.packb(self.model_dump(exclude_defaults=True)))
+
+    @classmethod
+    def model_load_msgpack(cls, data: bytes) -> Self:
+        return cls.model_validate(msgpack.unpackb(data))
+
+    @classmethod
+    def read_header(cls, buf: IO[bytes]) -> Self:
+        """Reads the header from the stream and returns the ObjectHeader instance
+
+        Leaves the stream open for reading at the position directly after the header
+
+        """
+        unpacker = msgpack.Unpacker(buf)
+        header_data = unpacker.unpack()
+        return cls.model_validate(header_data)
+
     @property
-    def printablepath(self):
-        """Used in printable representations"""
-        # Use the replacement error handler to turn any surrogate codepoints
-        # into something that won't crash attempts to encode them
-        bytepath = os.fsencode(self.path)
-        return bytepath.decode(sys.getfilesystemencoding(), errors="replace")
+    def file_size(self) -> int | None:
+        """Convenience property to get the file size of file (inode) objects"""
+        return self.stats.size if self.stats is not None else None
+
+    @property
+    def last_modified_time(self) -> datetime.datetime | None:
+        """Convenience property to get the mtime of a file (inode) object"""
+        return (
+            datetime.datetime.fromtimestamp(
+                self.stats.mtime / 1_000_000_000, tz=datetime.timezone.utc
+            )
+            if self.stats is not None
+            else None
+        )

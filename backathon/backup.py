@@ -1,7 +1,6 @@
 import asyncio
 import concurrent.futures
 import datetime
-import enum
 import io
 import os
 import stat
@@ -18,109 +17,22 @@ from typing import (
     cast,
 )
 
-import msgpack
-from pydantic import BaseModel
-from typing_extensions import Self
-
 from backathon import chunker, models
 from backathon.db import Database
 from backathon.exceptions import DependencyError
-from backathon.models import ObjIDType
+from backathon.models import (
+    BlobRef,
+    EntryRef,
+    ObjectHeader,
+    ObjectStats,
+    ObjectType,
+    ObjIDType,
+)
 
 logger = getLogger("backathon.backup")
 
 NUM_WORKERS = os.cpu_count() or 2
 INLINE_THRESHOLD = 2**20
-
-
-class ObjectType(str, enum.Enum):
-    INODE = "inode"
-    BLOB = "blob"
-    TREE = "tree"
-    SYMLINK = "symlink"
-
-
-class ObjectStats(BaseModel):
-    """Information in the object payload header related to entries on the filesystem
-
-    e.g. inode, tree, and symlink all have these fields in common, but blobs don't
-
-    """
-
-    size: int
-    inode: int
-    uid: int
-    gid: int
-    mode: int
-    # in nanoseconds since the epoch
-    mtime: int
-    atime: int
-
-    @classmethod
-    def from_stat_result(cls, stat_result: os.stat_result):
-        return cls(
-            size=stat_result.st_size,
-            inode=stat_result.st_ino,
-            uid=stat_result.st_uid,
-            gid=stat_result.st_gid,
-            mode=stat_result.st_mode,
-            mtime=stat_result.st_mtime_ns,
-            atime=stat_result.st_atime_ns,
-        )
-
-
-class BlobRef(NamedTuple):
-    pos: int
-    objid: ObjIDType
-
-
-class EntryRef(NamedTuple):
-    name: bytes
-    objid: ObjIDType
-
-
-class ObjectHeader(BaseModel):
-    """Information that gets serialized into the top of every object payload"""
-
-    type: ObjectType
-    length: int
-    stats: ObjectStats | None = None
-    blobs: list[BlobRef] | None = None
-    entries: list[EntryRef] | None = None
-
-    def model_dump_msgpack(self) -> bytes:
-        return cast(bytes, msgpack.packb(self.model_dump(exclude_defaults=True)))
-
-    @classmethod
-    def model_load_msgpack(cls, data: bytes) -> Self:
-        return cls.model_validate(msgpack.unpackb(data))
-
-    @classmethod
-    def read_header(cls, buf: IO[bytes]) -> Self:
-        """Reads the header from the stream and returns the ObjectHeader instance
-
-        Leaves the stream open for reading at the position directly after the header
-
-        """
-        unpacker = msgpack.Unpacker(buf)
-        header_data = unpacker.unpack()
-        return cls.model_validate(header_data)
-
-    @property
-    def file_size(self) -> int | None:
-        """Convenience property to get the file size of file (inode) objects"""
-        return self.stats.size if self.stats is not None else None
-
-    @property
-    def last_modified_time(self) -> datetime.datetime | None:
-        """Convenience property to get the mtime of a file (inode) object"""
-        return (
-            datetime.datetime.fromtimestamp(
-                self.stats.mtime / 1_000_000_000, tz=datetime.timezone.utc
-            )
-            if self.stats is not None
-            else None
-        )
 
 
 class ObjectRequest(NamedTuple):
@@ -150,11 +62,9 @@ async def backup(
             c.execute("SELECT 1 FROM fsentry WHERE objid IS NULL LIMIT 1")
             return bool(c.fetchone())
 
-    def finalize_entry(t: Future[tuple[models.FSEntry, _ProcessingResult | None]]):
+    def finalize_entry(e: models.FSEntry, result: _ProcessingResult | None):
         nonlocal backup_count
         backup_count += 1
-        # Caller must ensure the future's result is available
-        e, result = t.result()
         with db.atomic():
             if result is None:
                 # Item was not backed up. We need to delete its entry
@@ -178,8 +88,11 @@ async def backup(
         backup_total = cursor.fetchone()[0]
         backup_count = 0
 
+        logger.info("Starting backup. %s items to backup", backup_total)
+
         tasks: set[Future[tuple[models.FSEntry, _ProcessingResult | None]]] = set()
 
+        logger.debug("Launching threadpool with %s workers", NUM_WORKERS)
         executor = exitstack.enter_context(
             concurrent.futures.ThreadPoolExecutor(max_workers=NUM_WORKERS)
         )
@@ -240,7 +153,7 @@ async def backup(
                     )
 
                     for task in done:
-                        finalize_entry(task)
+                        finalize_entry(*(await task))
 
                 if time.monotonic() - last_checkpoint > 30:
                     # Perform a periodic checkpoint. We have to break out of the inner
@@ -271,7 +184,7 @@ async def backup(
             # forego the periodic checkpointing altogether.
             logger.debug("Flushing queue")
             for task in asyncio.as_completed(tasks):
-                finalize_entry(task)
+                finalize_entry(*(await task))
             tasks.clear()
 
     # Exiting the outer "while" loop and the context with the executor
@@ -285,11 +198,18 @@ async def backup(
         ):
             if entry.objid is None:
                 raise RuntimeError(f"Root not backed up {entry}")
+            logger.debug(
+                "Snapshot: %s: %s (%s)", now, entry.objid.hex(), entry.printable_path
+            )
             put_snapshot(
-                models.Snapshot(path=entry.path, root=entry.objid, timestamp=now)
+                models.Snapshot.model_construct(
+                    path=entry.printable_path, root=entry.objid, timestamp=now
+                )
             )
         cursor.execute("PRAGMA optimize")
+    with db.cursor() as cursor:
         cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
+    logger.info("Backup finished. %s entries backed up", backup_count)
 
 
 async def _dispatch(
@@ -401,7 +321,11 @@ def process_entry(
                     type=ObjectType.INODE,
                     length=len(payload.getbuffer()) if payload is not None else 0,
                     stats=ObjectStats.from_stat_result(stat_result),
-                    blobs=[BlobRef(objid=obj.objid, pos=pos) for pos, obj in blob_objs],
+                    blobs=(
+                        [BlobRef(objid=obj.objid, pos=pos) for pos, obj in blob_objs]
+                        if blob_objs
+                        else None
+                    ),
                 ),
                 body=payload,
             )

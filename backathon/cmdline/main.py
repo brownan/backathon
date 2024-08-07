@@ -6,6 +6,7 @@ from datetime import timedelta
 from typing import Sequence
 
 import click
+import msgpack
 import rich
 from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
 from rich.live import Live
@@ -22,6 +23,7 @@ from rich.text import Text
 
 import backathon.db
 import backathon.repository
+from backathon import models
 
 logger = logging.getLogger("backathon.cmdline")
 
@@ -215,6 +217,40 @@ def scan(ctx: click.Context, rescan_dirs: bool, no_rich: bool = False):
                 repo.scan(progress=update, rescan_dirs=rescan_dirs)
         finally:
             rich.print(progress)
+
+
+@main.command()
+@click.argument("path", type=click.Path(path_type=pathlib.Path))
+@click.pass_context
+def set_local_target(ctx: click.Context, path: pathlib.Path):
+    repo: backathon.repository.Backathon = ctx.obj["repo"]
+    repo.db.config_set_json("local_storage_config", {"base_path": str(path.absolute())})
+
+
+@main.command()
+@click.pass_context
+def backup(ctx: click.Context):
+    repo: backathon.repository.Backathon = ctx.obj["repo"]
+    repo.backup()
+
+
+@main.command()
+@click.argument("path", type=click.Path(path_type=pathlib.Path))
+@click.pass_context
+def obj_dump_header(ctx: click.Context, path: pathlib.Path):
+    repo: backathon.repository.Backathon = ctx.obj["repo"]
+    encrypter = repo.get_encrypter()
+
+    with open(path, "rb") as fobj:
+        fobj = encrypter.decrypt(fobj)
+
+        unpacker = msgpack.Unpacker(file_like=fobj)
+        header_data = unpacker.unpack()
+
+    header = models.ObjectHeader.model_validate(header_data)
+    import rich.pretty
+
+    rich.print(header)
 
 
 if __name__ == "__main__":

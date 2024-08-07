@@ -1,12 +1,12 @@
 import pathlib
 import shutil
 from os import PathLike
-from typing import Any, IO, Type
+from typing import Type
 
 from pydantic import BaseModel
 
-from backathon.storage.base import StorageBase
 from backathon.encryption.base import Payload
+from backathon.storage.base import StorageBase
 
 
 class LocalStorageConfig(BaseModel):
@@ -23,5 +23,6 @@ class LocalStorage(StorageBase):
     def put_object(self, path: PathLike, payload: Payload):
         base_path = self.config.base_path
         path = base_path / path
+        path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("wb") as fobj:
             shutil.copyfileobj(payload.buf, fobj)

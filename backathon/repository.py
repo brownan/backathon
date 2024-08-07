@@ -1,12 +1,17 @@
+import asyncio
 import hmac
 import io
 import json
+import logging
 import os.path
 import pathlib
+import secrets
 import uuid
 import zlib
 from functools import cached_property
+from typing import Awaitable, Callable
 
+import backathon.backup
 from backathon import encryption, models, storage, util
 from backathon.backup import ObjectRequest
 from backathon.db import Database
@@ -17,6 +22,10 @@ from backathon.models import ObjIDType
 from backathon.storage.base import StorageBase
 from backathon.storage.local import LocalStorage
 from backathon.util import Settings, SimpleSetting
+
+logger = logging.getLogger("backathon.repository")
+
+Compressor = Callable[[io.BytesIO], io.BytesIO]
 
 
 class Backathon:
@@ -104,15 +113,9 @@ class Backathon:
         else:
             return raw
 
-    def backup(self):
-        """Perform a backup
-
-        See documentation in the backathon.backup module
-
-        """
-        encrypter: EncrypterBase = self.get_encrypter()
-        storage: StorageBase = self.get_storage()
-
+    def _make_obj_putter(
+        self, compressor: Compressor, encrypter: EncrypterBase, storage: StorageBase
+    ) -> Callable[[ObjectRequest], Awaitable[models.Object]]:
         async def put_object(obj_req: ObjectRequest) -> models.Object:
             """Called from the backup code to upload an object to the remote repository
 
@@ -136,7 +139,7 @@ class Backathon:
                     return models.Object.model_validate(row)
 
             # Compress
-            compressed_payload = self._compress_payload(raw_payload)
+            compressed_payload = compressor(raw_payload)
             del raw_payload
 
             # Encrypt
@@ -186,6 +189,44 @@ class Backathon:
                     last_modified_time=obj_req.header.last_modified_time,
                     sha1=encrypted_payload.sha1,
                 )
+
+        return put_object
+
+    def _make_snapshot_putter(self, encrypter: EncrypterBase, storage: StorageBase):
+        def put_snapshot(snapshot: models.Snapshot):
+            snapshot_path = pathlib.Path("snapshot", secrets.token_urlsafe())
+            buf = io.BytesIO()
+            buf.write(snapshot.model_dump_json(indent=4).encode("utf-8"))
+            buf.seek(0)
+
+            payload = encrypter.encrypt(buf)
+            storage.put_object(snapshot_path, payload)
+
+        return put_snapshot
+
+    def backup(self):
+        """Perform a backup
+
+        See documentation in the backathon.backup module
+
+        """
+        compressor: Compressor
+        if not self.db.config_get_json("enable_compression"):
+
+            def compressor(x):
+                return x
+
+        else:
+            compressor = self._compress_payload
+        encrypter: EncrypterBase = self.get_encrypter()
+        storage: StorageBase = self.get_storage()
+
+        put_object = self._make_obj_putter(compressor, encrypter, storage)
+        put_snapshot = self._make_snapshot_putter(encrypter, storage)
+
+        backup_coro = backathon.backup.backup(self.db, put_object, put_snapshot)
+        logger.debug("Starting event loop")
+        asyncio.run(backup_coro, debug=logger.isEnabledFor(logging.DEBUG))
 
     def get_encrypter(self) -> EncrypterBase:
         return NullEncrypter({})
