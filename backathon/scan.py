@@ -144,7 +144,7 @@ def scan(
                     "SELECT SUM(st_size) FROM fsentry WHERE objid IS NULL AND st_mode & ?",
                     (stat.S_IFREG,),
                 )
-                to_backup_size = cursor.fetchone()[0]
+                to_backup_size = cursor.fetchone()[0] or 0
                 if not total_size:
                     logger.info("Empty backup set")
                 else:
@@ -160,7 +160,7 @@ def scan_entry(
     rescan_dirs: bool = False,
     excludes: Collection[str],
 ):
-    logger.debug("Scanning %s", entry.printable_path)
+    logger.log(5, "Scanning %s", entry.printable_path)
 
     def delete_entry():
         with db.cursor() as inner_cursor:

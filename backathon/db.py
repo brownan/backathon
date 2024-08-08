@@ -58,8 +58,10 @@ MIGRATIONS: list[list[str]] = [
 
 
 class Database:
-    def __init__(self, path: PathLike):
+    def __init__(self, path: PathLike, *, create: bool = False):
         self.path = pathlib.Path(path)
+        if not create and not self.path.is_file():
+            raise FileNotFoundError(f"Config database not found: {self.path}")
         self.conn = self._open_db()
         self._setup_db()
         self._savepoint_num: int = 1
@@ -153,7 +155,11 @@ class Database:
         return json.loads(data)
 
     def config_set_json(self, key: str, value: Any):
-        self.config_set(key, json.dumps(value))
+        if isinstance(value, BaseModel):
+            json_data = value.model_dump_json()
+        else:
+            json_data = json.dumps(value)
+        self.config_set(key, json_data)
 
     @contextmanager
     def atomic(self, *, immediate: bool = False):

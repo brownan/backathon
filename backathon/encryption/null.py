@@ -4,13 +4,31 @@ import hashlib
 import io
 from typing import IO, Any
 
-from backathon.encryption.base import EncrypterBase, Payload
+from pydantic import BaseModel
+from typing_extensions import Self
+
+from backathon.encryption.base import EncrypterBase, Payload, UnlockCallback
 from backathon.models import ObjIDType
 
 
-class NullEncrypter(EncrypterBase):
-    def __init__(self, state: dict[str, Any]):
-        pass
+class NullConfig(BaseModel):
+    pass
+
+
+class NullEncrypter(EncrypterBase[NullConfig]):
+    def __init__(self, config: NullConfig):
+        super().__init__(config)
+
+    @classmethod
+    def get_config_class(cls):
+        return NullConfig
+
+    def get_recovery_state(self) -> dict[str, Any] | None:
+        return None
+
+    @classmethod
+    def from_recovery_state(cls, rstate: dict[str, Any], password: str) -> Self:
+        return cls(NullConfig())
 
     def unlock(self, password: str):
         pass
@@ -24,7 +42,9 @@ class NullEncrypter(EncrypterBase):
         buf.seek(0)
         return Payload(buf=buf, size=size, sha1=hasher.digest())
 
-    def decrypt(self, buf: IO[bytes]) -> IO[bytes]:
+    def decrypt(
+        self, buf: IO[bytes], unlock_callback: UnlockCallback | None = None
+    ) -> IO[bytes]:
         return buf
 
     def make_objid(self, buf: IO[bytes]) -> ObjIDType:

@@ -1,6 +1,9 @@
+import dataclasses
 import logging
+import os
 import pathlib
 import sqlite3
+import sys
 from collections import deque
 from datetime import timedelta
 from typing import Sequence
@@ -24,8 +27,23 @@ from rich.text import Text
 import backathon.db
 import backathon.repository
 from backathon import models
+from backathon.encryption.nacl import NaclEncrypter
+from backathon.encryption.null import NullConfig, NullEncrypter
+from backathon.storage.local import LocalStorage, LocalStorageConfig
 
 logger = logging.getLogger("backathon.cmdline")
+
+
+@dataclasses.dataclass
+class BackathonContext:
+    repo: backathon.repository.Backathon
+    db: backathon.db.Database
+
+    @classmethod
+    def from_click_context(cls, ctx: click.Context):
+        db = backathon.db.Database(ctx.obj["db_path"])
+        repo = backathon.repository.Backathon(db)
+        return cls(repo=repo, db=db)
 
 
 @click.group()
@@ -40,24 +58,55 @@ def main(
     verbose: bool,
 ):
     loglevel = logging.INFO if not verbose else logging.DEBUG
-    logging.basicConfig(format="%(message)s", level=loglevel, handlers=[RichHandler()])
+    logging.basicConfig(
+        format="%(message)s", level=logging.WARNING, handlers=[RichHandler()]
+    )
+    logging.getLogger("backathon").setLevel(loglevel)
 
     ctx.ensure_object(dict)
+    ctx.obj["db_path"] = configfile
 
-    db = backathon.db.Database(configfile)
-    ctx.obj["db"] = db
 
-    repo = backathon.repository.Backathon(db)
-    ctx.obj["repo"] = repo
+@main.command()
+@click.option("--enable-encryption/--disable-encryption", default=True)
+@click.argument("destination")
+@click.pass_context
+def initialize(ctx: click.Context, enable_encryption: bool, destination: str):
+    db_path = ctx.obj["db_path"]
+    enc_password = os.environ.get("BACKATHON_PASSWORD")
+    if enc_password is None and enable_encryption:
+        click.echo("Create a password used to encrypt your backup repository")
+        click.echo("The password is REQUIRED to decrypt backed-up files")
+        click.echo("There is NO WAY to recover backed up files without the password!")
+        enc_password = click.prompt(
+            "Encryption Password", hide_input=True, confirmation_prompt=True
+        )
+
+    storage = LocalStorage(LocalStorageConfig(base_path=pathlib.Path(destination)))
+    if enc_password is None:
+        encryption = NullEncrypter(NullConfig())
+    else:
+        click.echo("Generating encryption keys...")
+        encryption = NaclEncrypter.new(enc_password)
+
+    repo = backathon.repository.Backathon.initialize(db_path, storage, encryption)
+    cmdline_prefix = sys.argv[0]
+    click.echo("Config database initialized. Add some roots with")
+    click.echo("> {} edit-roots".format(cmdline_prefix))
+    click.echo("then run a scan with")
+    click.echo("> {} scan".format(cmdline_prefix))
+    click.echo("then a backup with")
+    click.echo("> {} backup".format(cmdline_prefix))
 
 
 @main.command()
 @click.argument("path", type=click.Path(path_type=pathlib.Path))
 @click.pass_context
 def add_root(ctx: click.Context, path: pathlib.Path):
+    b = BackathonContext.from_click_context(ctx)
     click.echo("Adding root {}".format(path))
     try:
-        ctx.obj["b"].add_root(path)
+        b.repo.add_root(path)
     except sqlite3.IntegrityError as e:
         raise click.BadParameter(f"Root {path} already exists", param_hint="path")
 
@@ -65,7 +114,8 @@ def add_root(ctx: click.Context, path: pathlib.Path):
 @main.command()
 @click.pass_context
 def list_roots(ctx: click.Context):
-    repo: backathon.repository.Backathon = ctx.obj["repo"]
+    b = BackathonContext.from_click_context(ctx)
+    repo = b.repo
     roots = repo.get_roots()
     if roots:
         for root in roots:
@@ -77,7 +127,8 @@ def list_roots(ctx: click.Context):
 @main.command()
 @click.pass_context
 def edit_roots(ctx: click.Context):
-    repo: backathon.repository.Backathon = ctx.obj["repo"]
+    b = BackathonContext.from_click_context(ctx)
+    repo = b.repo
     roots = repo.get_roots()
     text = "\n".join(str(r.decoded_path) for r in roots)
     new_text = click.edit(text)
@@ -118,7 +169,8 @@ def edit_roots(ctx: click.Context):
 @main.command()
 @click.pass_context
 def edit_excludes(ctx: click.Context):
-    db: backathon.db.Database = ctx.obj["db"]
+    b = BackathonContext.from_click_context(ctx)
+    db = b.db
     current = db.config_get_json("excludes", [])
     text = """# Add excludes, one per line. Globs are supported.\n\n"""
     text += "\n".join(current)
@@ -190,7 +242,8 @@ class FileListRenderable:
 @click.option("--no-rich", is_flag=True)
 @click.pass_context
 def scan(ctx: click.Context, rescan_dirs: bool, no_rich: bool = False):
-    repo: backathon.repository.Backathon = ctx.obj["repo"]
+    b = BackathonContext.from_click_context(ctx)
+    repo = b.repo
     if no_rich:
         repo.scan(rescan_dirs=rescan_dirs)
     else:
@@ -223,14 +276,16 @@ def scan(ctx: click.Context, rescan_dirs: bool, no_rich: bool = False):
 @click.argument("path", type=click.Path(path_type=pathlib.Path))
 @click.pass_context
 def set_local_target(ctx: click.Context, path: pathlib.Path):
-    repo: backathon.repository.Backathon = ctx.obj["repo"]
+    b = BackathonContext.from_click_context(ctx)
+    repo = b.repo
     repo.db.config_set_json("local_storage_config", {"base_path": str(path.absolute())})
 
 
 @main.command()
 @click.pass_context
 def backup(ctx: click.Context):
-    repo: backathon.repository.Backathon = ctx.obj["repo"]
+    b = BackathonContext.from_click_context(ctx)
+    repo = b.repo
     repo.backup()
 
 
@@ -238,11 +293,18 @@ def backup(ctx: click.Context):
 @click.argument("path", type=click.Path(path_type=pathlib.Path))
 @click.pass_context
 def obj_dump_header(ctx: click.Context, path: pathlib.Path):
-    repo: backathon.repository.Backathon = ctx.obj["repo"]
+    b = BackathonContext.from_click_context(ctx)
+    repo = b.repo
     encrypter = repo.get_encrypter()
 
     with open(path, "rb") as fobj:
-        fobj = encrypter.decrypt(fobj)
+        fobj = encrypter.decrypt(
+            fobj,
+            lambda unlock: unlock(click.prompt("Enter Decryption Key", hide_input=True)),
+        )
+
+        # Decompress
+        fobj = repo._decompress_payload(fobj)
 
         unpacker = msgpack.Unpacker(file_like=fobj)
         header_data = unpacker.unpack()

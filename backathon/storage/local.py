@@ -1,7 +1,6 @@
 import pathlib
 import shutil
 from os import PathLike
-from typing import Type
 
 from pydantic import BaseModel
 
@@ -13,11 +12,11 @@ class LocalStorageConfig(BaseModel):
     base_path: pathlib.Path
 
 
-class LocalStorage(StorageBase):
+class LocalStorage(StorageBase[LocalStorageConfig]):
     config: LocalStorageConfig
 
     @classmethod
-    def get_config_class(cls) -> Type[BaseModel]:
+    def get_config_class(cls):
         return LocalStorageConfig
 
     def put_object(self, path: PathLike, payload: Payload):

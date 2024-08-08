@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import hmac
 import io
 import json
@@ -9,13 +10,16 @@ import secrets
 import uuid
 import zlib
 from functools import cached_property
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Type
+
+from typing_extensions import Self
 
 import backathon.backup
 from backathon import encryption, models, storage, util
 from backathon.backup import ObjectRequest
 from backathon.db import Database
-from backathon.encryption.base import EncrypterBase
+from backathon.encryption.base import EncrypterBase, Payload
+from backathon.encryption.nacl import NaclEncrypter
 from backathon.encryption.null import NullEncrypter
 from backathon.exceptions import CorruptedRepository
 from backathon.models import ObjIDType
@@ -39,6 +43,28 @@ class Backathon:
 
     def __init__(self, db: Database):
         self.db = db
+
+    @classmethod
+    def initialize(
+        cls, db_path: os.PathLike, storage: StorageBase, encrypter: EncrypterBase
+    ) -> Self:
+        # Try and write to the remote repo before we do anything else
+        recovery_params = encrypter.get_recovery_state()
+        json_data = json.dumps(recovery_params, indent=4).encode("utf-8")
+        payload = Payload(
+            io.BytesIO(json_data), len(json_data), hashlib.sha1(json_data).digest()
+        )
+        storage.put_object(pathlib.PurePath("backathon.json"), payload)
+
+        # Set up the local database
+        db = Database(db_path, create=True)
+        db.config_set("storage", storage.__class__.__name__)
+        db.config_set_json("storage-config", storage.config)
+
+        db.config_set("encrypter", encrypter.__class__.__name__)
+        db.config_set_json("encrypter-config", encrypter.config)
+
+        return cls(db)
 
     def scan(self, skip_existing=False, progress=None, rescan_dirs: bool = False):
         """Scans the backup set
@@ -113,6 +139,14 @@ class Backathon:
         else:
             return raw
 
+    def _decompress_payload(self, compressed: io.BytesIO) -> io.BytesIO:
+        buf = compressed.getbuffer()
+        if buf[0] == 0x78:
+            # zlib identification marker
+            return io.BytesIO(zlib.decompress(buf))
+        else:
+            return compressed
+
     def _make_obj_putter(
         self, compressor: Compressor, encrypter: EncrypterBase, storage: StorageBase
     ) -> Callable[[ObjectRequest], Awaitable[models.Object]]:
@@ -147,7 +181,7 @@ class Backathon:
             del compressed_payload
 
             objid_hex = objid.hex()
-            path = pathlib.Path("objects", objid_hex[:2], objid_hex)
+            path = pathlib.Path("objects", objid_hex[:3], objid_hex)
 
             storage.put_object(path, encrypted_payload)
 
@@ -211,7 +245,7 @@ class Backathon:
 
         """
         compressor: Compressor
-        if not self.db.config_get_json("enable_compression"):
+        if not self.db.config_get_json("enable_compression", True):
 
             def compressor(x):
                 return x
@@ -229,11 +263,31 @@ class Backathon:
         asyncio.run(backup_coro, debug=logger.isEnabledFor(logging.DEBUG))
 
     def get_encrypter(self) -> EncrypterBase:
-        return NullEncrypter({})
+        encrypter_cls_name = self.db.config_get("encrypter")
+        encrypter_cls: Type[EncrypterBase]
+        if encrypter_cls_name == "NaclEncrypter":
+            encrypter_cls = NaclEncrypter
+        elif encrypter_cls_name == "NullEncrypter":
+            encrypter_cls = NullEncrypter
+        else:
+            raise RuntimeError(
+                f"Invalid or unknown encryption backend: {encrypter_cls_name}"
+            )
+        config_cls = encrypter_cls.get_config_class()
+        config = config_cls.model_validate(self.db.config_get_json("encrypter-config"))
+        return encrypter_cls(config)
 
     def get_storage(self) -> StorageBase:
-        local_storage_config = self.db.config_get_json("local_storage_config")
-        return LocalStorage(local_storage_config)
+        storage_cls_name = self.db.config_get("storage")
+        storage_cls: Type[StorageBase]
+        if storage_cls_name == "LocalStorage":
+            storage_cls = LocalStorage
+        else:
+            raise RuntimeError(f"Invalid or unknown storage backend: {storage_cls_name}")
+
+        config_cls = storage_cls.get_config_class()
+        config = config_cls.model_validate(self.db.config_get_json("storage-config"))
+        return storage_cls(config)
 
     def save_metadata(self):
         """Updates the metadata file in the remote repository
