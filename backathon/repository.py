@@ -172,6 +172,9 @@ class Backathon:
                 if row is not None:
                     return models.Object.model_validate(row)
 
+            # TODO: dispatch the following cpu-heavy operations to a thread pool (after
+            # measuring whether it will actually improve performance, of course)
+
             # Compress
             compressed_payload = compressor(raw_payload)
             del raw_payload
