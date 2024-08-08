@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import io
+import logging
 from typing import IO, Annotated, Any
 
 import nacl.public
@@ -17,6 +18,8 @@ from backathon.encryption.base import (
     UnlockCallback,
 )
 from backathon.models import BytesHexEncoder, ObjIDType
+
+logger = logging.getLogger("backathon.nacl")
 
 
 class NaclConfig(BaseModel):
@@ -87,6 +90,7 @@ class NaclEncrypter(EncrypterBase[NaclConfig]):
     @staticmethod
     def _derive_symmetric_key(password: str, salt: bytes, ops: int, mem: int) -> bytes:
         """Derives the key used to encrypt the private part of the public/private key"""
+        logger.debug("Deriving key from password. This may take a moment...")
         return nacl.pwhash.argon2id.kdf(
             nacl.secret.SecretBox.KEY_SIZE,
             password.encode("utf-8"),

@@ -1,4 +1,5 @@
 import dataclasses
+import io
 import logging
 import os
 import pathlib
@@ -304,6 +305,8 @@ def obj_dump_header(ctx: click.Context, path: pathlib.Path):
         )
 
         # Decompress
+        if not isinstance(fobj, io.BytesIO):
+            fobj = io.BytesIO(fobj.read())
         fobj = repo._decompress_payload(fobj)
 
         unpacker = msgpack.Unpacker(file_like=fobj)
@@ -312,7 +315,7 @@ def obj_dump_header(ctx: click.Context, path: pathlib.Path):
     header = models.ObjectHeader.model_validate(header_data)
     import rich.pretty
 
-    rich.print(header)
+    rich.pretty.pprint(header)
 
 
 if __name__ == "__main__":
