@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import itertools
 import json
 import logging
@@ -16,6 +18,8 @@ from typing import (
 )
 
 from pydantic import BaseModel
+
+from backathon import models
 
 logger = logging.getLogger("backathon.db")
 
@@ -58,7 +62,7 @@ MIGRATIONS: list[list[str]] = [
 
 
 class Database:
-    def __init__(self, path: PathLike, *, create: bool = False):
+    def __init__(self, path: str | PathLike[str], *, create: bool = False):
         self.path = pathlib.Path(path)
         if not create and not self.path.is_file():
             raise FileNotFoundError(f"Config database not found: {self.path}")
@@ -182,3 +186,17 @@ class Database:
                 raise
             finally:
                 self.conn.execute(f"RELEASE {savepoint_name}")
+
+    def get_fsentry(self, path: str | bytes | os.PathLike) -> models.FSEntry | None:
+        """Shortcut to get an fsentry by its path"""
+        path = os.fspath(path)
+        if isinstance(path, str):
+            path = os.fsencode(path)
+        return next(
+            self.get_objects(
+                models.FSEntry,
+                "SELECT * FROM fsentry WHERE path=? LIMIT 1",
+                (path,),
+            ),
+            None,
+        )

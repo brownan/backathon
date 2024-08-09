@@ -3,143 +3,123 @@ import pathlib
 import stat
 from unittest import mock
 
-import umsgpack
-
-from backathon import models, util
-from backathon.restore import unpack_payload
-from tests.base import TestBase
-
-
-class FSEntryTest(TestBase):
-    """Tests some misc functionality of the FSEntry class"""
-
-    def test_invalidate(self):
-        """Tests that the FSEntry.invalidate() method works"""
-        o = models.Object.objects.using(self.repo.db).create(objid=b"a")
-
-        self.fsentry.all().delete()
-
-        root = self.fsentry.create(
-            path="/1",
-            obj=o,
-        )
-        e1 = self.fsentry.create(
-            path="/1/2",
-            parent=root,
-            obj=o,
-        )
-        e2 = self.fsentry.create(
-            path="/1/2/3",
-            parent=e1,
-            obj=o,
-        )
-        e3 = self.fsentry.create(
-            path="/1/2/3/4",
-            parent=e2,
-            obj=None,
-        )
-
-        self.assertListEqual(
-            list(self.fsentry.filter(obj__isnull=True)),
-            [e3],
-        )
-        self.assertSetEqual(
-            set(self.fsentry.filter(obj__isnull=False)),
-            {root, e1, e2},
-        )
-
-        e3.invalidate()
-
-        self.assertEqual(self.fsentry.filter(obj__isnull=True).count(), 4)
+from backathon import models
+from backathon.encryption.null import NullConfig, NullEncrypter
+from backathon.repository import Backathon
+from backathon.storage.local import LocalStorage, LocalStorageConfig
+from tests.base import BackathonTest
 
 
-class TestScan(TestBase):
+class TestScan(BackathonTest):
     """Tests the scan functionality of the FSEntry class"""
 
     def test_scan(self):
+        """Tests that a basic scan creates the expected fsentries"""
         self.create_file("dir/file1", "file contents")
         self.create_file("dir2/file2", "another file contents")
-        self.backathon.scan()
-        self.assertEqual(5, self.fsentry.count())
-        entries = self.fsentry.all()
-
-        names = set(e.name for e in entries)
-        for name in ["file1", "file2", "dir", "dir2"]:
-            self.assertIn(name, names)
+        back = self.init_basic_repo()
+        back.scan()
+        entries = list(back.db.get_objects(models.FSEntry, "SELECT * FROM fsentry"))
+        self.assertEqual(5, len(entries))
+        names = set(e.decoded_path.name for e in entries)
+        self.assertSetEqual(
+            {"file1", "file2", "dir", "dir2", self.backupdir.name},
+            names,
+        )
 
     def test_deleted_file(self):
+        """Tests that scanning after deleteing a file will delete its fsentry"""
         file = self.create_file("dir/file1", "file contents")
-        self.backathon.scan()
-        self.assertTrue(self.fsentry.filter(path=os.fspath(file)).exists())
+        back = self.init_basic_repo()
+        back.scan()
+        self.assertIsNotNone(back.db.get_fsentry(file))
         file.unlink()
-        self.backathon.scan()
-        self.assertFalse(self.fsentry.filter(path=os.fspath(file)).exists())
+        back.scan()
+        self.assertIsNone(back.db.get_fsentry(file))
 
     def test_deleted_dir(self):
+        """Tests that deleting a directory will also cause all descendent fsentries
+        to be deleted
+
+        """
         file = self.create_file("dir/file1", "file contents")
-        self.backathon.scan()
+        back = self.init_basic_repo()
+        back.scan()
         file.unlink()
         file.parent.rmdir()
-        self.backathon.scan()
-        self.assertFalse(self.fsentry.filter(path=os.fspath(file.parent)).exists())
-        self.assertFalse(self.fsentry.filter(path=os.fspath(file)).exists())
+        back.scan()
+        self.assertIsNone(back.db.get_fsentry(file.parent))
+        self.assertIsNone(back.db.get_fsentry(file))
 
     def test_replace_dir_with_file(self):
+        """Tests that the scan properly handles a directory being replaced by a file
+        with the same name
+
+        """
         file = self.create_file("dir/file1", "file contents")
-        self.backathon.scan()
+        back = self.init_basic_repo()
+        back.scan()
         file.unlink()
         file.parent.rmdir()
-        file.parent.write_text("another  file contents")
-        # Scan the parent first
-        self.fsentry.get(path=os.fspath(file.parent)).scan()
-        self.backathon.scan()
-        self._replace_dir_with_file_asserts(file)
+        file.parent.write_text("another file contents")
+        back.scan()
 
-    def _replace_dir_with_file_asserts(self, file):
-        self.assertTrue(self.fsentry.filter(path=os.fspath(file.parent)).exists())
-        self.assertFalse(self.fsentry.filter(path=os.fspath(file)).exists())
-        entry = self.fsentry.get(path=os.fspath(file.parent))
-        self.assertEqual(entry.children.count(), 0)
+        self.assertIsNone(back.db.get_fsentry(file))
+        entry = back.db.get_fsentry(file.parent)
+        assert entry is not None
+        assert entry.st_mode is not None
+        children = list(
+            back.db.get_objects(
+                models.FSEntry, "SELECT * FROM fsentry WHERE parent=?", (entry.id,)
+            )
+        )
+        self.assertEqual(0, len(children))
         self.assertTrue(stat.S_ISREG(entry.st_mode))
-
-    def test_replace_dir_with_file_2(self):
-        file = self.create_file("dir/file1", "file contents")
-        self.backathon.scan()
-        file.unlink()
-        file.parent.rmdir()
-        file.parent.write_text("another  file contents")
-        # Scan the file first
-        self.fsentry.get(path=os.fspath(file)).scan()
-        self.backathon.scan()
-        self._replace_dir_with_file_asserts(file)
 
     def test_dir_no_permission(self):
         """If we don't have permission to read a directory, it should be
         considered empty"""
         file = self.create_file("dir/file1", "file contents")
-
-        real_listdir = os.listdir
-
-        def patched_listdir(path):
-            if pathlib.Path(path) == file.parent:
-                raise PermissionError()
-            return real_listdir(path)
-
-        with mock.patch("os.listdir", patched_listdir):
-            self.backathon.scan()
-
-        self.assertTrue(self.fsentry.filter(path=os.fspath(file.parent)).exists())
-        self.assertFalse(self.fsentry.filter(path=os.fspath(file)).exists())
+        file.parent.chmod(0o000)
+        back = self.init_basic_repo()
+        back.scan()
+        self.assertIsNotNone(back.db.get_fsentry(file.parent))
+        self.assertIsNone(back.db.get_fsentry(file))
 
     def test_root_merge(self):
+        """Tests that when adding a root which is an ancestor of an existing root,
+        the two roots are merged
+
+        """
         file = self.create_file("dir1/dir2/file", "file contents")
-        self.fsentry.create(path=os.fspath(file.parent))
-        self.assertEqual(2, self.fsentry.filter(parent__isnull=True).count())
-        self.backathon.scan()
-        self.assertEqual(1, self.fsentry.filter(parent__isnull=True).count())
+        back = Backathon.initialize(
+            self.db_path,
+            LocalStorage(LocalStorageConfig(base_path=self.repodir)),
+            NullEncrypter(NullConfig()),
+        )
+        back.add_root(file.parent)
+        back.scan()
+
+        def get_roots() -> list[models.FSEntry]:
+            return list(
+                back.db.get_objects(
+                    models.FSEntry, "SELECT * FROM fsentry WHERE parent IS NULL"
+                )
+            )
+
+        roots = get_roots()
+        self.assertEqual(1, len(roots))
+        self.assertEqual(file.parent, roots[0].decoded_path)
+
+        back.add_root(self.backupdir)
+        back.scan()
+
+        roots = get_roots()
+        self.assertEqual(1, len(roots))
+        self.assertEqual(self.backupdir, roots[0].decoded_path)
 
 
-class TestBackup(TestBase):
+class TestBackup(BackathonTest):
     """Tests the backup functionality of the FSEntry class"""
 
     def setUp(self):

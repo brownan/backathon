@@ -35,7 +35,10 @@ class Backathon:
 
     @classmethod
     def initialize(
-        cls, db_path: os.PathLike, storage: StorageBase, encrypter: EncrypterBase
+        cls,
+        db_path: str | os.PathLike[str],
+        storage: StorageBase,
+        encrypter: EncrypterBase,
     ) -> Self:
         # Try and write to the remote repo before we do anything else
         recovery_params = encrypter.get_recovery_state()

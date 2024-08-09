@@ -19,7 +19,7 @@ class LocalStorage(StorageBase[LocalStorageConfig]):
     def get_config_class(cls):
         return LocalStorageConfig
 
-    def put_object(self, path: PathLike, payload: Payload):
+    def put_object(self, path: str | PathLike[str], payload: Payload):
         base_path = self.config.base_path
         path = base_path / path
         path.parent.mkdir(parents=True, exist_ok=True)

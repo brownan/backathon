@@ -21,5 +21,5 @@ class StorageBase(ABC, Generic[C]):
         ...
 
     @abstractmethod
-    def put_object(self, path: PathLike, payload: Payload):
+    def put_object(self, path: str | PathLike[str], payload: Payload):
         ...

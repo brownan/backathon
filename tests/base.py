@@ -1,7 +1,12 @@
+import os
 import pathlib
 import tempfile
 from contextlib import ExitStack
 from unittest import TestCase
+
+from backathon.encryption.null import NullConfig, NullEncrypter
+from backathon.repository import Backathon
+from backathon.storage.local import LocalStorage, LocalStorageConfig
 
 
 class BackathonTest(TestCase):
@@ -16,7 +21,7 @@ class BackathonTest(TestCase):
             )
         )
         # Directory to store the data files
-        self.datadir = pathlib.Path(
+        self.repodir = pathlib.Path(
             self.stack.enter_context(
                 tempfile.TemporaryDirectory(),
             )
@@ -27,8 +32,23 @@ class BackathonTest(TestCase):
         # and all threads access the same database.
         self.db_path = self.stack.enter_context(tempfile.NamedTemporaryFile()).name
 
-    def backuppath(self, *args):
+    def backuppath(self, *args) -> pathlib.Path:
         return self.backupdir.joinpath(*args)
 
-    def datapath(self, *args):
-        return self.datadir.joinpath(*args)
+    def datapath(self, *args) -> pathlib.Path:
+        return self.repodir.joinpath(*args)
+
+    def create_file(self, path: str | os.PathLike[str], contents: str) -> pathlib.Path:
+        path = self.backuppath(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents)
+        return path
+
+    def init_basic_repo(self) -> Backathon:
+        back = Backathon.initialize(
+            self.db_path,
+            LocalStorage(LocalStorageConfig(base_path=self.repodir)),
+            NullEncrypter(NullConfig()),
+        )
+        back.add_root(self.backupdir)
+        return back
