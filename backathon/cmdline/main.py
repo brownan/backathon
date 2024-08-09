@@ -10,7 +10,6 @@ from datetime import timedelta
 from typing import Sequence
 
 import click
-import msgpack
 import rich
 from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
 from rich.live import Live
@@ -27,9 +26,10 @@ from rich.text import Text
 
 import backathon.db
 import backathon.repository
-from backathon import models
+from backathon import repoobject
 from backathon.encryption.nacl import NaclEncrypter
 from backathon.encryption.null import NullConfig, NullEncrypter
+from backathon.models import ObjectHeader
 from backathon.storage.local import LocalStorage, LocalStorageConfig
 
 logger = logging.getLogger("backathon.cmdline")
@@ -307,12 +307,9 @@ def obj_dump_header(ctx: click.Context, path: pathlib.Path):
         # Decompress
         if not isinstance(fobj, io.BytesIO):
             fobj = io.BytesIO(fobj.read())
-        fobj = repo._decompress_payload(fobj)
+        fobj = repoobject.decompress_payload(fobj)
 
-        unpacker = msgpack.Unpacker(file_like=fobj)
-        header_data = unpacker.unpack()
-
-    header = models.ObjectHeader.model_validate(header_data)
+        header = ObjectHeader.from_stream(fobj)
     import rich.pretty
 
     rich.pretty.pprint(header)

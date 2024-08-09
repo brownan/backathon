@@ -6,13 +6,12 @@ import logging
 import os.path
 import pathlib
 import secrets
-import zlib
 from typing import Awaitable, Callable, Type
 
 from typing_extensions import Self
 
 import backathon.backup
-from backathon import models
+from backathon import models, repoobject
 from backathon.backup import ObjectRequest
 from backathon.db import Database
 from backathon.encryption.base import EncrypterBase, Payload
@@ -105,40 +104,6 @@ class Backathon:
             )
         )
 
-    def _make_obj_payload(self, obj_req: ObjectRequest) -> io.BytesIO:
-        # Build the object contents
-        if (
-            isinstance(obj_req.body, io.BytesIO)
-            and len(obj_req.body.getbuffer()) != obj_req.header.length
-        ):
-            raise RuntimeError("Size mismatch between header and body")
-
-        raw_payload = io.BytesIO()
-        raw_payload.write(obj_req.header.model_dump_msgpack())
-        if obj_req.body is not None:
-            if isinstance(obj_req.body, io.BytesIO):
-                raw_payload.write(obj_req.body.getbuffer())
-            else:
-                raw_payload.write(obj_req.body.read())
-        raw_payload.seek(0)
-        return raw_payload
-
-    def _compress_payload(self, raw: io.BytesIO) -> io.BytesIO:
-        buf = raw.getbuffer()
-        compressed_bytes = zlib.compress(buf)
-        if len(compressed_bytes) < len(buf):
-            return io.BytesIO(compressed_bytes)
-        else:
-            return raw
-
-    def _decompress_payload(self, compressed: io.BytesIO) -> io.BytesIO:
-        buf = compressed.getbuffer()
-        if buf[0] == 0x78:
-            # zlib identification marker
-            return io.BytesIO(zlib.decompress(buf))
-        else:
-            return compressed
-
     def _make_obj_putter(
         self,
         compressor: Compressor | None,
@@ -155,7 +120,7 @@ class Backathon:
             * creating the models.Object instance and returning it
             """
 
-            raw_payload = self._make_obj_payload(obj_req)
+            raw_payload = repoobject.make_obj_payload(obj_req)
 
             # Make the objid
             objid = encrypter.make_objid(raw_payload)
@@ -247,7 +212,7 @@ class Backathon:
         """
         compressor: Compressor | None = None
         if self.db.config_get_json("enable_compression", True):
-            compressor = self._compress_payload
+            compressor = repoobject.compress_payload
         encrypter: EncrypterBase = self.get_encrypter()
         storage: StorageBase = self.get_storage()
 

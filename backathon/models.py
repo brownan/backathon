@@ -322,8 +322,8 @@ class ObjectHeader(BaseModel):
         return cls.model_validate(msgpack.unpackb(data))
 
     @classmethod
-    def read_header(cls, buf: IO[bytes]) -> Self:
-        """Reads the header from the stream and returns the ObjectHeader instance
+    def from_stream(cls, buf: IO[bytes]) -> Self:
+        """Reads the header from the bytes stream and returns an ObjectHeader instance
 
         Leaves the stream open for reading at the position directly after the header
 
