@@ -27,10 +27,18 @@ class BackathonTest(TestCase):
             )
         )
 
-        # Create a repo object with a temporary database. We can't use sqlite
-        # in-memory databases because the backup routine is multi-threaded
-        # and all threads access the same database.
+        # Reserve a name in the filesystem that tests can use to create a sqlite
+        # database. The context manager makes sure it's removed at the end of the test.
         self.db_path = self.stack.enter_context(tempfile.NamedTemporaryFile()).name
+
+        # For some reason, sqlite doesn't remove the shm and wal files when a test
+        # finishes. So we remove them manually.
+        self.stack.callback(
+            lambda: pathlib.Path(self.db_path + "-shm").unlink(missing_ok=True)
+        )
+        self.stack.callback(
+            lambda: pathlib.Path(self.db_path + "-wal").unlink(missing_ok=True)
+        )
 
     def backuppath(self, *args) -> pathlib.Path:
         return self.backupdir.joinpath(*args)
