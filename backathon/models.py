@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import datetime
 import enum
 import logging
@@ -18,7 +20,7 @@ from pydantic import (
 )
 from typing_extensions import Self
 
-from backathon.db import Database
+import backathon.db
 
 if TYPE_CHECKING:
     pass
@@ -201,7 +203,7 @@ class FSEntry(BaseModel):
 
     def update(
         self,
-        db: Database,
+        db: backathon.db.Database,
         objid: ObjIDType | None,
         new: bool,
         stat_result: os.stat_result,
