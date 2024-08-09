@@ -146,10 +146,7 @@ class Backathon:
             encrypted_payload = encrypter.encrypt(compressed_payload)
             del compressed_payload
 
-            objid_hex = objid.hex()
-            path = pathlib.Path("objects", objid_hex[:3], objid_hex)
-
-            storage.put_object(path, encrypted_payload)
+            storage.put_object(repoobject.make_object_path(objid), encrypted_payload)
 
             with self.db.atomic(), self.db.cursor() as cursor:
                 cursor.execute(
@@ -211,7 +208,7 @@ class Backathon:
 
         """
         compressor: Compressor | None = None
-        if self.db.config_get_json("enable_compression", True):
+        if self.db.config_get_json("enable-compression", True):
             compressor = repoobject.compress_payload
         encrypter: EncrypterBase = self.get_encrypter()
         storage: StorageBase = self.get_storage()

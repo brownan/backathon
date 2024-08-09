@@ -1,9 +1,11 @@
 """Utility functions for working with repository objects"""
 
 import io
+import pathlib
 import zlib
 
 from backathon.backup import ObjectRequest
+from backathon.models import ObjIDType
 
 
 def make_obj_payload(obj_req: ObjectRequest) -> io.BytesIO:
@@ -59,3 +61,12 @@ def decompress_payload(compressed: io.BytesIO) -> io.BytesIO:
         return io.BytesIO(zlib.decompress(buf))
     else:
         return compressed
+
+
+def make_object_path(objid: ObjIDType) -> pathlib.PurePosixPath:
+    """Defines the path in the storage backend used to store an object
+    with the given object id
+
+    """
+    objid_hex = objid.hex()
+    return pathlib.PurePosixPath("objects", objid_hex[:3], objid_hex)

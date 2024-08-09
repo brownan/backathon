@@ -1,60 +1,59 @@
 import os
 import pathlib
 import stat
+from typing import Iterable
 from unittest import mock
 
+from backathon import models, repoobject
+from backathon.models import ObjectHeader, ObjectType
 from tests.base import BackathonTest
 
 
 class TestBackup(BackathonTest):
-    """Tests the backup functionality of the FSEntry class"""
+    """Tests backup functionality
+
+    This test case covers both saving objects to storage, and updating the objects table
+    in the database.
+    """
 
     def setUp(self):
         super().setUp()
+        self.back = self.init_basic_repo()
 
-    def _assert_file_obj(self, obj, contents):
-        """Asserts that the given object is a file object with the given
-        contents"""
-        payload = unpack_payload(self.repo.get_object(obj.objid))
-        self.assertEqual("inode", next(payload))
+    def _assert_obj_contents(self, objid: bytes, body: bytes):
+        """Asserts that the given objid has the given body by reading in the
+        object on the filesystem
 
-        info = next(payload)
-        datatype, chunks = next(payload)
-        # No inline files; the base class set the chunk threshold to 0
-        self.assertEqual(datatype, "chunklist")
-        self.assertRaises(StopIteration, next, payload)
 
-        buf = bytearray(info["size"])
-        for pos, chunkid in chunks:
-            chunk = self.object.get(objid=chunkid)
-            chunkpayload = unpack_payload(self.repo.get_object(chunk.objid))
-            self.assertEqual("blob", next(chunkpayload))
-            chunkcontents = next(chunkpayload)
-            self.assertRaises(StopIteration, next, chunkpayload)
-            buf[pos : pos + len(chunkcontents)] = chunkcontents
+        """
+        full_obj_path = self.backuppath(repoobject.make_object_path(objid))
+        with full_obj_path.open("rb") as stream:
+            header = ObjectHeader.from_stream(stream)
+            self.assertEqual(body, stream.read())
 
-        self.assertEqual(buf.decode("utf-8"), contents)
-
-    def _assert_symlink(self, obj, target):
+    def _assert_symlink(self, objid: bytes, target: bytes):
         """Asserts that the given object is a symlink type with the given
-        target"""
-        payload = unpack_payload(self.repo.get_object(obj.objid))
-        self.assertEqual("symlink", next(payload))
-        next(payload)
-        self.assertEqual(os.fsencode(target), next(payload))
+        target
 
-    def _assert_dir(self, obj, contents):
+        """
+        full_obj_path = self.backuppath(repoobject.make_object_path(objid))
+        with full_obj_path.open("rb") as stream:
+            header = ObjectHeader.from_stream(stream)
+            self.assertEqual(ObjectType.SYMLINK, header.type)
+            self.assertEqual(target, stream.read())
+
+    def _assert_dir(self, objid: bytes, entries: Iterable[bytes]):
         """Asserts that the given object is a dir object with the given
-        contents"""
-        payload = unpack_payload(self.repo.get_object(obj.objid))
-        self.assertEqual("tree", next(payload))
+        entries
 
-        next(payload)
-        children = next(payload)
-        self.assertRaises(StopIteration, next, payload)
-
-        children_objs = {name: self.object.get(objid=objid) for name, objid in children}
-        self._assert_objects(contents, children_objs)
+        """
+        full_obj_path = self.backuppath(repoobject.make_object_path(objid))
+        with full_obj_path.open("rb") as stream:
+            header = ObjectHeader.from_stream(stream)
+            self.assertEqual(ObjectType.TREE, header.type)
+            assert header.entries is not None
+            obj_entries = {e.name for e in header.entries}
+            self.assertSetEqual(set(entries), obj_entries)
 
     def _assert_objects(self, structure, objects):
         """Asserts that a hierarchy of objects described by `structure`
@@ -130,24 +129,29 @@ class TestBackup(BackathonTest):
         """Do a backup and then assert the objects actually get committed to
         the backing store"""
         self.create_file("dir/file1", "file contents")
-        self.backathon.scan()
-        self.backathon.backup()
+        self.back.scan()
+        self.back.backup()
 
-        for obj in self.object.all():
-            # Assert that an object file exists in the backing store and is
-            # named properly. In particular, make sure we're naming them with
-            # the hex representation of the objid
-            obj_filepath = pathlib.Path(
-                self.datadir,
-                "objects",
-                obj.objid.hex()[:3],
-                obj.objid.hex(),
+        all_objs = list(
+            self.back.db.get_objects(
+                models.Object,
+                "SELECT * FROM objects",
             )
-            self.assertTrue(obj_filepath.is_file())
+        )
+        # Expect 2 tree and 1 inode objects
+        self.assertEqual(3, len(all_objs))
+        for obj in all_objs:
+            obj_filepath = repoobject.make_object_path(obj.objid)
+            # See that this object actually exists in the backup repo
+            full_path = self.datapath(obj_filepath)
+            self.assertTrue(full_path.is_file())
 
-            remote_payload = self.repo.get_object(obj.objid)
-
-            self.assertEqual(obj.type, umsgpack.unpack(util.BytesReader(remote_payload)))
+            # Read in the object and make sure its header is well-formed and has the same
+            # type as we expect according to the database
+            with full_path.open("rb") as stream:
+                header = ObjectHeader.from_stream(stream)
+                body = stream.read()
+                self.assertEqual(obj.type, header.type)
 
     def test_backup(self):
         self.create_file("dir/file1", "file contents")

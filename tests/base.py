@@ -58,5 +58,6 @@ class BackathonTest(TestCase):
             LocalStorage(LocalStorageConfig(base_path=self.repodir)),
             NullEncrypter(NullConfig()),
         )
+        back.db.config_set_json("enable-compression", False)
         back.add_root(self.backupdir)
         return back

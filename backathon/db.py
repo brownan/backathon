@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import itertools
 import json
 import logging
@@ -22,6 +23,10 @@ from pydantic import BaseModel
 from backathon import models
 
 logger = logging.getLogger("backathon.db")
+
+# Explicit datetime adapter. The default adapter is deprecated in Python 3.12
+# Note: Converting back to Python types is done by Pydantic, not sqlite3 converters.
+sqlite3.register_adapter(datetime.datetime, lambda val: val.isoformat())
 
 M = TypeVar("M", bound=BaseModel)
 
