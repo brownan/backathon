@@ -1,12 +1,16 @@
+from __future__ import annotations
+
 import os
 import pathlib
 import stat
-from typing import Iterable
 from unittest import mock
 
 from backathon import models, repoobject
-from backathon.models import ObjectHeader, ObjectType
+from backathon.models import ObjectHeader, ObjectType, ObjIDType
 from tests.base import BackathonTest
+
+ExpectedFile = str
+ExpectedDir = dict[str, "ExpectedDir | ExpectedFile"]
 
 
 class TestBackup(BackathonTest):
@@ -42,7 +46,7 @@ class TestBackup(BackathonTest):
             self.assertEqual(ObjectType.SYMLINK, header.type)
             self.assertEqual(target, stream.read())
 
-    def _assert_dir(self, objid: bytes, entries: Iterable[bytes]):
+    def _assert_dir(self, objid: ObjIDType, expected: ExpectedDir):
         """Asserts that the given object is a dir object with the given
         entries
 
@@ -51,83 +55,79 @@ class TestBackup(BackathonTest):
         with full_obj_path.open("rb") as stream:
             header = ObjectHeader.from_stream(stream)
             self.assertEqual(ObjectType.TREE, header.type)
+
+            # No body
+            self.assertEqual(b"", stream.read())
+
             assert header.entries is not None
-            obj_entries = {e.name for e in header.entries}
-            self.assertSetEqual(set(entries), obj_entries)
+            obj_entries = {e.name_str: e.objid for e in header.entries}
 
-    def _assert_objects(self, structure, objects):
-        """Asserts that a hierarchy of objects described by `structure`
-        is the same as the hierarchy of objects given by `objects`
+            # All the same names should be set
+            self.assertSetEqual(set(expected), set(obj_entries))
 
-        :param structure: A mapping of names to structure|string describing
-            the layout of the objects. Another structure indicates the name
-            is a directory, and a string indicates it's a file where the
-            string is the file's contents.
-        :param objects: A mapping of names to Object instances.
+            for name, expected_val in expected.items():
+                referenced_objid = obj_entries[name]
+                if isinstance(expected_val, dict):
+                    # Another directory
+                    self._assert_dir(referenced_objid, expected_val)
+                elif isinstance(expected_val, str):
+                    # A file
+                    pass
+                elif isinstance(expected_val, tuple):
+                    # A symlink
+                    pass
+                else:
+                    raise Exception
 
-        Corresponding names in the structure and objects dictionaries are
-        checked for equivalence.
-        """
+    def assert_backupsets(self, *snapshots: ExpectedDir):
+        """Asserts that one or more snapshots exist both in the database and on disk
 
-        # Encode all file names and we do byte comparisons throughout this
-        # method and the helper methods. It's easier than decoding the object
-        # file names everywhere they appear.
-        structure = {os.fsencode(name): contents for name, contents in structure.items()}
+        Each given snapshot describes a directory hierarchy of directories and
+        files. The top-most ExpectedDir contains the roots of the snapshot, if there were
+        more than one root in the backup set. Otherwise, the top-most ExpectedDir
+        will usually just have the one entry mapping self.backupdir to another
+        ExpectedDir.
 
-        for name, contents in structure.items():
-            self.assertIn(name, objects, "Object {} not found".format(name))
-            obj = objects.pop(name)
-            if isinstance(contents, str):
-                self._assert_file_obj(obj, contents)
-            elif isinstance(contents, dict):
-                self._assert_dir(obj, contents)
-            elif isinstance(contents, tuple) and contents[0] == "s":
-                # symlink
-                self._assert_symlink(obj, contents[1])
-            else:
-                raise TypeError("Unknown contents type")
-
-        self.assertEqual(
-            0,
-            len(objects),
-            "Extra objects not expected: {}".format(objects),
-        )
-
-    def assert_backupsets(self, *structures):
-        """Asserts that the given structures exist in the database as objects
-
-        The given structures describe what files we've backed up, and should
-        exist as a set of object files in the local database.
-
-        Each structure is a dictionary mapping names to values. Each value is
-        either another structure (indicating the name is a directory) or a
-        string (indicating the name is a file with the string as its contents)
-
-        The names in the top level structures are the backup roots, which for
-        these tests, should always be just self.backupdir unless the specific
-        test adds more backup roots.
-
-        Each structure in the structures list is a separate backup. So if a
-        test does one backup, then there should be one structure given. If a
+        Each snapshot in the snapshots list is a separate backup. So if a
+        test does one backup, then there should be one snapshot given. If a
         test does two backups, then it should provide two structures
         describing the contents of each backup.
         """
-        backup_dates = (
-            self.snapshot.all().distinct().order_by("date").values_list("date", flat=True)
-        )
+        with self.back.db.cursor() as cursor:
+            cursor.execute("SELECT distinct timestamp FROM snapshots ORDER BY timestamp")
+            backup_dates: list[str] = [r[0] for r in cursor]
 
         self.assertEqual(
-            len(structures),
+            len(snapshots),
             len(backup_dates),
+            "Different number of snapshots given than are in the database",
         )
 
-        for structure, date in zip(structures, backup_dates):
-            roots = {os.fsencode(s.path): s.root for s in self.snapshot.filter(date=date)}
-            self._assert_objects(structure, roots)
+        for snapshot, date in zip(snapshots, backup_dates):
+            # This snapshot has len(snapshot) roots, so should have that many
+            # Snapshot objects in the database.
+            db_snaphots = list(
+                self.back.db.get_objects(
+                    models.Snapshot, "SELECT * FROM snapshots WHERE timestamp=?", (date,)
+                )
+            )
+            self.assertEqual(
+                len(snapshot), len(db_snaphots), "DB has wrong number of snapshot roots"
+            )
+            # Now correlated them with each other
+            roots = {s.path: s.root for s in db_snaphots}
+            for root_dir_name, root_dir_expected in snapshot.items():
+                # Root of a snapshot is always a directory
+                assert isinstance(root_dir_expected, dict)
+
+                root_objid = roots[root_dir_name]
+                self._assert_dir(root_objid, root_dir_expected)
 
     def test_objects_comitted(self):
-        """Do a backup and then assert the objects actually get committed to
-        the backing store"""
+        """Tests that objects being backed up are both committed to the database and
+        written to the filesystem
+
+        """
         self.create_file("dir/file1", "file contents")
         self.back.scan()
         self.back.backup()
@@ -150,17 +150,19 @@ class TestBackup(BackathonTest):
             # type as we expect according to the database
             with full_path.open("rb") as stream:
                 header = ObjectHeader.from_stream(stream)
-                body = stream.read()
                 self.assertEqual(obj.type, header.type)
 
     def test_backup(self):
         self.create_file("dir/file1", "file contents")
         self.create_file("dir/file2", "file contents 2")
-        self.backathon.scan()
-        self.assertEqual(4, self.fsentry.count())
-        self.backathon.backup()
-        self.assertTrue(all(entry.obj is not None for entry in self.fsentry.all()))
-        self.assertEqual(6, self.object.count())
+        self.back.scan()
+        entries = list(self.back.db.get_objects(models.FSEntry, "SELECT * FROM fsentry"))
+        self.assertEqual(4, len(entries))
+        self.back.backup()
+        entries = list(self.back.db.get_objects(models.FSEntry, "SELECT * FROM fsentry"))
+        self.assertTrue(all(entry.objid is not None for entry in entries))
+        objects = list(self.back.db.get_objects(models.Object, "SELECT * FROM objects"))
+        self.assertEqual(6, len(objects))
 
         self.assert_backupsets(
             {

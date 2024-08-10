@@ -295,6 +295,10 @@ class EntryRef(NamedTuple):
         yield "name", self.name.decode(sys.getfilesystemencoding(), errors="replace")
         yield "objid", self.objid.hex().lower()
 
+    @property
+    def name_str(self):
+        return self.name.decode("utf-8", errors="replace")
+
 
 class ObjectHeader(BaseModel):
     """Information that gets serialized into the top of every object payload"""
