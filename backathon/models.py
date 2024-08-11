@@ -9,14 +9,19 @@ import pathlib
 import sys
 from collections.abc import Collection
 from functools import cached_property
-from typing import IO, TYPE_CHECKING, Annotated, NamedTuple, NewType, cast
+from typing import IO, TYPE_CHECKING, Annotated, Any, NamedTuple, NewType, cast
 
 import msgpack
 from pydantic import (
     BaseModel,
-    EncodedBytes,
     EncoderProtocol,
+    PlainSerializer,
     WrapSerializer,
+    WrapValidator,
+)
+from pydantic_core.core_schema import (
+    ValidationInfo,
+    ValidatorFunctionWrapHandler,
 )
 from typing_extensions import Self
 
@@ -27,11 +32,26 @@ if TYPE_CHECKING:
 
 scanlogger = logging.getLogger("backathon.scan")
 
-ObjIDType = NewType("ObjIDType", bytes)
+
+def bytes_validator(
+    v: Any, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
+) -> bytes:
+    """If validating in json mode, assume it's hex encoded. Otherwise pass it thru"""
+    if info.mode == "json" and v is not None:
+        assert isinstance(v, str)
+        return handler(bytes.fromhex(v))
+    return handler(v)
+
+
+ObjIDType = Annotated[
+    NewType("ObjIDType", bytes),
+    WrapValidator(bytes_validator),
+    PlainSerializer(lambda v: v.hex(), return_type=str, when_used="json-unless-none"),
+]
 
 
 class ObjectType(str, enum.Enum):
-    INODE = "inode"
+    FILE = "file"
     BLOB = "blob"
     TREE = "tree"
     SYMLINK = "symlink"
@@ -92,6 +112,9 @@ class Object(BaseModel):
 
     def __str__(self):
         return self.objid_hex[:7]
+
+    def __repr__(self):
+        return f"<Object {self.type and self.type.name} {self.objid.hex()}>"
 
 
 class ObjectRelation(BaseModel):
@@ -232,14 +255,14 @@ class Snapshot(BaseModel):
     """A snapshot of a filesystem at a particular time"""
 
     path: str
-    root: Annotated[ObjIDType, EncodedBytes(encoder=BytesHexEncoder)]
+    root: ObjIDType
     timestamp: datetime.datetime
 
 
 class ObjectStats(BaseModel):
     """Information in the object payload header related to entries on the filesystem
 
-    e.g. inode, tree, and symlink all have these fields in common, but blobs don't
+    e.g. file, tree, and symlink all have these fields in common, but blobs don't
 
     """
 
@@ -334,16 +357,17 @@ class ObjectHeader(BaseModel):
         """
         unpacker = msgpack.Unpacker(buf)
         header_data = unpacker.unpack()
+        buf.seek(unpacker.tell())
         return cls.model_validate(header_data)
 
     @property
     def file_size(self) -> int | None:
-        """Convenience property to get the file size of file (inode) objects"""
+        """Convenience property to get the file size of file objects"""
         return self.stats.size if self.stats is not None else None
 
     @property
     def last_modified_time(self) -> datetime.datetime | None:
-        """Convenience property to get the mtime of a file (inode) object"""
+        """Convenience property to get the mtime of a file object"""
         return (
             datetime.datetime.fromtimestamp(
                 self.stats.mtime / 1_000_000_000, tz=datetime.timezone.utc

@@ -58,7 +58,7 @@ MIGRATIONS: list[list[str]] = [
         """CREATE INDEX fsentry_new ON fsentry(new)""",
         """CREATE INDEX fsentry_parent ON fsentry(parent)""",
         """CREATE TABLE snapshots (
-            path BLOB NOT NULL,
+            path TEXT NOT NULL,
             root BLOB NOT NULL REFERENCES objects (objid) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
             timestamp TEXT
         )""",

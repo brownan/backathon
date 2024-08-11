@@ -7,54 +7,85 @@ from unittest import mock
 
 from backathon import models, repoobject
 from backathon.models import ObjectHeader, ObjectType, ObjIDType
+from backathon.repository import Backathon
 from tests.base import BackathonTest
 
-ExpectedFile = str
-ExpectedDir = dict[str, "ExpectedDir | ExpectedFile"]
+
+class ExpectedFile(str):
+    pass
 
 
-class TestBackup(BackathonTest):
-    """Tests backup functionality
+class ExpectedSymlink(str):
+    pass
 
-    This test case covers both saving objects to storage, and updating the objects table
-    in the database.
-    """
 
-    def setUp(self):
-        super().setUp()
-        self.back = self.init_basic_repo()
+class ExpectedDir(dict[str, "ExpectedDir|ExpectedSymlink|ExpectedFile"]):
+    pass
 
-    def _assert_obj_contents(self, objid: bytes, body: bytes):
-        """Asserts that the given objid has the given body by reading in the
-        object on the filesystem
 
+class AssertObjHelperMixin(BackathonTest):
+    back: Backathon
+
+    def assert_object_header(self, objid: ObjIDType, header: ObjectHeader):
+        """Asserts that the given object exists in the database and is consistent
+        with the given object header
 
         """
-        full_obj_path = self.backuppath(repoobject.make_object_path(objid))
+        db_obj = next(
+            self.back.db.get_objects(
+                models.Object, "SELECT * FROM objects WHERE objid=?", (objid,)
+            )
+        )
+        self.assertEqual(db_obj.type, header.type)
+        if header.stats:
+            # File sizes should match
+            self.assertEqual(header.stats.size, db_obj.file_size)
+            # Last modified time should match
+            assert header.last_modified_time
+            self.assertEqual(header.last_modified_time, db_obj.last_modified_time)
+        else:
+            self.assertIsNone(db_obj.file_size)
+            self.assertIsNone(db_obj.last_modified_time)
+
+    def assert_file_obj(self, objid: ObjIDType, expected_file: ExpectedFile):
+        """Asserts that the given object is a file object"""
+        full_obj_path = self.repopath(repoobject.make_object_path(objid))
         with full_obj_path.open("rb") as stream:
             header = ObjectHeader.from_stream(stream)
-            self.assertEqual(body, stream.read())
+            self.assertEqual(ObjectType.FILE, header.type)
+            self.assert_object_header(objid, header)
 
-    def _assert_symlink(self, objid: bytes, target: bytes):
-        """Asserts that the given object is a symlink type with the given
-        target
+            # Body may or may not exist depending on whether the file is below the inline
+            # threshold
+            # For now, assume files in this test case are all inlined
+            body = stream.read()
+            self.assertIsNone(header.entries)
+            self.assertIsNone(header.blobs)
+            self.assertEqual(expected_file.encode("utf-8"), body)
 
-        """
-        full_obj_path = self.backuppath(repoobject.make_object_path(objid))
+    def assert_symlink_obj(self, objid: ObjIDType, expected_symlink: ExpectedSymlink):
+        """Asserts that the given object is a symlink object"""
+        full_obj_path = self.repopath(repoobject.make_object_path(objid))
         with full_obj_path.open("rb") as stream:
             header = ObjectHeader.from_stream(stream)
             self.assertEqual(ObjectType.SYMLINK, header.type)
-            self.assertEqual(target, stream.read())
+            self.assert_object_header(objid, header)
+            self.assertIsNone(header.entries)
+            self.assertIsNone(header.blobs)
 
-    def _assert_dir(self, objid: ObjIDType, expected: ExpectedDir):
+            target = stream.read()
+            self.assertEqual(expected_symlink.encode("utf-8"), target)
+
+    def assert_dir_object(self, objid: ObjIDType, expected: ExpectedDir):
         """Asserts that the given object is a dir object with the given
         entries
 
         """
-        full_obj_path = self.backuppath(repoobject.make_object_path(objid))
+        full_obj_path = self.repopath(repoobject.make_object_path(objid))
         with full_obj_path.open("rb") as stream:
             header = ObjectHeader.from_stream(stream)
             self.assertEqual(ObjectType.TREE, header.type)
+            self.assert_object_header(objid, header)
 
             # No body
             self.assertEqual(b"", stream.read())
@@ -67,31 +98,31 @@ class TestBackup(BackathonTest):
 
             for name, expected_val in expected.items():
                 referenced_objid = obj_entries[name]
-                if isinstance(expected_val, dict):
+                if isinstance(expected_val, ExpectedDir):
                     # Another directory
-                    self._assert_dir(referenced_objid, expected_val)
-                elif isinstance(expected_val, str):
+                    self.assert_dir_object(referenced_objid, expected_val)
+                elif isinstance(expected_val, ExpectedFile):
                     # A file
-                    pass
-                elif isinstance(expected_val, tuple):
+                    self.assert_file_obj(referenced_objid, expected_val)
+                elif isinstance(expected_val, ExpectedSymlink):
                     # A symlink
-                    pass
+                    self.assert_symlink_obj(referenced_objid, expected_val)
                 else:
                     raise Exception
 
-    def assert_backupsets(self, *snapshots: ExpectedDir):
+    def assert_backupsets(self, *snapshots: dict[str | os.PathLike[str], ExpectedDir]):
         """Asserts that one or more snapshots exist both in the database and on disk
 
-        Each given snapshot describes a directory hierarchy of directories and
-        files. The top-most ExpectedDir contains the roots of the snapshot, if there were
-        more than one root in the backup set. Otherwise, the top-most ExpectedDir
-        will usually just have the one entry mapping self.backupdir to another
-        ExpectedDir.
+        Each given snapshot is a mapping of root directories to the expected files
+        that were backed up from that root.
 
         Each snapshot in the snapshots list is a separate backup. So if a
         test does one backup, then there should be one snapshot given. If a
         test does two backups, then it should provide two structures
         describing the contents of each backup.
+
+        Each snapshot dict usually has one entry: the root that was backed up. For tests
+        involving multiple roots, the snapshot dict will have an entry for each one.
         """
         with self.back.db.cursor() as cursor:
             cursor.execute("SELECT distinct timestamp FROM snapshots ORDER BY timestamp")
@@ -102,6 +133,12 @@ class TestBackup(BackathonTest):
             len(backup_dates),
             "Different number of snapshots given than are in the database",
         )
+
+        # Read in the snapshot files saved to the filesystem
+        snapshot_files = [
+            models.Snapshot.model_validate_json(p.read_text())
+            for p in (self.repodir / "snapshots").iterdir()
+        ]
 
         for snapshot, date in zip(snapshots, backup_dates):
             # This snapshot has len(snapshot) roots, so should have that many
@@ -114,14 +151,34 @@ class TestBackup(BackathonTest):
             self.assertEqual(
                 len(snapshot), len(db_snaphots), "DB has wrong number of snapshot roots"
             )
+
+            # Make sure each snapshot from the database also exists on the filesystem
+            for db_s in db_snaphots:
+                self.assertTrue(
+                    any(db_s == file_s for file_s in snapshot_files),
+                    f"Database snapshot not found in filesystem: {db_s!s}",
+                )
+
             # Now correlated them with each other
             roots = {s.path: s.root for s in db_snaphots}
             for root_dir_name, root_dir_expected in snapshot.items():
                 # Root of a snapshot is always a directory
                 assert isinstance(root_dir_expected, dict)
 
-                root_objid = roots[root_dir_name]
-                self._assert_dir(root_objid, root_dir_expected)
+                root_objid = roots[os.fspath(root_dir_name)]
+                self.assert_dir_object(root_objid, root_dir_expected)
+
+
+class TestBackup(AssertObjHelperMixin, BackathonTest):
+    """Tests backup functionality
+
+    This test case covers both saving objects to storage, and updating the objects table
+    in the database.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.back = self.init_basic_repo()
 
     def test_objects_comitted(self):
         """Tests that objects being backed up are both committed to the database and
@@ -143,7 +200,7 @@ class TestBackup(BackathonTest):
         for obj in all_objs:
             obj_filepath = repoobject.make_object_path(obj.objid)
             # See that this object actually exists in the backup repo
-            full_path = self.datapath(obj_filepath)
+            full_path = self.repopath(obj_filepath)
             self.assertTrue(full_path.is_file())
 
             # Read in the object and make sure its header is well-formed and has the same
@@ -162,16 +219,20 @@ class TestBackup(BackathonTest):
         entries = list(self.back.db.get_objects(models.FSEntry, "SELECT * FROM fsentry"))
         self.assertTrue(all(entry.objid is not None for entry in entries))
         objects = list(self.back.db.get_objects(models.Object, "SELECT * FROM objects"))
-        self.assertEqual(6, len(objects))
+        self.assertEqual(4, len(objects))
 
         self.assert_backupsets(
             {
-                self.backupdir: {
-                    "dir": {
-                        "file1": "file contents",
-                        "file2": "file contents 2",
+                self.backupdir: ExpectedDir(
+                    {
+                        "dir": ExpectedDir(
+                            {
+                                "file1": ExpectedFile("file contents"),
+                                "file2": ExpectedFile("file contents 2"),
+                            }
+                        )
                     }
-                }
+                )
             }
         )
 

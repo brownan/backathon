@@ -318,7 +318,7 @@ def process_entry(
         file_obj = upload(
             ObjectRequest(
                 header=ObjectHeader(
-                    type=ObjectType.INODE,
+                    type=ObjectType.FILE,
                     length=len(payload.getbuffer()) if payload is not None else 0,
                     stats=ObjectStats.from_stat_result(stat_result),
                     blobs=(

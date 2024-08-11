@@ -43,7 +43,7 @@ class BackathonTest(TestCase):
     def backuppath(self, *args) -> pathlib.Path:
         return self.backupdir.joinpath(*args)
 
-    def datapath(self, *args) -> pathlib.Path:
+    def repopath(self, *args) -> pathlib.Path:
         return self.repodir.joinpath(*args)
 
     def create_file(self, path: str | os.PathLike[str], contents: str) -> pathlib.Path:

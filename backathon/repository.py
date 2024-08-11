@@ -191,13 +191,20 @@ class Backathon:
 
     def _make_snapshot_putter(self, encrypter: EncrypterBase, storage: StorageBase):
         def put_snapshot(snapshot: models.Snapshot):
-            snapshot_path = pathlib.Path("snapshot", secrets.token_urlsafe())
+            snapshot_path = pathlib.Path("snapshots", secrets.token_urlsafe())
             buf = io.BytesIO()
             buf.write(snapshot.model_dump_json(indent=4).encode("utf-8"))
             buf.seek(0)
 
             payload = encrypter.encrypt(buf)
             storage.put_object(snapshot_path, payload)
+
+            # Update database
+            with self.db.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO snapshots (path, root, timestamp) VALUES (?,?,?)",
+                    (snapshot.path, snapshot.root, snapshot.timestamp),
+                )
 
         return put_snapshot
 
