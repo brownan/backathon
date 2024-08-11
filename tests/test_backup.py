@@ -211,6 +211,17 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         super().setUp()
         self.back = self.init_basic_repo()
 
+        # For these tests, always inline files unless the test specifies otherwise.
+        # This ensures these tests work independently of the default inline threshold
+        # changing
+        # The specific value here needs to be larger than any test files this test case
+        # uses
+        self.back.db.config_set("inline-threshold", 2**20)
+
+    def _disable_inlining(self):
+        """Disables inlining for the test"""
+        self.back.db.config_set("inline-threshold", 0)
+
     def test_objects_committed(self):
         """Check that objects saved to the database are written to the filesystem repo
         with a well-formed header and the correct type
@@ -245,13 +256,11 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         self.create_file("dir/file1", "file contents")
         self.create_file("dir/file2", "file contents 2")
         self.back.scan()
-        entries = list(self.back.db.query(models.FSEntry, "SELECT * FROM fsentry"))
-        self.assertEqual(4, len(entries))
+        self.assert_fsentry_count(self.back, 4)
         self.back.backup()
         entries = list(self.back.db.query(models.FSEntry, "SELECT * FROM fsentry"))
         self.assertTrue(all(entry.objid is not None for entry in entries))
-        objects = list(self.back.db.query(models.Object, "SELECT * FROM objects"))
-        self.assertEqual(4, len(objects))
+        self.assert_object_count(self.back, 4)
 
         self.assert_backupsets(
             {
@@ -270,12 +279,11 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
 
     def test_backup_no_inline(self):
         """Tests backing up files with inlining disabled"""
-        self.back.db.config_set("inline-threshold", 0)
+        self._disable_inlining()
         self.create_file("file1", "file contents")
         self.back.scan()
         self.back.backup()
-        objects = list(self.back.db.query(models.Object, "SELECT * FROM objects"))
-        self.assertEqual(3, len(objects))
+        self.assert_object_count(self.back, 3)
         self.assert_backupsets(
             {self.backupdir: ExpectedDir(file1=ExpectedFile("file contents"))}
         )
@@ -284,7 +292,7 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         """Tests deduplication when backing up two identical files
 
         Specifically, we expect one fewer blob object in the database and repo"""
-        self.back.db.config_set("inline-threshold", 0)
+        self._disable_inlining()
         self.create_file("file1", "file contents")
         self.create_file("file2", "file contents")
         self.back.scan()
@@ -325,8 +333,7 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         )
         # The file objects should be identical, so just 2 objects should get uploaded:
         # a dir object and a file object (dir will have 2 entries to the one file)
-        objects = list(self.back.db.query(models.Object, "SELECT * FROM objects"))
-        self.assertEqual(2, len(objects))
+        self.assert_object_count(self.back, 2)
 
     def test_file_disappeared(self):
         """Tests that a file which has disappeared after scanning gets removed from
@@ -337,51 +344,40 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         """
         file = self.create_file("dir/file1", "file contents")
         self.back.scan()
-        num_entries = len(
-            list(self.back.db.query(models.FSEntry, "SELECT * FROM fsentry"))
-        )
+        self.assert_fsentry_count(self.back, 3)
 
-        self.assertEqual(3, num_entries)
         file.unlink()
         self.back.backup()
 
-        num_entries = len(
-            list(self.back.db.query(models.FSEntry, "SELECT * FROM fsentry"))
-        )
-        self.assertEqual(2, num_entries)
+        self.assert_fsentry_count(self.back, 2)
+        self.assert_object_count(self.back, 2)
 
-        num_objects = len(
-            list(self.back.db.query(models.Object, "SELECT * FROM objects"))
-        )
-        self.assertEqual(
-            2,
-            num_objects,
-        )
         self.assert_backupsets({self.backupdir: ExpectedDir({"dir": ExpectedDir()})})
 
     def test_file_changes_to_dir(self):
         """Tests if a file changes to a directory after scan before backup
 
-        Currently the behavior is to back up the directory and update the
-        fsentry in the process. The old behavior was to delete the entry and
-        not back it up, but that turned out not to be necessary.
+        The backup routine should back up the directory, modifying the fsentry
+        to match the actual state of the filesystem
+
         """
         file = self.create_file("dir/file1", "file contents")
-        self.backathon.scan()
-        self.assertEqual(3, self.fsentry.count())
-        self.assertTrue(stat.S_ISREG(self.fsentry.get(path=str(file)).st_mode))
+        self.back.scan()
+        self.assert_fsentry_count(self.back, 3)
+        self.assertTrue(stat.S_ISREG(self.back.db.get_fsentry(file).st_mode or 0))
 
         file.unlink()
         file.mkdir()
-        self.backathon.backup()
+        self.back.backup()
 
-        self.assertEqual(3, self.fsentry.count())
-        self.assertTrue(stat.S_ISDIR(self.fsentry.get(path=str(file)).st_mode))
+        # The fsentry for that path should now be a directory
+        self.assertTrue(stat.S_ISDIR(self.back.db.get_fsentry(file).st_mode or 0))
 
-        self.assertEqual(
-            3,
-            self.object.count(),
-        )
+        # Should still be 3 entries, but the file entry will be changed to a tree entry
+        self.assert_fsentry_count(self.back, 3)
+
+        # 3 objects in the repo: root tree, tree for "dir/", and tree for "dir/file/"
+        self.assert_object_count(self.back, 3)
 
     def test_file_disappeared_2(self):
         # We want to delete the file after the initial lstat() call,

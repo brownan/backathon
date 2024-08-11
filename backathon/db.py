@@ -204,12 +204,12 @@ class Database:
             finally:
                 self.conn.execute(f"RELEASE {savepoint_name}")
 
-    def get_fsentry(self, path: str | bytes | os.PathLike) -> models.FSEntry | None:
-        """Shortcut to get an fsentry by its path"""
+    def get_fsentry(self, path: str | bytes | os.PathLike) -> models.FSEntry:
+        """Shortcut to get an fsentry by its path, or raise a FileNotFound exception"""
         path = os.fspath(path)
         if isinstance(path, str):
             path = os.fsencode(path)
-        return next(
+        entry = next(
             self.query(
                 models.FSEntry,
                 "SELECT * FROM fsentry WHERE path=? LIMIT 1",
@@ -217,3 +217,10 @@ class Database:
             ),
             None,
         )
+        if entry is None:
+            raise FSEntryNotFound(path)
+        return entry
+
+
+class FSEntryNotFound(FileNotFoundError):
+    pass

@@ -294,12 +294,6 @@ def process_entry(
         logger.info("%s: File disappeared", entry.printable_path)
         return None
 
-    if entry.st_mode != stat_result.st_mode:
-        logger.warning(
-            "%s: File has changed mode since scan. Ignoring.", entry.printable_path
-        )
-        return
-
     if stat.S_ISREG(stat_result.st_mode):
         # Regular file
         payload: io.BytesIO | None

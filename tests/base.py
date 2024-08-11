@@ -61,3 +61,13 @@ class BackathonTest(TestCase):
         back.db.config_set_json("enable-compression", False)
         back.add_root(self.backupdir)
         return back
+
+    def assert_object_count(self, back: Backathon, expected: int):
+        with back.db.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM objects")
+            self.assertEqual(expected, cursor.fetchone()[0] or 0)
+
+    def assert_fsentry_count(self, back: Backathon, expected: int):
+        with back.db.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM fsentry")
+            self.assertEqual(expected, cursor.fetchone()[0] or 0)

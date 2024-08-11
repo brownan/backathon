@@ -32,7 +32,8 @@ class TestScan(BackathonTest):
         self.assertIsNotNone(back.db.get_fsentry(file))
         file.unlink()
         back.scan()
-        self.assertIsNone(back.db.get_fsentry(file))
+        with self.assertRaises(FileNotFoundError):
+            back.db.get_fsentry(file)
 
     def test_deleted_dir(self):
         """Tests that deleting a directory will also cause all descendent fsentries
@@ -45,8 +46,10 @@ class TestScan(BackathonTest):
         file.unlink()
         file.parent.rmdir()
         back.scan()
-        self.assertIsNone(back.db.get_fsentry(file.parent))
-        self.assertIsNone(back.db.get_fsentry(file))
+        with self.assertRaises(FileNotFoundError):
+            back.db.get_fsentry(file.parent)
+        with self.assertRaises(FileNotFoundError):
+            back.db.get_fsentry(file)
 
     def test_replace_dir_with_file(self):
         """Tests that the scan properly handles a directory being replaced by a file
@@ -61,7 +64,8 @@ class TestScan(BackathonTest):
         file.parent.write_text("another file contents")
         back.scan()
 
-        self.assertIsNone(back.db.get_fsentry(file))
+        with self.assertRaises(FileNotFoundError):
+            back.db.get_fsentry(file)
         entry = back.db.get_fsentry(file.parent)
         assert entry is not None
         assert entry.st_mode is not None
@@ -81,7 +85,8 @@ class TestScan(BackathonTest):
         back = self.init_basic_repo()
         back.scan()
         self.assertIsNotNone(back.db.get_fsentry(file.parent))
-        self.assertIsNone(back.db.get_fsentry(file))
+        with self.assertRaises(FileNotFoundError):
+            back.db.get_fsentry(file)
 
     def test_root_merge(self):
         """Tests that when adding a root which is an ancestor of an existing root,
