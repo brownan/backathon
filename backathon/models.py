@@ -307,7 +307,10 @@ class BlobRef(NamedTuple):
 
     def __rich_repr__(self):
         yield "pos", self.pos
-        yield "objid", self.objid.hex().lower()
+        yield "objid", self.objid.hex()
+
+    def __repr__(self):
+        return f"<BlobRef pos={self.pos} objid={self.objid.hex()}>"
 
 
 class EntryRef(NamedTuple):
@@ -315,8 +318,11 @@ class EntryRef(NamedTuple):
     objid: ObjIDType
 
     def __rich_repr__(self):
-        yield "name", self.name.decode(sys.getfilesystemencoding(), errors="replace")
+        yield "name", self.name_str
         yield "objid", self.objid.hex().lower()
+
+    def __repr__(self):
+        return f"<EntryRef {self.name_str} {self.objid.hex()}>"
 
     @property
     def name_str(self):

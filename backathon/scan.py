@@ -56,7 +56,7 @@ def scan(
         with db.cursor() as cursor:
             total: int = cursor.execute("SELECT COUNT(*) FROM fsentry").fetchone()[0]
         with db.atomic(immediate=True):
-            for entry in db.get_objects(models.FSEntry, "SELECT * FROM fsentry"):
+            for entry in db.query(models.FSEntry, "SELECT * FROM fsentry"):
                 scan_entry(db, entry, rescan_dirs=rescan_dirs, excludes=exclude_patterns)
                 if progress is not None:
                     scanned += 1
@@ -72,9 +72,7 @@ def scan(
                 if not cursor.fetchone():
                     break
 
-            obj_iterator = db.get_objects(
-                models.FSEntry, "SELECT * FROM fsentry WHERE new"
-            )
+            obj_iterator = db.query(models.FSEntry, "SELECT * FROM fsentry WHERE new")
             for entry in obj_iterator:
                 scan_entry(db, entry, excludes=exclude_patterns)
                 if progress is not None:
@@ -213,7 +211,7 @@ def scan_entry(
 
         if is_dir:
             children = list(
-                db.get_objects(
+                db.query(
                     models.FSEntry, "SELECT * FROM fsentry WHERE parent=?", (entry.id,)
                 )
             )

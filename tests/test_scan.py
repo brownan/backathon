@@ -16,7 +16,7 @@ class TestScan(BackathonTest):
         self.create_file("dir2/file2", "another file contents")
         back = self.init_basic_repo()
         back.scan()
-        entries = list(back.db.get_objects(models.FSEntry, "SELECT * FROM fsentry"))
+        entries = list(back.db.query(models.FSEntry, "SELECT * FROM fsentry"))
         self.assertEqual(5, len(entries))
         names = set(e.decoded_path.name for e in entries)
         self.assertSetEqual(
@@ -66,7 +66,7 @@ class TestScan(BackathonTest):
         assert entry is not None
         assert entry.st_mode is not None
         children = list(
-            back.db.get_objects(
+            back.db.query(
                 models.FSEntry, "SELECT * FROM fsentry WHERE parent=?", (entry.id,)
             )
         )
@@ -99,7 +99,7 @@ class TestScan(BackathonTest):
 
         def get_roots() -> list[models.FSEntry]:
             return list(
-                back.db.get_objects(
+                back.db.query(
                     models.FSEntry, "SELECT * FROM fsentry WHERE parent IS NULL"
                 )
             )

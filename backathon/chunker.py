@@ -6,17 +6,16 @@ class FixedChunker:
 
     """
 
-    def __init__(self, fileobj):
+    def __init__(self, fileobj, chunk_size: int):
         self.f = fileobj
         self.pos = 0
-
-    def _get_chunksize(self):
-        return 10 * 2**20
+        self.chunk_size = chunk_size
 
     def __iter__(self):
+        chunk_size = self.chunk_size
         while True:
             pos = self.f.tell()
-            data = self.f.read(self._get_chunksize())
+            data = self.f.read(chunk_size)
             if not data:
                 return
             yield pos, data

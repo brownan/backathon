@@ -131,9 +131,21 @@ class Database:
         finally:
             c.close()
 
-    def get_objects(
+    def query(
         self, model_cls: Type[M], query: str, args: tuple[Any, ...] = ()
     ) -> Generator[M, None, None]:
+        """Queries the database and returns instances of the given model
+
+        Queries must make sure to return rows from the table corresponding to
+        the given model class.
+
+        Queries must make sure they retrieve columns covering at least the required
+        fields of the model class. Usually queries should just select *.
+
+        This method takes care of batching the calls to sqlite and passing the
+        rows into model_validate(). It is the preferred way of retrieving
+        FSEntry and Object instances from the database.
+        """
         with self.cursor(retdict=True) as cursor:
             cursor.arraysize = 2048
             cursor.execute(query, args)
@@ -198,7 +210,7 @@ class Database:
         if isinstance(path, str):
             path = os.fsencode(path)
         return next(
-            self.get_objects(
+            self.query(
                 models.FSEntry,
                 "SELECT * FROM fsentry WHERE path=? LIMIT 1",
                 (path,),

@@ -1,3 +1,5 @@
+"""Tests for the backup code"""
+
 from __future__ import annotations
 
 import os
@@ -32,7 +34,7 @@ class AssertObjHelperMixin(BackathonTest):
 
         """
         db_obj = next(
-            self.back.db.get_objects(
+            self.back.db.query(
                 models.Object, "SELECT * FROM objects WHERE objid=?", (objid,)
             )
         )
@@ -47,21 +49,48 @@ class AssertObjHelperMixin(BackathonTest):
             self.assertIsNone(db_obj.file_size)
             self.assertIsNone(db_obj.last_modified_time)
 
+    def get_blob_body(self, objid: ObjIDType) -> bytes:
+        """Returns the body of the given blob object"""
+        full_obj_path = self.repopath(repoobject.make_object_path(objid))
+        with full_obj_path.open("rb") as stream:
+            header = ObjectHeader.from_stream(stream)
+            self.assertEqual(ObjectType.BLOB, header.type)
+            self.assert_object_header(objid, header)
+            self.assertIsNone(header.entries)
+            self.assertIsNone(header.blobs)
+            self.assertIsNone(header.stats)
+
+            body = stream.read()
+            self.assertEqual(header.length, len(body))
+            return body
+
     def assert_file_obj(self, objid: ObjIDType, expected_file: ExpectedFile):
         """Asserts that the given object is a file object"""
         full_obj_path = self.repopath(repoobject.make_object_path(objid))
+        expected_file_bytes = expected_file.encode("utf-8")
         with full_obj_path.open("rb") as stream:
             header = ObjectHeader.from_stream(stream)
             self.assertEqual(ObjectType.FILE, header.type)
             self.assert_object_header(objid, header)
-
-            # Body may or may not exist depending on whether the file is below the inline
-            # threshold
-            # For now, assume files in this test case are all inlined
-            body = stream.read()
             self.assertIsNone(header.entries)
-            self.assertIsNone(header.blobs)
-            self.assertEqual(expected_file.encode("utf-8"), body)
+
+            body = stream.read()
+            self.assertEqual(header.length, len(body))
+            if header.blobs is None:
+                # File contents are inlined. Check them directly
+                self.assertEqual(expected_file_bytes, body)
+            else:
+                self.assertEqual(b"", body)
+                # Assemble the blobs into the file contents
+                assert header.file_size is not None
+                actual_file = bytearray(header.file_size)
+                for blobref in header.blobs:
+                    blob_contents = self.get_blob_body(blobref.objid)
+                    actual_file[
+                        blobref.pos : blobref.pos + len(blob_contents)
+                    ] = blob_contents
+
+                self.assertEqual(expected_file_bytes, actual_file)
 
     def assert_symlink_obj(self, objid: ObjIDType, expected_symlink: ExpectedSymlink):
         """Asserts that the given object is a symlink object"""
@@ -74,6 +103,7 @@ class AssertObjHelperMixin(BackathonTest):
             self.assertIsNone(header.blobs)
 
             target = stream.read()
+            self.assertEqual(header.length, len(target))
             self.assertEqual(expected_symlink.encode("utf-8"), target)
 
     def assert_dir_object(self, objid: ObjIDType, expected: ExpectedDir):
@@ -89,6 +119,7 @@ class AssertObjHelperMixin(BackathonTest):
 
             # No body
             self.assertEqual(b"", stream.read())
+            self.assertEqual(0, header.length)
 
             assert header.entries is not None
             obj_entries = {e.name_str: e.objid for e in header.entries}
@@ -144,7 +175,7 @@ class AssertObjHelperMixin(BackathonTest):
             # This snapshot has len(snapshot) roots, so should have that many
             # Snapshot objects in the database.
             db_snaphots = list(
-                self.back.db.get_objects(
+                self.back.db.query(
                     models.Snapshot, "SELECT * FROM snapshots WHERE timestamp=?", (date,)
                 )
             )
@@ -172,17 +203,17 @@ class AssertObjHelperMixin(BackathonTest):
 class TestBackup(AssertObjHelperMixin, BackathonTest):
     """Tests backup functionality
 
-    This test case covers both saving objects to storage, and updating the objects table
-    in the database.
+    These tests invoke the backup routine and check that the correct data is written
+    to the repository AND the correct information is saved to the database
     """
 
     def setUp(self):
         super().setUp()
         self.back = self.init_basic_repo()
 
-    def test_objects_comitted(self):
-        """Tests that objects being backed up are both committed to the database and
-        written to the filesystem
+    def test_objects_committed(self):
+        """Check that objects saved to the database are written to the filesystem repo
+        with a well-formed header and the correct type
 
         """
         self.create_file("dir/file1", "file contents")
@@ -190,12 +221,12 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         self.back.backup()
 
         all_objs = list(
-            self.back.db.get_objects(
+            self.back.db.query(
                 models.Object,
                 "SELECT * FROM objects",
             )
         )
-        # Expect 2 tree and 1 inode objects
+        # Expect 2 tree and 1 file objects
         self.assertEqual(3, len(all_objs))
         for obj in all_objs:
             obj_filepath = repoobject.make_object_path(obj.objid)
@@ -210,15 +241,16 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
                 self.assertEqual(obj.type, header.type)
 
     def test_backup(self):
+        """Tests backing up two files in two directories"""
         self.create_file("dir/file1", "file contents")
         self.create_file("dir/file2", "file contents 2")
         self.back.scan()
-        entries = list(self.back.db.get_objects(models.FSEntry, "SELECT * FROM fsentry"))
+        entries = list(self.back.db.query(models.FSEntry, "SELECT * FROM fsentry"))
         self.assertEqual(4, len(entries))
         self.back.backup()
-        entries = list(self.back.db.get_objects(models.FSEntry, "SELECT * FROM fsentry"))
+        entries = list(self.back.db.query(models.FSEntry, "SELECT * FROM fsentry"))
         self.assertTrue(all(entry.objid is not None for entry in entries))
-        objects = list(self.back.db.get_objects(models.Object, "SELECT * FROM objects"))
+        objects = list(self.back.db.query(models.Object, "SELECT * FROM objects"))
         self.assertEqual(4, len(objects))
 
         self.assert_backupsets(
@@ -236,50 +268,96 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
             }
         )
 
+    def test_backup_no_inline(self):
+        """Tests backing up files with inlining disabled"""
+        self.back.db.config_set("inline-threshold", 0)
+        self.create_file("file1", "file contents")
+        self.back.scan()
+        self.back.backup()
+        objects = list(self.back.db.query(models.Object, "SELECT * FROM objects"))
+        self.assertEqual(3, len(objects))
+        self.assert_backupsets(
+            {self.backupdir: ExpectedDir(file1=ExpectedFile("file contents"))}
+        )
+
     def test_backup_identical_files(self):
+        """Tests deduplication when backing up two identical files
+
+        Specifically, we expect one fewer blob object in the database and repo"""
+        self.back.db.config_set("inline-threshold", 0)
         self.create_file("file1", "file contents")
         self.create_file("file2", "file contents")
-        self.backathon.scan()
-        self.backathon.backup()
+        self.back.scan()
+        self.back.backup()
         self.assert_backupsets(
             {
-                self.backupdir: {
-                    "file1": "file contents",
-                    "file2": "file contents",
-                }
+                self.backupdir: ExpectedDir(
+                    {
+                        "file1": ExpectedFile("file contents"),
+                        "file2": ExpectedFile("file contents"),
+                    }
+                )
             }
         )
-        # Inode objects differ, so 4 total objects uploaded
-        self.assertEqual(4, self.object.count())
+        objects = list(self.back.db.query(models.Object, "SELECT * FROM objects"))
+        # Expect a tree, two file, and one blob objects
+        self.assertEqual(4, len(objects))
+        blobs = [o for o in objects if o.type == ObjectType.BLOB]
+        self.assertEqual(1, len(blobs))
+        contents = self.get_blob_body(blobs[0].objid)
+        self.assertEqual(b"file contents", contents)
 
     def test_backup_hardlinked_files(self):
+        """Tests that two hardlinked files count as identical for deduplication"""
         file = self.create_file("file1", "file contents")
         os.link(file, file.parent / "file2")
-        self.backathon.scan()
-        self.backathon.backup()
+        self.back.scan()
+        self.back.backup()
         self.assert_backupsets(
             {
-                self.backupdir: {
-                    "file1": "file contents",
-                    "file2": "file contents",
-                }
+                self.backupdir: ExpectedDir(
+                    {
+                        "file1": ExpectedFile("file contents"),
+                        "file2": ExpectedFile("file contents"),
+                    }
+                )
             }
         )
-        # The inode objects should be identical, so 3 total objects uploaded
-        self.assertEqual(3, self.object.count())
+        # The file objects should be identical, so just 2 objects should get uploaded:
+        # a dir object and a file object (dir will have 2 entries to the one file)
+        objects = list(self.back.db.query(models.Object, "SELECT * FROM objects"))
+        self.assertEqual(2, len(objects))
 
     def test_file_disappeared(self):
+        """Tests that a file which has disappeared after scanning gets removed from
+        the database after backup
+
+        The backup process should remove the entry from the fsentry table
+
+        """
         file = self.create_file("dir/file1", "file contents")
-        self.backathon.scan()
-        self.assertEqual(3, self.fsentry.count())
+        self.back.scan()
+        num_entries = len(
+            list(self.back.db.query(models.FSEntry, "SELECT * FROM fsentry"))
+        )
+
+        self.assertEqual(3, num_entries)
         file.unlink()
-        self.backathon.backup()
-        self.assertEqual(2, self.fsentry.count())
+        self.back.backup()
+
+        num_entries = len(
+            list(self.back.db.query(models.FSEntry, "SELECT * FROM fsentry"))
+        )
+        self.assertEqual(2, num_entries)
+
+        num_objects = len(
+            list(self.back.db.query(models.Object, "SELECT * FROM objects"))
+        )
         self.assertEqual(
             2,
-            self.object.count(),
+            num_objects,
         )
-        self.assert_backupsets({self.backupdir: {"dir": {}}})
+        self.assert_backupsets({self.backupdir: ExpectedDir({"dir": ExpectedDir()})})
 
     def test_file_changes_to_dir(self):
         """Tests if a file changes to a directory after scan before backup

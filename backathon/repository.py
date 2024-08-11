@@ -99,9 +99,7 @@ class Backathon:
 
     def get_roots(self) -> list[models.FSEntry]:
         return list(
-            self.db.get_objects(
-                models.FSEntry, "SELECT * FROM fsentry WHERE parent IS NULL"
-            )
+            self.db.query(models.FSEntry, "SELECT * FROM fsentry WHERE parent IS NULL")
         )
 
     def _make_obj_putter(

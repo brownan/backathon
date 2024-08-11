@@ -31,9 +31,6 @@ from backathon.models import (
 
 logger = getLogger("backathon.backup")
 
-NUM_WORKERS = os.cpu_count() or 2
-INLINE_THRESHOLD = 2**20
-
 
 class ObjectRequest(NamedTuple):
     """Used by the backup code to pass information about an object to be uploaded to the upload
@@ -48,6 +45,24 @@ class ObjectRequest(NamedTuple):
 class _ProcessingResult(NamedTuple):
     obj: models.Object
     stat_result: os.stat_result
+
+
+class _TuningParams(NamedTuple):
+    # File sizes below this will be inlined into the "file" object's body, rather than
+    # referenced in separate "blob" objects
+    inline_threshold: int
+
+    # File sizes below this but above the inline threshold will be saved to a single
+    # "blob" object separate from the "file" object, enabling deduplication
+    # chunk_threshold should be above the inline_threshold
+    chunk_threshold: int
+
+    # If a file size exceeds the chunk_threshold, then each chunk will be at most
+    # chunk_size large.
+    # Note that this may be smaller than the chunk_threshold. chunk_threshold sets the
+    # file size below which it's not worth chunking at all. Once a file is worth chunking,
+    # chunk_size determines how large each chunk is.
+    chunk_size: int
 
 
 async def backup(
@@ -82,6 +97,12 @@ async def backup(
                     stat_result=result.stat_result,
                 )
 
+    # Get some config items
+    inline_threshold: int = db.config_get("inline-threshold", 2**20)
+    chunk_threshold: int = db.config_get("chunk-threshold", 30 * 2**20)
+    chunk_size: int = db.config_get("chunk-size", 10 * 2**20)
+    num_workers: int = db.config_get("num-workers", os.cpu_count() or 2)
+
     with ExitStack() as exitstack:
         cursor = exitstack.enter_context(db.cursor())
         cursor.execute("SELECT COUNT(*) FROM fsentry WHERE objid IS NULL")
@@ -92,9 +113,9 @@ async def backup(
 
         tasks: set[Future[tuple[models.FSEntry, _ProcessingResult | None]]] = set()
 
-        logger.debug("Launching threadpool with %s workers", NUM_WORKERS)
+        logger.debug("Launching threadpool with %s workers", num_workers)
         executor = exitstack.enter_context(
-            concurrent.futures.ThreadPoolExecutor(max_workers=NUM_WORKERS)
+            concurrent.futures.ThreadPoolExecutor(max_workers=num_workers)
         )
         exitstack.enter_context(db.atomic(immediate=True))
         while backup_items_remain():
@@ -106,7 +127,7 @@ async def backup(
                 backup_count,
                 backup_total,
             )
-            entry_iterator = db.get_objects(
+            entry_iterator = db.query(
                 models.FSEntry,
                 """SELECT * FROM fsentry WHERE
                 objid IS NULL
@@ -124,7 +145,7 @@ async def backup(
                     )
 
                 child_entries = list(
-                    db.get_objects(
+                    db.query(
                         models.FSEntry,
                         "SELECT * FROM fsentry WHERE parent=?",
                         (entry.id,),
@@ -141,6 +162,7 @@ async def backup(
                             entry,
                             child_entries,
                             put_object,
+                            _TuningParams(inline_threshold, chunk_threshold, chunk_size),
                         )
                     )
                 )
@@ -193,7 +215,7 @@ async def backup(
     logger.debug("Backup finished. Creating snapshot objects")
     now = datetime.datetime.now(tz=datetime.timezone.utc)
     with db.atomic(immediate=True), db.cursor() as cursor:
-        for entry in db.get_objects(
+        for entry in db.query(
             models.FSEntry, "SELECT * FROM fsentry WHERE parent IS NULL"
         ):
             if entry.objid is None:
@@ -217,6 +239,7 @@ async def _dispatch(
     entry: models.FSEntry,
     child_entries: list[models.FSEntry],
     put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
+    params: _TuningParams,
 ) -> tuple[models.FSEntry, _ProcessingResult | None]:
     """Shim to dispatch a sub-thread to process an entry
 
@@ -234,7 +257,7 @@ async def _dispatch(
 
     result: _ProcessingResult | None
     result = await loop.run_in_executor(
-        executor, process_entry, entry, child_entries, upload
+        executor, process_entry, entry, child_entries, upload, params
     )
     return entry, result
 
@@ -243,6 +266,7 @@ def process_entry(
     entry: models.FSEntry,
     children: list[models.FSEntry],
     upload: Callable[[ObjectRequest], models.Object],
+    params: _TuningParams,
 ) -> _ProcessingResult | None:
     """Prepares the payloads for an FSEntry and performs the calls to upload them
 
@@ -283,7 +307,7 @@ def process_entry(
 
         try:
             with _open_file(entry.path) as fobj:
-                if stat_result.st_size < INLINE_THRESHOLD:
+                if stat_result.st_size < params.inline_threshold:
                     # Upload the file as a payload in this object
                     # We read the entire file into memory here because it's not huge, and to
                     # make sure the ObjectHeader length field is correct.
@@ -291,10 +315,10 @@ def process_entry(
                 else:
                     # Upload the file as blob objects and reference them from this one
                     payload = None
-                    if stat_result.st_size <= 30 * 2**20:
+                    if stat_result.st_size <= params.chunk_threshold:
                         chunk_iter = [(0, fobj.read())]
                     else:
-                        chunk_iter = chunker.FixedChunker(fobj)
+                        chunk_iter = chunker.FixedChunker(fobj, params.chunk_size)
                     for pos, chunk in chunk_iter:
                         chunk_obj = upload(
                             ObjectRequest(
