@@ -330,7 +330,7 @@ def process_entry(
             logger.info("%s: File disappeared", entry.printable_path)
             return None
         except OSError as e:
-            logger.error("%s: Error when reading: %s", entry.printable_path, e)
+            logger.warning("%s: Error when reading: %s", entry.printable_path, e)
             return None
 
         file_obj = upload(

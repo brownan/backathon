@@ -318,14 +318,14 @@ class EntryRef(NamedTuple):
     objid: ObjIDType
 
     def __rich_repr__(self):
-        yield "name", self.name_str
+        yield "name", self.printable_name
         yield "objid", self.objid.hex().lower()
 
     def __repr__(self):
-        return f"<EntryRef {self.name_str} {self.objid.hex()}>"
+        return f"<EntryRef {self.printable_name} {self.objid.hex()}>"
 
     @property
-    def name_str(self):
+    def printable_name(self):
         return self.name.decode("utf-8", errors="replace")
 
 

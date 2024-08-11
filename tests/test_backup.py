@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
-import pathlib
 import stat
+import sys
 from unittest import mock
 
 from backathon import models, repoobject
@@ -104,7 +105,9 @@ class AssertObjHelperMixin(BackathonTest):
 
             target = stream.read()
             self.assertEqual(header.length, len(target))
-            self.assertEqual(expected_symlink.encode("utf-8"), target)
+            self.assertEqual(
+                expected_symlink.encode("utf-8", errors="surrogateescape"), target
+            )
 
     def assert_dir_object(self, objid: ObjIDType, expected: ExpectedDir):
         """Asserts that the given object is a dir object with the given
@@ -122,7 +125,7 @@ class AssertObjHelperMixin(BackathonTest):
             self.assertEqual(0, header.length)
 
             assert header.entries is not None
-            obj_entries = {e.name_str: e.objid for e in header.entries}
+            obj_entries = {os.fsdecode(e.name): e.objid for e in header.entries}
 
             # All the same names should be set
             self.assertSetEqual(set(expected), set(obj_entries))
@@ -379,22 +382,24 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         # 3 objects in the repo: root tree, tree for "dir/", and tree for "dir/file/"
         self.assert_object_count(self.back, 3)
 
-    def test_file_disappeared_2(self):
+    def test_file_disappeared_after_lstat(self):
+        """Tests when a file disappears after the initial lstat call, but
+        before the file is opened for reading
+
+        """
         # We want to delete the file after the initial lstat() call,
         # but before the file is opened for reading later on, to test this
         # race condition. So we patch os.lstat to delete the file right after
         # the lstat call.
         file = self.create_file("dir/file1", "file contents")
-        self.backathon.scan()
-        self.assertEqual(3, self.fsentry.count())
-
-        import os
+        self.back.scan()
+        self.assert_fsentry_count(self.back, 3)
 
         real_lstat = os.lstat
 
         def lstat(path):
             stat_result = real_lstat(path)
-            if path == str(file):
+            if path == str(file).encode(sys.getfilesystemencoding()):
                 file.unlink()
             return stat_result
 
@@ -405,55 +410,68 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
             )
         )
 
-        self.backathon.backup()
-        self.assertEqual(2, self.fsentry.count())
-        self.assertEqual(
-            2,
-            self.object.count(),
-        )
-        self.assert_backupsets({self.backupdir: {"dir": {}}})
+        self.back.backup()
+
+        # Did the file properly get deleted? If not, the patch code above may be
+        # broken or something changed in the backup code to not trigger the unlink.
+        self.assertFalse(file.exists())
+
+        # Expect only the root and the directory "dir" within
+        self.assert_fsentry_count(self.back, 2)
+        self.assert_object_count(self.back, 2)
+
+        self.assert_backupsets({self.backupdir: ExpectedDir({"dir": ExpectedDir()})})
 
     def test_permission_denied_file(self):
         """A permission denied error when reading a file shouldn't cause the
         backup to fail, and other files should still get backed up"""
         self.create_file("dir/file1", "file contents")
-        self.backathon.scan()
-        self.assertEqual(3, self.fsentry.count())
+        self.back.scan()
+        self.assert_fsentry_count(self.back, 3)
 
         def raise_permissiondeined(path):
-            raise PermissionError()
+            raise PermissionError("Permission Denied")
 
         with mock.patch("backathon.backup._open_file", raise_permissiondeined):
-            self.backathon.backup()
+            with self.assertLogs("backathon.backup", level=logging.WARNING) as cm:
+                self.back.backup()
 
-        self.assertEqual(2, self.fsentry.count())
-        self.assertEqual(
-            2,
-            self.object.count(),
-        )
-        self.assert_backupsets({self.backupdir: {"dir": {}}})
+        self.assertIn("Error when reading: Permission Denied", cm.output[0])
+
+        self.assert_fsentry_count(self.back, 2)
+        self.assert_object_count(self.back, 2)
+        self.assert_backupsets({self.backupdir: ExpectedDir({"dir": ExpectedDir()})})
 
     def test_invalid_utf8_filename(self):
         """Tests that a file with invalid utf-8 in the name can be backed up"""
         name = os.fsdecode(b"\xff\xffhello\xff\xff")
         self.create_file(name, "file contents")
-        self.backathon.scan()
-        self.backathon.backup()
+        self.back.scan()
+        self.back.backup()
 
-        self.assert_backupsets({self.backupdir: {name: "file contents"}})
+        self.assert_backupsets(
+            {self.backupdir: ExpectedDir({name: ExpectedFile("file contents")})}
+        )
 
     def test_symlink(self):
         """Tests that symlinks are saved properly"""
         self.create_file("file1", "file contents")
 
-        pathobj = pathlib.Path(self.path("file2"))
+        pathobj = self.backuppath("file2")
         pathobj.symlink_to("file1")
 
-        self.backathon.scan()
-        self.backathon.backup()
+        self.back.scan()
+        self.back.backup()
 
         self.assert_backupsets(
-            {self.backupdir: {"file1": "file contents", "file2": ("s", "file1")}}
+            {
+                self.backupdir: ExpectedDir(
+                    {
+                        "file1": ExpectedFile("file contents"),
+                        "file2": ExpectedSymlink("file1"),
+                    }
+                )
+            }
         )
 
     def test_invalid_utf8_symlink(self):
@@ -463,10 +481,12 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         """
         target = os.fsdecode(b"\xff\xffhello\xff\xff")
 
-        pathobj = pathlib.Path(self.path("badsymlink"))
+        pathobj = self.backuppath("badsymlink")
         pathobj.symlink_to(target)
 
-        self.backathon.scan()
-        self.backathon.backup()
+        self.back.scan()
+        self.back.backup()
 
-        self.assert_backupsets({self.backupdir: {"badsymlink": ("s", target)}})
+        self.assert_backupsets(
+            {self.backupdir: ExpectedDir({"badsymlink": ExpectedSymlink(target)})}
+        )
