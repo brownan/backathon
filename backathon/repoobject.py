@@ -55,6 +55,11 @@ def decompress_payload(compressed: io.BytesIO) -> io.BytesIO:
     the original buffer is returned
 
     """
+    # We can guarantee positive identification of compression with the first byte because
+    # the only messages we compress are msgpack "map" types, which always begin with
+    # 0x80 - 0x8f, 0xde, or 0xdf.
+    # Note: only the msgpack serialization of the positive 7-bit integer 120 serializes
+    # to the byte 0x78
     buf = compressed.getbuffer()
     if buf[0] == 0x78:
         # zlib identification marker

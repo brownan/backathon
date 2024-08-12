@@ -1,4 +1,6 @@
 import asyncio
+import importlib.metadata
+import pathlib
 
 
 class BackathonEventLoopPolicy(asyncio.DefaultEventLoopPolicy):
@@ -26,3 +28,28 @@ class BackathonEventLoopPolicy(asyncio.DefaultEventLoopPolicy):
 
 
 asyncio.set_event_loop_policy(BackathonEventLoopPolicy())
+
+
+def get_version():
+    try:
+        return importlib.metadata.version("backathon")
+    except importlib.metadata.PackageNotFoundError:
+        pass
+
+    # Not installed? We're probably running out of a dev environment. Find
+    # and read the pyproject.tmol file
+    # Note that toml isn't a runtime dependency so it may not be installed in
+    # the dev environment. In that case, it's not a big deal to find the real version,
+    # since it implies it's not being used in production, just for dev/testing.
+    try:
+        import toml
+    except ModuleNotFoundError:
+        return "unknown"
+
+    tomlpath = pathlib.Path(__file__).parent.parent / "pyproject.toml"
+    with tomlpath.open("r") as tomlfile:
+        data = toml.load(tomlfile)
+    return data["project"]["version"]
+
+
+__version__ = get_version()

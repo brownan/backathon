@@ -41,7 +41,12 @@ class Backathon:
     ) -> Self:
         # Try and write to the remote repo before we do anything else
         recovery_params = encrypter.get_recovery_state()
-        json_data = json.dumps(recovery_params, indent=4).encode("utf-8")
+        marker_data = {
+            "name": "Backathon Repository",
+            "version": backathon.__version__,
+            "encryption": recovery_params,
+        }
+        json_data = json.dumps(marker_data, indent=4).encode("utf-8")
         payload = Payload(
             io.BytesIO(json_data), len(json_data), hashlib.sha1(json_data).digest()
         )

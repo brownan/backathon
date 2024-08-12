@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import logging
 import os
 import stat
@@ -12,6 +13,7 @@ import zlib
 from typing import IO
 from unittest import mock
 
+import backathon
 from backathon import models, repoobject
 from backathon.models import ObjectHeader, ObjectType, ObjIDType
 from backathon.repository import Backathon
@@ -583,3 +585,26 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         )
         self.assertEqual(len(contents), db_obj.uploaded_size)
         self.assertEqual(hashlib.sha1(contents).digest(), db_obj.sha1)
+
+    def test_backup_marker(self):
+        """Tests that the backathon marker file is saved to the remote repo"""
+        self.back.db.config_set("enable-compression", True)
+        self.back.scan()
+        self.back.backup()
+        file = self.repopath("backathon.json")
+        self.assertTrue(file.exists())
+
+        with file.open("r") as fobj:
+            data = json.load(fobj)
+
+        self.assertEqual(
+            "Backathon Repository",
+            data["name"],
+        )
+        self.assertEqual(
+            backathon.__version__,
+            data["version"],
+        )
+
+        # No encryption is used here, but the key should exist
+        self.assertIsNone(data["encryption"])
