@@ -490,3 +490,21 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         self.assert_backupsets(
             {self.backupdir: ExpectedDir({"badsymlink": ExpectedSymlink(target)})}
         )
+
+    def test_second_snapshot_file_update(self):
+        """Tests taking a second snapshot of a file"""
+        file = self.create_file("file", "contents 1")
+        self.back.scan()
+        self.back.backup()
+        self.assert_backupsets(
+            {self.backupdir: ExpectedDir({"file": ExpectedFile("contents 1")})}
+        )
+
+        file.write_text("contents 2")
+        self.back.scan()
+        self.back.backup()
+
+        self.assert_backupsets(
+            {self.backupdir: ExpectedDir({"file": ExpectedFile("contents 1")})},
+            {self.backupdir: ExpectedDir({"file": ExpectedFile("contents 2")})},
+        )
