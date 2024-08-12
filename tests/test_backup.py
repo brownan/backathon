@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import logging
 import os
 import stat
 import sys
+import zlib
+from typing import IO
 from unittest import mock
 
 from backathon import models, repoobject
@@ -26,10 +30,40 @@ class ExpectedDir(dict[str, "ExpectedDir|ExpectedSymlink|ExpectedFile"]):
     pass
 
 
+def stream_len_and_sha1(stream: IO[bytes]) -> tuple[int, bytes]:
+    hasher = hashlib.sha1()
+    pos = stream.tell()
+    stream.seek(0)
+    length = 0
+    while buf := stream.read(io.DEFAULT_BUFFER_SIZE):
+        length += len(buf)
+        hasher.update(buf)
+    stream.seek(pos)
+    return length, hasher.digest()
+
+
 class AssertObjHelperMixin(BackathonTest):
     back: Backathon
 
-    def assert_object_header(self, objid: ObjIDType, header: ObjectHeader):
+    def assert_relation_exists(self, parent: bytes, child: bytes, name: bytes | None):
+        """Asserts that a relation exists in the object_relations table"""
+        with self.back.db.cursor() as cursor:
+            if name is not None:
+                cursor.execute(
+                    "SELECT 1 FROM object_relations WHERE parent=? AND child=? AND name=? LIMIT 1",
+                    (parent, child, name),
+                )
+            else:
+                cursor.execute(
+                    "SELECT 1 FROM object_relations WHERE parent=? AND child=? AND name IS NULL LIMIT 1",
+                    (parent, child),
+                )
+            row = cursor.fetchone()
+            self.assertIsNotNone(row, "Relation doesn't exist")
+
+    def assert_object_header(
+        self, objid: ObjIDType, header: ObjectHeader, uploaded_size: int, sha1: bytes
+    ):
         """Asserts that the given object exists in the database and is consistent
         with the given object header
 
@@ -40,6 +74,8 @@ class AssertObjHelperMixin(BackathonTest):
             )
         )
         self.assertEqual(db_obj.type, header.type)
+        self.assertEqual(uploaded_size, db_obj.uploaded_size)
+        self.assertEqual(sha1, db_obj.sha1)
         if header.stats:
             # File sizes should match
             self.assertEqual(header.stats.size, db_obj.file_size)
@@ -50,13 +86,22 @@ class AssertObjHelperMixin(BackathonTest):
             self.assertIsNone(db_obj.file_size)
             self.assertIsNone(db_obj.last_modified_time)
 
+        # Check that all referenced entries are recorded in the object relations table
+        if header.entries is not None:
+            for entryref in header.entries:
+                self.assert_relation_exists(objid, entryref.objid, entryref.name)
+        # Same for referenced blobs
+        if header.blobs is not None:
+            for blobref in header.blobs:
+                self.assert_relation_exists(objid, blobref.objid, None)
+
     def get_blob_body(self, objid: ObjIDType) -> bytes:
         """Returns the body of the given blob object"""
         full_obj_path = self.repopath(repoobject.make_object_path(objid))
         with full_obj_path.open("rb") as stream:
             header = ObjectHeader.from_stream(stream)
             self.assertEqual(ObjectType.BLOB, header.type)
-            self.assert_object_header(objid, header)
+            self.assert_object_header(objid, header, *stream_len_and_sha1(stream))
             self.assertIsNone(header.entries)
             self.assertIsNone(header.blobs)
             self.assertIsNone(header.stats)
@@ -72,7 +117,7 @@ class AssertObjHelperMixin(BackathonTest):
         with full_obj_path.open("rb") as stream:
             header = ObjectHeader.from_stream(stream)
             self.assertEqual(ObjectType.FILE, header.type)
-            self.assert_object_header(objid, header)
+            self.assert_object_header(objid, header, *stream_len_and_sha1(stream))
             self.assertIsNone(header.entries)
 
             body = stream.read()
@@ -99,7 +144,7 @@ class AssertObjHelperMixin(BackathonTest):
         with full_obj_path.open("rb") as stream:
             header = ObjectHeader.from_stream(stream)
             self.assertEqual(ObjectType.SYMLINK, header.type)
-            self.assert_object_header(objid, header)
+            self.assert_object_header(objid, header, *stream_len_and_sha1(stream))
             self.assertIsNone(header.entries)
             self.assertIsNone(header.blobs)
 
@@ -118,7 +163,7 @@ class AssertObjHelperMixin(BackathonTest):
         with full_obj_path.open("rb") as stream:
             header = ObjectHeader.from_stream(stream)
             self.assertEqual(ObjectType.TREE, header.type)
-            self.assert_object_header(objid, header)
+            self.assert_object_header(objid, header, *stream_len_and_sha1(stream))
 
             # No body
             self.assertEqual(b"", stream.read())
@@ -508,3 +553,33 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
             {self.backupdir: ExpectedDir({"file": ExpectedFile("contents 1")})},
             {self.backupdir: ExpectedDir({"file": ExpectedFile("contents 2")})},
         )
+
+    def test_compression(self):
+        """Tests that uploaded objects are compressed if compression is enabled"""
+        self.back.db.config_set("enable-compression", True)
+        file = self.create_file("file1", "Hello, world!")
+        self.back.scan()
+        self.back.backup()
+        entry = self.back.db.get_fsentry(file)
+
+        assert entry.objid is not None
+        obj_path = self.repopath(repoobject.make_object_path(entry.objid))
+        contents = obj_path.read_bytes()
+
+        # Should start with the zlib magic byte
+        self.assertEqual(0x78, contents[0])
+        decompressed = zlib.decompress(contents)
+        buf = io.BytesIO(decompressed)
+        header = models.ObjectHeader.from_stream(buf)
+        self.assertEqual(ObjectType.FILE, header.type)
+        self.assertEqual(b"Hello, world!", buf.read())
+
+        # The database should store the compressed size and sha1, not that of the
+        # decompressed data
+        db_obj = next(
+            self.back.db.query(
+                models.Object, "SELECT * FROM objects WHERE objid=?", (entry.objid,)
+            )
+        )
+        self.assertEqual(len(contents), db_obj.uploaded_size)
+        self.assertEqual(hashlib.sha1(contents).digest(), db_obj.sha1)

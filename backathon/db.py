@@ -21,6 +21,7 @@ from typing import (
 from pydantic import BaseModel
 
 from backathon import models
+from backathon.exceptions import FSEntryNotFound
 
 logger = logging.getLogger("backathon.db")
 
@@ -43,7 +44,7 @@ MIGRATIONS: list[list[str]] = [
         """CREATE TABLE object_relations (
             parent BLOB NOT NULL REFERENCES objects (objid) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
             child BLOB NOT NULL REFERENCES objects (objid) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
-            name TEXT DEFAULT null
+            name BLOB DEFAULT null
         )""",
         """CREATE TABLE fsentry (
             id INTEGER PRIMARY KEY,
@@ -220,7 +221,3 @@ class Database:
         if entry is None:
             raise FSEntryNotFound(path)
         return entry
-
-
-class FSEntryNotFound(FileNotFoundError):
-    pass

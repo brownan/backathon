@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 class CorruptedRepository(Exception):
     """Raised when an inconsistency was detected while reading from a storage
     repository
@@ -11,4 +14,8 @@ class CorruptedRepository(Exception):
 
 
 class DependencyError(Exception):
+    pass
+
+
+class FSEntryNotFound(FileNotFoundError):
     pass

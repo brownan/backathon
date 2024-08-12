@@ -138,7 +138,7 @@ class ObjectRelation(BaseModel):
 
     parent: ObjIDType
     child: ObjIDType
-    name: str | None
+    name: bytes | None
 
     def __repr__(self):
         return "<ObjectRelation {} - {}>".format(

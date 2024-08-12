@@ -213,7 +213,7 @@ class Backathon:
 
         """
         compressor: Compressor | None = None
-        if self.db.config_get_json("enable-compression", True):
+        if self.db.config_get("enable-compression", True):
             compressor = repoobject.compress_payload
         encrypter: EncrypterBase = self.get_encrypter()
         storage: StorageBase = self.get_storage()
