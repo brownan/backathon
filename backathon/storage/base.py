@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from os import PathLike
-from typing import Generic, Type, TypeVar
+from typing import IO, Generic, Type, TypeVar
 
 from pydantic import BaseModel
 
@@ -22,4 +22,8 @@ class StorageBase(ABC, Generic[C]):
 
     @abstractmethod
     def put_object(self, path: str | PathLike[str], payload: Payload):
+        ...
+
+    @abstractmethod
+    def get_object(self, path: str | PathLike[str]) -> IO[bytes]:
         ...

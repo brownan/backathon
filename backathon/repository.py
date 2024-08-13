@@ -1,12 +1,13 @@
 import asyncio
 import hashlib
+import hmac
 import io
 import json
 import logging
 import os.path
 import pathlib
 import secrets
-from typing import Awaitable, Callable, Type
+from typing import IO, Awaitable, Callable, Type
 
 from typing_extensions import Self
 
@@ -17,7 +18,9 @@ from backathon.db import Database
 from backathon.encryption.base import EncrypterBase, Payload
 from backathon.encryption.nacl import NaclEncrypter
 from backathon.encryption.null import NullEncrypter
-from backathon.models import ObjIDType
+from backathon.exceptions import CorruptedRepository
+from backathon.models import ObjectHeader, ObjIDType
+from backathon.restore import GetObject
 from backathon.storage.base import StorageBase
 from backathon.storage.local import LocalStorage
 
@@ -210,6 +213,28 @@ class Backathon:
                 )
 
         return put_snapshot
+
+    def _make_obj_getter(
+        self, encrypter: EncrypterBase, storage: StorageBase
+    ) -> GetObject:
+        async def get_object(objid: ObjIDType) -> tuple[ObjectHeader, IO[bytes]]:
+            path = repoobject.make_object_path(objid)
+
+            # TODO: these next lines should be farmed out to a thread pool so as not
+            # to block the main thread
+            obj_stream = storage.get_object(path)
+            obj_stream = encrypter.decrypt(obj_stream)
+            obj_stream = repoobject.decompress_payload(io.BytesIO(obj_stream.read()))
+
+            actual_objid = encrypter.make_objid(obj_stream)
+            if not hmac.compare_digest(actual_objid, objid):
+                raise CorruptedRepository(f"Object {objid.hex()} is corrupted")
+
+            header = ObjectHeader.from_stream(obj_stream)
+
+            return header, obj_stream
+
+        return get_object
 
     def backup(self):
         """Perform a backup

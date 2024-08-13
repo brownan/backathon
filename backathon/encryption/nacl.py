@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import io
 import logging
-from typing import IO, Annotated, Any
+from typing import IO, Annotated, Any, cast
 
 import nacl.public
 import nacl.pwhash.argon2id
@@ -166,8 +166,10 @@ class NaclEncrypter(EncrypterBase[NaclConfig]):
         return io.BytesIO(decrypted_bytes)
 
     def make_objid(self, buf: IO[bytes]) -> ObjIDType:
+        pos = buf.tell()
+        buf.seek(0)
         h = hmac.new(bytes(self.pubkey), digestmod="sha256")
         while chunk := buf.read(io.DEFAULT_BUFFER_SIZE):
             h.update(chunk)
-        buf.seek(0)
-        return ObjIDType(h.digest())
+        buf.seek(pos)
+        return cast(ObjIDType, h.digest())
