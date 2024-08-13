@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
-from typing import IO, Any
+from typing import IO, Any, cast
 
 from pydantic import BaseModel
 from typing_extensions import Self
@@ -48,8 +48,10 @@ class NullEncrypter(EncrypterBase[NullConfig]):
         return buf
 
     def make_objid(self, buf: IO[bytes]) -> ObjIDType:
+        pos = buf.tell()
+        buf.seek(0)
         hasher = hashlib.sha256()
         while chunk := buf.read(io.DEFAULT_BUFFER_SIZE):
             hasher.update(chunk)
-        buf.seek(0)
-        return ObjIDType(hasher.digest())
+        buf.seek(pos)
+        return cast(ObjIDType, hasher.digest())

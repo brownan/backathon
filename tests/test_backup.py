@@ -97,10 +97,25 @@ class AssertObjHelperMixin(BackathonTest):
             for blobref in header.blobs:
                 self.assert_relation_exists(objid, blobref.objid, None)
 
+    def assert_correct_objid(self, objid: ObjIDType, stream: IO[bytes]):
+        pos = stream.tell()
+        stream.seek(0)
+
+        # For no encryption, objid should be the sha256 of the decompressed contents
+        # TODO: handle encryption here. maybe defer to the defined encryption
+        # class's make_objid(), since objids being sha256 specifically isn't part
+        # of the specification. But for now...
+        contents = repoobject.decompress_payload(io.BytesIO(stream.read()))
+        digest = hashlib.sha256(contents.getbuffer()).digest()
+        self.assertEqual(objid, digest)
+
+        stream.seek(pos)
+
     def get_blob_body(self, objid: ObjIDType) -> bytes:
         """Returns the body of the given blob object"""
         full_obj_path = self.repopath(repoobject.make_object_path(objid))
         with full_obj_path.open("rb") as stream:
+            self.assert_correct_objid(objid, stream)
             header = ObjectHeader.from_stream(stream)
             self.assertEqual(ObjectType.BLOB, header.type)
             self.assert_object_header(objid, header, *stream_len_and_sha1(stream))
@@ -117,6 +132,7 @@ class AssertObjHelperMixin(BackathonTest):
         full_obj_path = self.repopath(repoobject.make_object_path(objid))
         expected_file_bytes = expected_file.encode("utf-8")
         with full_obj_path.open("rb") as stream:
+            self.assert_correct_objid(objid, stream)
             header = ObjectHeader.from_stream(stream)
             self.assertEqual(ObjectType.FILE, header.type)
             self.assert_object_header(objid, header, *stream_len_and_sha1(stream))
@@ -144,6 +160,7 @@ class AssertObjHelperMixin(BackathonTest):
         """Asserts that the given object is a symlink object"""
         full_obj_path = self.repopath(repoobject.make_object_path(objid))
         with full_obj_path.open("rb") as stream:
+            self.assert_correct_objid(objid, stream)
             header = ObjectHeader.from_stream(stream)
             self.assertEqual(ObjectType.SYMLINK, header.type)
             self.assert_object_header(objid, header, *stream_len_and_sha1(stream))
@@ -163,6 +180,7 @@ class AssertObjHelperMixin(BackathonTest):
         """
         full_obj_path = self.repopath(repoobject.make_object_path(objid))
         with full_obj_path.open("rb") as stream:
+            self.assert_correct_objid(objid, stream)
             header = ObjectHeader.from_stream(stream)
             self.assertEqual(ObjectType.TREE, header.type)
             self.assert_object_header(objid, header, *stream_len_and_sha1(stream))
