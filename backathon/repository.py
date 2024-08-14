@@ -7,6 +7,7 @@ import logging
 import os.path
 import pathlib
 import secrets
+import sqlite3
 from typing import IO, Awaitable, Callable, Type
 
 from typing_extensions import Self
@@ -250,21 +251,34 @@ def make_obj_putter(
         )
 
         with db.atomic(), db.cursor() as cursor:
-            cursor.execute(
-                """
-            INSERT INTO objects
-            (objid, type, uploaded_size, file_size, last_modified_time, sha1)
-            VALUES (?,?,?,?,?,?)
-            """,
-                (
-                    objid,
-                    obj_req.header.type,
-                    encrypted_payload.size,
-                    obj_req.header.file_size,
-                    obj_req.header.last_modified_time,
-                    encrypted_payload.sha1,
-                ),
-            )
+            try:
+                cursor.execute(
+                    """
+                INSERT INTO objects
+                (objid, type, uploaded_size, file_size, last_modified_time, sha1)
+                VALUES (?,?,?,?,?,?)
+                """,
+                    (
+                        objid,
+                        obj_req.header.type,
+                        encrypted_payload.size,
+                        obj_req.header.file_size,
+                        obj_req.header.last_modified_time,
+                        encrypted_payload.sha1,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                # This can happen if two backup threads try to upload an identical
+                # object, which isn't too unlikely in practice. Since they are
+                # cryptographically guaranteed to be identical (including relations),
+                # we can just query that one back out and return it.
+                # The fact that the object was uploaded twice is an unfortunate
+                # inefficiency but I believe it won't be too bad overall.
+                return next(
+                    db.query(
+                        models.Object, "SELECT * FROM objects WHERE objid=?", (objid,)
+                    )
+                )
 
             # Add object relations
             children: list[tuple[ObjIDType, ObjIDType, bytes | None]] = []
