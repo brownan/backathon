@@ -101,7 +101,6 @@ async def backup(
     inline_threshold: int = db.config_get("inline-threshold", 2**20)
     chunk_threshold: int = db.config_get("chunk-threshold", 30 * 2**20)
     chunk_size: int = db.config_get("chunk-size", 10 * 2**20)
-    num_workers: int = db.config_get("num-workers", os.cpu_count() or 2)
 
     with ExitStack() as exitstack:
         cursor = exitstack.enter_context(db.cursor())
@@ -113,10 +112,6 @@ async def backup(
 
         tasks: set[Future[tuple[models.FSEntry, _ProcessingResult | None]]] = set()
 
-        logger.debug("Launching threadpool with %s workers", num_workers)
-        executor = exitstack.enter_context(
-            concurrent.futures.ThreadPoolExecutor(max_workers=num_workers)
-        )
         exitstack.enter_context(db.atomic(immediate=True))
         while backup_items_remain():
             ct = 0
@@ -158,7 +153,6 @@ async def backup(
                 tasks.add(
                     asyncio.create_task(
                         _dispatch(
-                            executor,
                             entry,
                             child_entries,
                             put_object,
@@ -235,7 +229,6 @@ async def backup(
 
 
 async def _dispatch(
-    executor: concurrent.futures.Executor,
     entry: models.FSEntry,
     child_entries: list[models.FSEntry],
     put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
@@ -256,9 +249,7 @@ async def _dispatch(
         return fut.result()
 
     result: _ProcessingResult | None
-    result = await loop.run_in_executor(
-        executor, process_entry, entry, child_entries, upload, params
-    )
+    result = await asyncio.to_thread(process_entry, entry, child_entries, upload, params)
     return entry, result
 
 
