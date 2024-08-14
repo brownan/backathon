@@ -3,4 +3,3 @@ ruff
 black
 pre-commit
 types-requests
-types-pytz
