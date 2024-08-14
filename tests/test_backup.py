@@ -279,7 +279,7 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         super().setUp()
         self.back = self.init_basic_repo()
 
-    def _disable_inlining(self):
+    def disable_inlining(self):
         """Disables inlining for the test"""
         self.back.db.config_set("inline-threshold", 0)
 
@@ -340,7 +340,7 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
 
     def test_backup_no_inline(self):
         """Tests backing up files with inlining disabled"""
-        self._disable_inlining()
+        self.disable_inlining()
         self.create_file("file1", "file contents")
         self.back.scan()
         self.back.backup()
@@ -353,7 +353,7 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         """Tests deduplication when backing up two identical files
 
         Specifically, we expect one fewer blob object in the database and repo"""
-        self._disable_inlining()
+        self.disable_inlining()
         self.create_file("file1", "file contents")
         self.create_file("file2", "file contents")
         self.back.scan()

@@ -69,6 +69,7 @@ class TestRestore(BackathonTest):
         )
 
     def _get_snapshot(self) -> models.Snapshot:
+        """Helper function to get a single snapshot from the database"""
         return next(
             self.back.db.query(models.Snapshot, "SELECT * FROM snapshots LIMIT 1")
         )
@@ -177,22 +178,28 @@ class TestRestore(BackathonTest):
     def test_restore_multiple_revisions(self):
         self.create_file("file", "contents A")
 
-        self.backathon.scan()
-        self.backathon.backup()
+        self.back.scan()
+        self.back.backup()
 
         self.create_file("file", "new contents")
 
-        self.backathon.scan()
-        self.backathon.backup()
+        self.back.scan()
+        self.back.backup()
 
-        snapshots = list(self.snapshot.order_by("date"))
+        snapshots = list(
+            self.back.db.query(
+                models.Snapshot, "SELECT * FROM snapshots ORDER BY timestamp"
+            )
+        )
 
         self.assertEqual(2, len(snapshots))
-        self.assertEqual(6, self.object.count())
+
+        # two root dirs, two file objs
+        self.assert_object_count(self.back, 4)
 
         restoredir = pathlib.Path(self.restoredir)
-        self.backathon.restore(snapshots[0].root, restoredir / "ss1", self.password)
-        self.backathon.restore(snapshots[1].root, restoredir / "ss2", self.password)
+        self.back.restore(snapshots[0].root, restoredir / "ss1", self.password)
+        self.back.restore(snapshots[1].root, restoredir / "ss2", self.password)
 
         file1 = restoredir / "ss1" / "file"
         file2 = restoredir / "ss2" / "file"
@@ -201,18 +208,27 @@ class TestRestore(BackathonTest):
         self.assertEqual("new contents", file2.read_text())
 
     def test_restore_single_file(self):
+        """Tests restoring a single file instead of an entire directory"""
         self.create_file("file", "contents")
 
-        self.backathon.scan()
-        self.backathon.backup()
+        self.back.scan()
+        self.back.backup()
 
-        root = self.snapshot.get().root
+        ss = self._get_snapshot()
 
         # Should just be one child
-        inode = root.children.get()
+        children = list(
+            self.back.db.query(
+                models.ObjectRelation,
+                "SELECT * FROM object_relations WHERE parent=?",
+                (ss.root,),
+            )
+        )
+        self.assertEqual(1, len(children))
+        objid = children[0].child
 
         filename = pathlib.Path(self.restoredir, "my_file")
-        self.backathon.restore(inode, filename, self.password)
+        self.back.restore(objid, filename, self.password)
 
         self.assertEqual("contents", filename.read_text())
 
@@ -223,32 +239,44 @@ class TestRestore(BackathonTest):
 
         self.create_file(name, "contents")
 
-        self.backathon.scan()
-        self.backathon.backup()
-        ss = self.snapshot.get()
+        self.back.scan()
+        self.back.backup()
+        ss = self._get_snapshot()
 
-        self.backathon.restore(ss.root, self.restoredir, self.password)
+        self.back.restore(ss.root, self.restoredir, self.password)
 
         self.assert_restored_file(name, "contents")
 
     def test_restore_large_file(self):
-        """This file should take more than one block to save, so it tests
-        routines that must operate on multiple blocks.
+        """This file should take more than one blob to save, so it tests
+        routines that must operate on multiple blobs.
 
         """
+        self.back.db.config_set("inline-threshold", 0)
+        self.back.db.config_set("chunk-threshold", 0)
+        self.back.db.config_set("chunk-size", 2**20)
         infile = self.create_file("bigfile", "")
-        block = b"\0" * 1024 * 1024
         h = hashlib.md5()
 
         with infile.open("wb") as f:
-            for _ in range(50):
+            for i in range(5):
+                # Each block must be different so they don't get deduplicated and
+                # we ensure the backup and restore routines are handling files made of
+                # multiple different blobs
+                block = i.to_bytes() * 1024 * 1024
                 h.update(block)
                 f.write(block)
 
-        self.backathon.scan()
-        self.backathon.backup()
-        ss = self.snapshot.get()
-        self.backathon.restore(ss.root, self.restoredir, self.password)
+        self.back.scan()
+        self.back.backup()
+
+        blobs = list(
+            self.back.db.query(models.Object, "SELECT * FROM objects WHERE type='blob'")
+        )
+        self.assertEqual(5, len(blobs))
+
+        ss = self._get_snapshot()
+        self.back.restore(ss.root, self.restoredir, self.password)
 
         outfile = pathlib.Path(self.restoredir, "bigfile")
         h2 = hashlib.md5()
@@ -262,13 +290,13 @@ class TestRestore(BackathonTest):
 
     def test_restore_symlink(self):
         """Tests backing up and restoring symlinks"""
-        path = self.path("linkname")
+        path = self.backuppath("linkname")
         os.symlink("this is the link target", path)
 
-        self.backathon.scan()
-        self.backathon.backup()
-        ss = self.snapshot.get()
-        self.backathon.restore(ss.root, self.restoredir, self.password)
+        self.back.scan()
+        self.back.backup()
+        ss = self._get_snapshot()
+        self.back.restore(ss.root, self.restoredir, self.password)
 
         self.assertEqual(
             os.readlink(pathlib.Path(self.restoredir, "linkname")),
@@ -279,7 +307,7 @@ class TestRestore(BackathonTest):
 class TestRestoreWithCompression(TestRestore):
     def setUp(self):
         super().setUp()
-        self.repo.set_compression(True)
+        self.back.db.config_set("enable-compression", True)
 
 
 class TestRestoreWithEncryption(TestRestore):

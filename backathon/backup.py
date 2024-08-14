@@ -99,9 +99,11 @@ async def backup(
                 )
 
     # Get some config items
-    inline_threshold: int = db.config_get("inline-threshold", 2**20)
-    chunk_threshold: int = db.config_get("chunk-threshold", 30 * 2**20)
-    chunk_size: int = db.config_get("chunk-size", 10 * 2**20)
+    inline_threshold: int = max(0, db.config_get("inline-threshold", 2**20))
+    chunk_threshold: int = max(
+        0, inline_threshold, db.config_get("chunk-threshold", 30 * 2**20)
+    )
+    chunk_size: int = max(2**16, db.config_get("chunk-size", 10 * 2**20))
 
     with ExitStack() as exitstack:
         cursor = exitstack.enter_context(db.cursor())
