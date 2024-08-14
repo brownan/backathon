@@ -9,6 +9,7 @@ from typing_extensions import Self
 
 from backathon.encryption.base import EncrypterBase, Payload, UnlockCallback
 from backathon.models import ObjIDType
+from backathon.repoobject import COPY_BUFSIZE
 
 
 class NullConfig(BaseModel):
@@ -51,7 +52,7 @@ class NullEncrypter(EncrypterBase[NullConfig]):
         pos = buf.tell()
         buf.seek(0)
         hasher = hashlib.sha256()
-        while chunk := buf.read(io.DEFAULT_BUFFER_SIZE):
+        while chunk := buf.read(COPY_BUFSIZE):
             hasher.update(chunk)
         buf.seek(pos)
         return cast(ObjIDType, hasher.digest())

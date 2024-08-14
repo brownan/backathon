@@ -279,13 +279,6 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         super().setUp()
         self.back = self.init_basic_repo()
 
-        # For these tests, always inline files unless the test specifies otherwise.
-        # This ensures these tests work independently of the default inline threshold
-        # changing
-        # The specific value here needs to be larger than any test files this test case
-        # uses
-        self.back.db.config_set("inline-threshold", 2**20)
-
     def _disable_inlining(self):
         """Disables inlining for the test"""
         self.back.db.config_set("inline-threshold", 0)

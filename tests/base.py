@@ -59,6 +59,11 @@ class BackathonTest(TestCase):
             NullEncrypter(NullConfig()),
         )
         back.db.config_set("enable-compression", False)
+        # For these tests, always inline files unless the test specifies otherwise.
+        # This ensures these tests work independently of the default inline threshold
+        # changing
+        # The specific value here needs to be larger than any test files
+        back.db.config_set("inline-threshold", 2**20)
         back.add_root(self.backupdir)
         return back
 

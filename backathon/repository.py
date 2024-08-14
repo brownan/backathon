@@ -12,6 +12,7 @@ from typing import IO, Awaitable, Callable, Type
 from typing_extensions import Self
 
 import backathon.backup
+import backathon.restore
 from backathon import models, repoobject
 from backathon.backup import ObjectRequest
 from backathon.db import Database
@@ -282,3 +283,39 @@ class Backathon:
         config_cls = storage_cls.get_config_class()
         config = config_cls.model_validate(self.db.config_get_json("storage-config"))
         return storage_cls(config)
+
+    def restore(
+        self,
+        root_objid: ObjIDType,
+        restoredir: str | os.PathLike[str],
+        password: str | None,
+    ):
+        encrypter = self.get_encrypter()
+        if password is not None:
+            encrypter.unlock(password)
+        storage = self.get_storage()
+
+        async def get_object(objid: ObjIDType) -> tuple[ObjectHeader, IO[bytes]]:
+            raw_stream = await asyncio.to_thread(
+                storage.get_object, repoobject.make_object_path(objid)
+            )
+            decrypted = encrypter.decrypt(raw_stream)
+            decompressed = repoobject.decompress_payload(decrypted)
+            if raw_stream is not decompressed:
+                raw_stream.close()
+
+            # Check obj id
+            actual_objid = encrypter.make_objid(decompressed)
+            if not hmac.compare_digest(actual_objid, objid):
+                raise CorruptedRepository(f"Corrupted Object: {objid.hex()}")
+
+            header = models.ObjectHeader.from_stream(decompressed)
+            return header, decompressed
+
+        asyncio.run(
+            backathon.restore.restore_obj(
+                root_objid,
+                pathlib.Path(restoredir),
+                get_object,
+            )
+        )

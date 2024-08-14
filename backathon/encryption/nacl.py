@@ -18,6 +18,7 @@ from backathon.encryption.base import (
     UnlockCallback,
 )
 from backathon.models import BytesHexEncoder, ObjIDType
+from backathon.repoobject import COPY_BUFSIZE
 
 logger = logging.getLogger("backathon.nacl")
 
@@ -115,7 +116,7 @@ class NaclEncrypter(EncrypterBase[NaclConfig]):
         encrypted_key = nacl.secret.SecretBox(symmetric_key).encrypt(bytes(key))
 
         # The state is saved locally in plain text, and is everything we need in order
-        # to perform unattended backups.#
+        # to perform unattended backups.
         # The private key is stored encrypted, so restores are only possible with the
         # password.
         state = NaclConfig.model_construct(
@@ -169,7 +170,7 @@ class NaclEncrypter(EncrypterBase[NaclConfig]):
         pos = buf.tell()
         buf.seek(0)
         h = hmac.new(bytes(self.pubkey), digestmod="sha256")
-        while chunk := buf.read(io.DEFAULT_BUFFER_SIZE):
+        while chunk := buf.read(COPY_BUFSIZE):
             h.update(chunk)
         buf.seek(pos)
         return cast(ObjIDType, h.digest())

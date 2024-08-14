@@ -2,10 +2,15 @@
 
 import io
 import pathlib
+import tempfile
 import zlib
+from typing import IO
 
 from backathon.backup import ObjectRequest
 from backathon.models import ObjIDType
+
+# Same value as shutil.COPY_BUFSIZE but that attribute isn't public
+COPY_BUFSIZE = 1024 * 1024
 
 
 def make_obj_payload(obj_req: ObjectRequest) -> io.BytesIO:
@@ -48,7 +53,7 @@ def compress_payload(raw: io.BytesIO) -> io.BytesIO:
         return raw
 
 
-def decompress_payload(compressed: io.BytesIO) -> io.BytesIO:
+def decompress_payload(compressed: IO[bytes]) -> IO[bytes]:
     """Decompress the given bytes
 
     If the given byte buffer does not start with the zlib magic byte,
@@ -60,12 +65,30 @@ def decompress_payload(compressed: io.BytesIO) -> io.BytesIO:
     # 0x80 - 0x8f, 0xde, or 0xdf.
     # Note: only the msgpack serialization of the positive 7-bit integer 120 serializes
     # to the byte 0x78
-    buf = compressed.getbuffer()
-    if buf[0] == 0x78:
-        # zlib identification marker
-        return io.BytesIO(zlib.decompress(buf))
+
+    if isinstance(compressed, io.BytesIO):
+        # Optimized path if we get an in-memory buffer
+        buf = compressed.getbuffer()
+        if buf[0] == 0x78:
+            # zlib identification marker
+            return io.BytesIO(zlib.decompress(buf))
+        else:
+            return compressed
     else:
-        return compressed
+        initial_byte = compressed.read(1)
+        compressed.seek(-1, io.SEEK_CUR)
+        if not initial_byte:
+            return io.BytesIO()
+        if initial_byte[0] == 0x78:
+            decomp_buf = tempfile.SpooledTemporaryFile(max_size=10 * 2**20)
+            decompressor = zlib.decompressobj()
+            while chunk := compressed.read(COPY_BUFSIZE):
+                decomp_buf.write(decompressor.decompress(chunk))
+            decomp_buf.write(decompressor.flush())
+            decomp_buf.seek(0)
+            return decomp_buf
+        else:
+            return compressed
 
 
 def make_object_path(objid: ObjIDType) -> pathlib.PurePosixPath:

@@ -5,8 +5,10 @@ import pathlib
 import stat
 import tempfile
 import unittest.mock
+import warnings
 
-from tests.base import TestBase
+from backathon import models
+from tests.base import BackathonTest
 
 
 class AssertionHandler(logging.Handler):
@@ -18,10 +20,10 @@ class AssertionHandler(logging.Handler):
     """
 
     def emit(self, record):
-        raise AssertionError(self.format(record))
+        raise AssertionError("Unexpected warning: " + self.format(record))
 
 
-class TestRestore(TestBase):
+class TestRestore(BackathonTest):
     """Tests restore functionality, and some other end-to-end scan and backup
     functionality
 
@@ -32,15 +34,32 @@ class TestRestore(TestBase):
 
     def setUp(self):
         super().setUp()
+        self.back = self.init_basic_repo()
         self.restoredir = self.stack.enter_context(tempfile.TemporaryDirectory())
 
         self.handler = AssertionHandler()
         self.handler.setLevel(logging.WARNING)
         logging.getLogger("backathon.restore").addHandler(self.handler)
 
+        # Also watch for emitted warnings
+        self.w = self.stack.enter_context(warnings.catch_warnings(record=True))
+
     def tearDown(self):
         logging.getLogger("backathon.restore").removeHandler(self.handler)
         super().tearDown()
+        if self.w:
+            self.fail(
+                "Warnings emitted:\n{}".format(
+                    "\n".join(
+                        [
+                            warnings.formatwarning(
+                                w.message, w.category, w.filename, w.lineno, line=w.line
+                            )
+                            for w in self.w
+                        ]
+                    )
+                )
+            )
 
     def assert_restored_file(self, path, contents):
         fullpath = pathlib.Path(self.restoredir, path)
@@ -49,15 +68,20 @@ class TestRestore(TestBase):
             fullpath.read_text(),
         )
 
+    def _get_snapshot(self) -> models.Snapshot:
+        return next(
+            self.back.db.query(models.Snapshot, "SELECT * FROM snapshots LIMIT 1")
+        )
+
     def test_simple_restore(self):
         self.create_file("file1", "contents1")
         self.create_file("dir/file2", "contents2")
-        self.backathon.scan()
-        self.backathon.backup()
+        self.back.scan()
+        self.back.backup()
 
-        ss = self.snapshot.get()
+        ss = self._get_snapshot()
 
-        self.backathon.restore(ss.root, self.restoredir, self.password)
+        self.back.restore(ss.root, self.restoredir, self.password)
 
         self.assert_restored_file("file1", "contents1")
         self.assert_restored_file("dir/file2", "contents2")

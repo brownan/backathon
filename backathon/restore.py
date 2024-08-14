@@ -27,14 +27,17 @@ async def restore_obj(
     """
     header, body = await get_object(objid)
 
-    if header.type == ObjectType.FILE:
-        return await _restore_file(path, header, body, get_object)
-    elif header.type == ObjectType.TREE:
-        return await _restore_dir(path, header, get_object)
-    elif header.type == ObjectType.SYMLINK:
-        return await _restore_symlink(path, header, body)
-    else:
-        raise ValueError(f"Cannot restore objects of type {header.type}")
+    try:
+        if header.type == ObjectType.FILE:
+            return await _restore_file(path, header, body, get_object)
+        elif header.type == ObjectType.TREE:
+            return await _restore_dir(path, header, get_object)
+        elif header.type == ObjectType.SYMLINK:
+            return await _restore_symlink(path, header, body)
+        else:
+            raise ValueError(f"Cannot restore objects of type {header.type}")
+    finally:
+        body.close()
 
 
 async def _restore_file(
@@ -75,15 +78,18 @@ async def _write_blob(
 ):
     header, body = await get_object(objid)
 
-    if header.type != ObjectType.BLOB:
-        logger.error("Expected blob object: %s", objid.hex())
-        return
-
     try:
-        fobj.seek(pos)
-        shutil.copyfileobj(body, fobj)
-    except OSError as e:
-        logger.error("%s: Error writing to file", pathstr(path))
+        if header.type != ObjectType.BLOB:
+            logger.error("Expected blob object: %s", objid.hex())
+            return
+
+        try:
+            fobj.seek(pos)
+            shutil.copyfileobj(body, fobj)
+        except OSError as e:
+            logger.error("%s: Error writing to file", pathstr(path))
+    finally:
+        body.close()
 
 
 async def _restore_dir(
