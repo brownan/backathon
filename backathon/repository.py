@@ -117,125 +117,15 @@ class Backathon:
         encrypter: EncrypterBase,
         storage: StorageBase,
     ) -> Callable[[ObjectRequest], Awaitable[models.Object]]:
-        async def put_object(obj_req: ObjectRequest) -> models.Object:
-            """Called from the backup code to upload an object to the remote repository
-
-            Responsible for:
-            * Uploading the object
-            * Adding the entry to the objects table
-            * Adding any object relations to the relations table
-            * creating the models.Object instance and returning it
-            """
-
-            raw_payload = repoobject.make_obj_payload(obj_req)
-
-            # Make the objid
-            objid = encrypter.make_objid(raw_payload)
-
-            # Check if this object already exists
-            with self.db.cursor(retdict=True) as cursor:
-                cursor.execute("SELECT * FROM objects WHERE objid=?", (objid,))
-                row = cursor.fetchone()
-                if row is not None:
-                    return models.Object.model_validate(row)
-
-            # TODO: dispatch the following cpu-heavy operations to a thread pool (after
-            # measuring whether it will actually improve performance, of course)
-
-            # Compress
-            if compressor is not None:
-                compressed_payload = compressor(raw_payload)
-            else:
-                compressed_payload = raw_payload
-            del raw_payload
-
-            # Encrypt
-            encrypted_payload = encrypter.encrypt(compressed_payload)
-            del compressed_payload
-
-            storage.put_object(repoobject.make_object_path(objid), encrypted_payload)
-
-            with self.db.atomic(), self.db.cursor() as cursor:
-                cursor.execute(
-                    """
-                INSERT INTO objects
-                (objid, type, uploaded_size, file_size, last_modified_time, sha1)
-                VALUES (?,?,?,?,?,?)
-                """,
-                    (
-                        objid,
-                        obj_req.header.type,
-                        encrypted_payload.size,
-                        obj_req.header.file_size,
-                        obj_req.header.last_modified_time,
-                        encrypted_payload.sha1,
-                    ),
-                )
-
-                # Add object relations
-                children: list[tuple[ObjIDType, ObjIDType, bytes | None]] = []
-                if obj_req.header.blobs:
-                    children.extend((objid, b.objid, None) for b in obj_req.header.blobs)
-                if obj_req.header.entries:
-                    children.extend(
-                        (objid, e.objid, e.name) for e in obj_req.header.entries
-                    )
-                cursor.executemany(
-                    "INSERT INTO object_relations (parent, child, name) VALUES (?,?,?)",
-                    children,
-                )
-
-                return models.Object(
-                    objid=objid,
-                    type=obj_req.header.type,
-                    uploaded_size=encrypted_payload.size,
-                    file_size=obj_req.header.file_size,
-                    last_modified_time=obj_req.header.last_modified_time,
-                    sha1=encrypted_payload.sha1,
-                )
-
-        return put_object
+        return make_obj_putter(self.db, compressor, encrypter, storage)
 
     def _make_snapshot_putter(self, encrypter: EncrypterBase, storage: StorageBase):
-        def put_snapshot(snapshot: models.Snapshot):
-            snapshot_path = pathlib.Path("snapshots", secrets.token_urlsafe())
-            buf = io.BytesIO()
-            buf.write(snapshot.model_dump_json(indent=4).encode("utf-8"))
-            buf.seek(0)
-
-            payload = encrypter.encrypt(buf)
-            storage.put_object(snapshot_path, payload)
-
-            # Update database
-            with self.db.cursor() as cursor:
-                cursor.execute(
-                    "INSERT INTO snapshots (path, root, timestamp) VALUES (?,?,?)",
-                    (snapshot.path, snapshot.root, snapshot.timestamp),
-                )
-
-        return put_snapshot
+        return make_snapshot_putter(self.db, encrypter, storage)
 
     def _make_obj_getter(
         self, encrypter: EncrypterBase, storage: StorageBase
     ) -> GetObject:
-        async def get_object(objid: ObjIDType) -> tuple[ObjectHeader, IO[bytes]]:
-            raw_stream = await asyncio.to_thread(
-                storage.get_object, repoobject.make_object_path(objid)
-            )
-            decrypted = encrypter.decrypt(raw_stream)
-            decompressed = repoobject.decompress_payload(decrypted)
-            if raw_stream is not decompressed:
-                raw_stream.close()
-
-            # Check obj id
-            actual_objid = encrypter.make_objid(decompressed)
-            if not hmac.compare_digest(actual_objid, objid):
-                raise CorruptedRepository(f"Corrupted Object: {objid.hex()}")
-
-            header = models.ObjectHeader.from_stream(decompressed)
-            return header, decompressed
-
-        return get_object
+        return make_obj_getter(encrypter, storage)
 
     def backup(self):
         """Perform a backup
@@ -304,3 +194,180 @@ class Backathon:
                 get_object,
             )
         )
+
+
+def make_obj_putter(
+    db: Database,
+    compressor: Compressor | None,
+    encrypter: EncrypterBase,
+    storage: StorageBase,
+) -> Callable[[ObjectRequest], Awaitable[models.Object]]:
+    """Returns an object putter function
+
+    The object putter takes care of coordinating the operations that must be done
+    to upload an object to the remote repository:
+
+    * Creating the objid via the encryption backend
+    * Checking whether the object already exists
+    * Encrypting and compressing the object payload via the given encrypter and compressor
+    * Upload the object via the storage backend
+    * Add a row to the objects table in the database
+    * Add rows to the object_relations table
+    * Returning an Object model instance
+
+    The object putter is a coroutine and must be called in the main thread (because
+    it accesses the database)
+
+    """
+
+    async def put_object(obj_req: ObjectRequest) -> models.Object:
+        raw_payload = repoobject.make_obj_payload(obj_req)
+
+        # Make the objid
+        objid = encrypter.make_objid(raw_payload)
+
+        # Check if this object already exists
+        with db.cursor(retdict=True) as cursor:
+            cursor.execute("SELECT * FROM objects WHERE objid=?", (objid,))
+            row = cursor.fetchone()
+            if row is not None:
+                return models.Object.model_validate(row)
+
+        # Compress
+        if compressor is not None:
+            compressed_payload = compressor(raw_payload)
+        else:
+            compressed_payload = raw_payload
+        del raw_payload
+
+        # Encrypt
+        encrypted_payload = encrypter.encrypt(compressed_payload)
+        del compressed_payload
+
+        # Do the actual uploading in a subthread since it's likely IO bound
+        await asyncio.to_thread(
+            storage.put_object, repoobject.make_object_path(objid), encrypted_payload
+        )
+
+        with db.atomic(), db.cursor() as cursor:
+            cursor.execute(
+                """
+            INSERT INTO objects
+            (objid, type, uploaded_size, file_size, last_modified_time, sha1)
+            VALUES (?,?,?,?,?,?)
+            """,
+                (
+                    objid,
+                    obj_req.header.type,
+                    encrypted_payload.size,
+                    obj_req.header.file_size,
+                    obj_req.header.last_modified_time,
+                    encrypted_payload.sha1,
+                ),
+            )
+
+            # Add object relations
+            children: list[tuple[ObjIDType, ObjIDType, bytes | None]] = []
+            if obj_req.header.blobs:
+                children.extend((objid, b.objid, None) for b in obj_req.header.blobs)
+            if obj_req.header.entries:
+                children.extend((objid, e.objid, e.name) for e in obj_req.header.entries)
+            cursor.executemany(
+                "INSERT INTO object_relations (parent, child, name) VALUES (?,?,?)",
+                children,
+            )
+
+            return models.Object(
+                objid=objid,
+                type=obj_req.header.type,
+                uploaded_size=encrypted_payload.size,
+                file_size=obj_req.header.file_size,
+                last_modified_time=obj_req.header.last_modified_time,
+                sha1=encrypted_payload.sha1,
+            )
+
+    return put_object
+
+
+def make_snapshot_putter(
+    db: Database, encrypter: EncrypterBase, storage: StorageBase
+) -> Callable[[models.Snapshot], None]:
+    """Returns a snapshot putter function
+
+    The snapshot putter is called to upload a final snapshot definition to the remote
+    repository. It coordinates the following operations:
+
+    * Creating the snapshot metadata
+    * Encrypting the metadata via the given encrypter
+    * Uploading the metadata to the remote repository via the given storage backend
+    * Updating the local database with the snapshot metadata
+    """
+
+    def put_snapshot(snapshot: models.Snapshot):
+        snapshot_path = pathlib.Path("snapshots", secrets.token_urlsafe())
+        buf = io.BytesIO()
+        buf.write(snapshot.model_dump_json(indent=4).encode("utf-8"))
+        buf.seek(0)
+
+        payload = encrypter.encrypt(buf)
+        storage.put_object(snapshot_path, payload)
+
+        # Update database
+        with db.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO snapshots (path, root, timestamp) VALUES (?,?,?)",
+                (snapshot.path, snapshot.root, snapshot.timestamp),
+            )
+
+    return put_snapshot
+
+
+def make_obj_getter(encrypter: EncrypterBase, storage: StorageBase) -> GetObject:
+    """Returns an object getter function
+
+    The object getter's job is to retrieve, decrypt, decompress, verify, and deserialize
+    an object from a remote repository. The object getter returns a tuple of
+    (ObjectHeader, IO[bytes]).
+
+    The ObjectHeader is the deserialized header from the object, and the byte stream
+    is the object body (bytes following the header).
+
+    The byte stream is a file-like object open for reading. The file's position may
+    not be at byte 0; it may just point to the position in the object where the body
+    starts. The exact details of what kind of object the byte stream is depends on the
+    storage and encryption implementation. Callers can assume it's seekable, and that
+    the number of bytes in the body matches the header's length.
+
+    Callers MUST close the file-like object when finished reading. Callers should not rely
+    on garbage collection to close the byte stream.
+
+    """
+
+    async def get_object(objid: ObjIDType) -> tuple[ObjectHeader, IO[bytes]]:
+        raw_stream = await asyncio.to_thread(
+            storage.get_object, repoobject.make_object_path(objid)
+        )
+        decrypted = encrypter.decrypt(raw_stream)
+        decompressed = repoobject.decompress_payload(decrypted)
+        if raw_stream is not decompressed:
+            raw_stream.close()
+
+        # Check obj id
+        actual_objid = encrypter.make_objid(decompressed)
+        if not hmac.compare_digest(actual_objid, objid):
+            raise CorruptedRepository(f"Corrupted Object: {objid.hex()}")
+
+        header = models.ObjectHeader.from_stream(decompressed)
+
+        # Verify the body length matches the length in the header
+        pos = decompressed.tell()
+        decompressed.seek(0, io.SEEK_END)
+        length = decompressed.tell() - pos
+        decompressed.seek(pos)
+
+        if length != header.length:
+            raise CorruptedRepository(f"Object length mismatch: {objid.hex()}")
+
+        return header, decompressed
+
+    return get_object
