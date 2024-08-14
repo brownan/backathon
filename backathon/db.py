@@ -46,6 +46,10 @@ MIGRATIONS: list[list[str]] = [
             child BLOB NOT NULL REFERENCES objects (objid) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
             name BLOB DEFAULT null
         )""",
+        """CREATE UNIQUE INDEX object_relations_unique
+            ON object_relations
+            (parent, child, name)
+        """,
         """CREATE TABLE fsentry (
             id INTEGER PRIMARY KEY,
             objid BLOB REFERENCES objects (objid) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
