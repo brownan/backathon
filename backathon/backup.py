@@ -6,6 +6,7 @@ import os
 import stat
 import time
 from asyncio import Future
+from concurrent.futures.thread import ThreadPoolExecutor
 from contextlib import ExitStack
 from logging import getLogger
 from operator import attrgetter
@@ -112,6 +113,14 @@ async def backup(
 
         tasks: set[Future[tuple[models.FSEntry, _ProcessingResult | None]]] = set()
 
+        # The backup routine MUST use a separate thread pool from the event loop's default,
+        # because the threads will call back in to the main thread to upload objects,
+        # and those calls may themselves call back into the default thread pool. That
+        # could cause deadlocks if all threads in the pool are busy.
+        executor = exitstack.enter_context(
+            ThreadPoolExecutor(thread_name_prefix="backup-thread-")
+        )
+
         exitstack.enter_context(db.atomic(immediate=True))
         while backup_items_remain():
             ct = 0
@@ -153,6 +162,7 @@ async def backup(
                 tasks.add(
                     asyncio.create_task(
                         _dispatch(
+                            executor,
                             entry,
                             child_entries,
                             put_object,
@@ -229,6 +239,7 @@ async def backup(
 
 
 async def _dispatch(
+    executor: ThreadPoolExecutor,
     entry: models.FSEntry,
     child_entries: list[models.FSEntry],
     put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
@@ -249,7 +260,9 @@ async def _dispatch(
         return fut.result()
 
     result: _ProcessingResult | None
-    result = await asyncio.to_thread(process_entry, entry, child_entries, upload, params)
+    result = await loop.run_in_executor(
+        executor, process_entry, entry, child_entries, upload, params
+    )
     return entry, result
 
 
