@@ -219,21 +219,21 @@ class Backathon:
         self, encrypter: EncrypterBase, storage: StorageBase
     ) -> GetObject:
         async def get_object(objid: ObjIDType) -> tuple[ObjectHeader, IO[bytes]]:
-            path = repoobject.make_object_path(objid)
+            raw_stream = await asyncio.to_thread(
+                storage.get_object, repoobject.make_object_path(objid)
+            )
+            decrypted = encrypter.decrypt(raw_stream)
+            decompressed = repoobject.decompress_payload(decrypted)
+            if raw_stream is not decompressed:
+                raw_stream.close()
 
-            # TODO: these next lines should be farmed out to a thread pool so as not
-            # to block the main thread
-            obj_stream = storage.get_object(path)
-            obj_stream = encrypter.decrypt(obj_stream)
-            obj_stream = repoobject.decompress_payload(io.BytesIO(obj_stream.read()))
-
-            actual_objid = encrypter.make_objid(obj_stream)
+            # Check obj id
+            actual_objid = encrypter.make_objid(decompressed)
             if not hmac.compare_digest(actual_objid, objid):
-                raise CorruptedRepository(f"Object {objid.hex()} is corrupted")
+                raise CorruptedRepository(f"Corrupted Object: {objid.hex()}")
 
-            header = ObjectHeader.from_stream(obj_stream)
-
-            return header, obj_stream
+            header = models.ObjectHeader.from_stream(decompressed)
+            return header, decompressed
 
         return get_object
 
@@ -295,22 +295,7 @@ class Backathon:
             encrypter.unlock(password)
         storage = self.get_storage()
 
-        async def get_object(objid: ObjIDType) -> tuple[ObjectHeader, IO[bytes]]:
-            raw_stream = await asyncio.to_thread(
-                storage.get_object, repoobject.make_object_path(objid)
-            )
-            decrypted = encrypter.decrypt(raw_stream)
-            decompressed = repoobject.decompress_payload(decrypted)
-            if raw_stream is not decompressed:
-                raw_stream.close()
-
-            # Check obj id
-            actual_objid = encrypter.make_objid(decompressed)
-            if not hmac.compare_digest(actual_objid, objid):
-                raise CorruptedRepository(f"Corrupted Object: {objid.hex()}")
-
-            header = models.ObjectHeader.from_stream(decompressed)
-            return header, decompressed
+        get_object = self._make_obj_getter(encrypter, storage)
 
         asyncio.run(
             backathon.restore.restore_obj(

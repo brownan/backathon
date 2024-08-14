@@ -7,7 +7,7 @@ import tempfile
 import unittest.mock
 import warnings
 
-from backathon import models
+from backathon import models, repoobject
 from tests.base import BackathonTest
 
 
@@ -90,10 +90,10 @@ class TestRestore(BackathonTest):
         file_a = self.create_file("file1", "contents")
         file_a.chmod(0o777)
 
-        self.backathon.scan()
-        self.backathon.backup()
-        ss = self.snapshot.get()
-        self.backathon.restore(ss.root, self.restoredir, self.password)
+        self.back.scan()
+        self.back.backup()
+        ss = self._get_snapshot()
+        self.back.restore(ss.root, self.restoredir, self.password)
 
         file_b = pathlib.Path(self.restoredir, "file1")
         stat_result = file_b.stat()
@@ -109,10 +109,10 @@ class TestRestore(BackathonTest):
         except PermissionError:
             raise unittest.SkipTest("Process doesn't have chown permission")
 
-        self.backathon.scan()
-        self.backathon.backup()
-        ss = self.snapshot.get()
-        self.backathon.restore(ss.root, self.restoredir, self.password)
+        self.back.scan()
+        self.back.backup()
+        ss = self._get_snapshot()
+        self.back.restore(ss.root, self.restoredir, self.password)
 
         file_b = pathlib.Path(self.restoredir, "file1")
         stat_result = file_b.stat()
@@ -123,10 +123,10 @@ class TestRestore(BackathonTest):
         file_a = self.create_file("file1", "contents")
         os.utime(file_a, ns=(123456789, 987654321))
 
-        self.backathon.scan()
-        self.backathon.backup()
-        ss = self.snapshot.get()
-        self.backathon.restore(ss.root, self.restoredir, self.password)
+        self.back.scan()
+        self.back.backup()
+        ss = self._get_snapshot()
+        self.back.restore(ss.root, self.restoredir, self.password)
 
         file_b = pathlib.Path(self.restoredir, "file1")
 
@@ -145,22 +145,22 @@ class TestRestore(BackathonTest):
         dir_a.mkdir()
         os.utime(dir_a, ns=(123456789, 987654321))
 
-        self.backathon.scan()
-        self.backathon.backup()
-        ss = self.snapshot.get()
+        self.back.scan()
+        self.back.backup()
+        ss = self._get_snapshot()
 
         # The directory atime gets reset before we back it up, so just check
         # that whatever value it had when it was backed up, that's what gets
         # restored.
-        key = self.repo.encrypter.get_decryption_key(self.password)
-        tree = ss.root.children.get()
-        payload = self.repo.get_object(tree.objid, key)
-        from backathon.restore import unpack_payload
+        entry = self.back.db.get_fsentry(self.backuppath("dir1"))
+        assert entry.objid is not None
+        obj_path = self.repopath(repoobject.make_object_path(entry.objid))
+        with obj_path.open("rb") as fobj:
+            header = models.ObjectHeader.from_stream(fobj)
+        assert header.stats is not None
+        atime = header.stats.atime
 
-        info = list(unpack_payload(payload))[1]
-        atime = info["atime"]
-
-        self.backathon.restore(ss.root, self.restoredir, self.password)
+        self.back.restore(ss.root, self.restoredir, self.password)
 
         dir1 = pathlib.Path(self.restoredir, "dir1")
 
