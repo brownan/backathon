@@ -7,7 +7,9 @@ import tempfile
 import unittest.mock
 import warnings
 
+import backathon.encryption.nacl
 from backathon import models, repoobject
+from backathon.encryption.base import EncrypterBase
 from tests.base import BackathonTest
 
 
@@ -30,11 +32,12 @@ class TestRestore(BackathonTest):
     """
 
     # Set by subclasses that test encryption
-    password = None
+    password: str | None = None
+    encrypter: EncrypterBase | None = None
 
     def setUp(self):
         super().setUp()
-        self.back = self.init_basic_repo()
+        self.back = self.init_basic_repo(self.encrypter)
         self.restoredir = self.stack.enter_context(tempfile.TemporaryDirectory())
 
         self.handler = AssertionHandler()
@@ -157,6 +160,10 @@ class TestRestore(BackathonTest):
         assert entry.objid is not None
         obj_path = self.repopath(repoobject.make_object_path(entry.objid))
         with obj_path.open("rb") as fobj:
+            encrypter = self.back.get_encrypter()
+            if self.password:
+                encrypter.unlock(self.password)
+            fobj = encrypter.decrypt(fobj)
             header = models.ObjectHeader.from_stream(fobj)
         assert header.stats is not None
         atime = header.stats.atime
@@ -312,49 +319,47 @@ class TestRestoreWithCompression(TestRestore):
 
 class TestRestoreWithEncryption(TestRestore):
     def setUp(self):
-        super().setUp()
-
-        from backathon import encryption
-
         self.password = "This is my password!"
 
         # Set the ops limit and mem limit low so the tests don't take forever
         import nacl.pwhash.argon2id
 
-        self.stack.enter_context(
+        with (
             unittest.mock.patch.object(
-                encryption.NaclSealedBox, "OPSLIMIT", nacl.pwhash.argon2id.OPSLIMIT_MIN
-            )
-        )
-        self.stack.enter_context(
+                backathon.encryption.nacl.NaclEncrypter,
+                "DEFAULT_OPSLIMIT",
+                nacl.pwhash.argon2id.OPSLIMIT_MIN,
+            ),
             unittest.mock.patch.object(
-                encryption.NaclSealedBox, "MEMLIMIT", nacl.pwhash.argon2id.MEMLIMIT_MIN
-            )
-        )
-
-        # Initialize our encrypter
-        encrypter = encryption.NaclSealedBox.init_new(self.password)
-        self.repo.set_encrypter(encrypter)
+                backathon.encryption.nacl.NaclEncrypter,
+                "DEFAULT_MEMLIMIT",
+                nacl.pwhash.argon2id.MEMLIMIT_MIN,
+            ),
+        ):
+            # Initialize our encrypter
+            self.encrypter = backathon.encryption.nacl.NaclEncrypter.new(self.password)
+        super().setUp()
 
     def test_not_plaintext(self):
         """Tests that the plaintext of a file doesn't appear in the object
         payload on disk"""
+        self.back.db.config_set("inline-threshold", 0)
+
         self.create_file("secret_file", "super secret contents")
 
-        self.backathon.scan()
-        self.backathon.backup()
+        self.back.scan()
+        self.back.backup()
 
-        ss = self.snapshot.get()
-        tree = ss.root
-        inode = tree.children.get()
-        blob = inode.children.get()
-
-        path = pathlib.Path(
-            self.datadir, "objects", blob.objid.hex()[:3], blob.objid.hex()
+        blobs = list(
+            self.back.db.query(models.Object, "SELECT * FROM objects WHERE type='blob'")
         )
+        self.assertEqual(1, len(blobs))
+        blob = blobs[0]
+
+        path = self.repopath(repoobject.make_object_path(blob.objid))
         self.assertTrue(path.exists())
         contents = path.read_bytes()
-        self.assertFalse(b"super secret contents" in contents)
+        self.assertNotIn(b"super secret contents", contents)
 
 
 class TestRestoreEncryptionAndCompression(

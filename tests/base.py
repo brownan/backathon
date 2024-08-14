@@ -4,6 +4,7 @@ import tempfile
 from contextlib import ExitStack
 from unittest import TestCase
 
+from backathon.encryption.base import EncrypterBase
 from backathon.encryption.null import NullConfig, NullEncrypter
 from backathon.repository import Backathon
 from backathon.storage.local import LocalStorage, LocalStorageConfig
@@ -52,11 +53,11 @@ class BackathonTest(TestCase):
         path.write_text(contents)
         return path
 
-    def init_basic_repo(self) -> Backathon:
+    def init_basic_repo(self, encrypter: EncrypterBase | None = None) -> Backathon:
         back = Backathon.initialize(
             self.db_path,
             LocalStorage(LocalStorageConfig(base_path=self.repodir)),
-            NullEncrypter(NullConfig()),
+            encrypter or NullEncrypter(NullConfig()),
         )
         back.db.config_set("enable-compression", False)
         # For these tests, always inline files unless the test specifies otherwise.

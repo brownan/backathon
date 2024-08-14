@@ -76,6 +76,8 @@ class Database:
         self.path = pathlib.Path(path)
         if not create and not self.path.is_file():
             raise FileNotFoundError(f"Config database not found: {self.path}")
+        elif create and self.path.is_file() and self.path.stat().st_size != 0:
+            raise FileExistsError(f"Config database already exists: {self.path}")
         self.conn = self._open_db()
         self._setup_db()
         self._savepoint_num: int = 1
