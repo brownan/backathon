@@ -51,7 +51,7 @@ class NullEncrypter(EncrypterBase[NullConfig]):
     def make_objid(self, buf: IO[bytes]) -> ObjIDType:
         pos = buf.tell()
         buf.seek(0)
-        hasher = hashlib.sha256()
+        hasher = hashlib.blake2b(digest_size=32)
         while chunk := buf.read(COPY_BUFSIZE):
             hasher.update(chunk)
         buf.seek(pos)

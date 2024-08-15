@@ -2,6 +2,7 @@
 
 import io
 import pathlib
+import shutil
 import tempfile
 import zlib
 from typing import IO
@@ -33,7 +34,7 @@ def make_obj_payload(obj_req: ObjectRequest) -> io.BytesIO:
         if isinstance(obj_req.body, io.BytesIO):
             raw_payload.write(obj_req.body.getbuffer())
         else:
-            raw_payload.write(obj_req.body.read())
+            shutil.copyfileobj(obj_req.body, raw_payload)
     raw_payload.seek(0)
     return raw_payload
 

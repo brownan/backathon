@@ -1,5 +1,4 @@
 import hashlib
-import hmac
 import io
 import logging
 from typing import IO, Annotated, Any, cast
@@ -169,7 +168,7 @@ class NaclEncrypter(EncrypterBase[NaclConfig]):
     def make_objid(self, buf: IO[bytes]) -> ObjIDType:
         pos = buf.tell()
         buf.seek(0)
-        h = hmac.new(bytes(self.pubkey), digestmod="sha256")
+        h = hashlib.blake2b(digest_size=32, key=bytes(self.pubkey))
         while chunk := buf.read(COPY_BUFSIZE):
             h.update(chunk)
         buf.seek(pos)

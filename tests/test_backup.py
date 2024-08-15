@@ -101,12 +101,13 @@ class AssertObjHelperMixin(BackathonTest):
         pos = stream.tell()
         stream.seek(0)
 
-        # For no encryption, objid should be the sha256 of the decompressed contents
+        # For no encryption, objid should be the blake2b digest of the decompressed
+        # contents
         # TODO: handle encryption here. maybe defer to the defined encryption
-        # class's make_objid(), since objids being sha256 specifically isn't part
-        # of the specification. But for now...
+        # class's make_objid(), since any particular hash algo isn't part
+        # of the specification
         contents = repoobject.decompress_payload(io.BytesIO(stream.read()))
-        digest = hashlib.sha256(contents.getbuffer()).digest()
+        digest = hashlib.blake2b(contents.read(), digest_size=32).digest()
         self.assertEqual(objid, digest)
 
         stream.seek(pos)
