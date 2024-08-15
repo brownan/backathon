@@ -17,8 +17,8 @@ class NullConfig(BaseModel):
 
 
 class NullEncrypter(EncrypterBase[NullConfig]):
-    def __init__(self, config: NullConfig):
-        super().__init__(config)
+    def __init__(self, config: NullConfig | None = None):
+        super().__init__(config or NullConfig())
 
     @classmethod
     def get_config_class(cls):

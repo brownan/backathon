@@ -1,17 +1,69 @@
 import datetime
+from typing import Iterable
 
-import backathon.garbage
 from tests.base import BackathonTest
+
+UTC = datetime.timezone.utc
+
+ExpectedObjects = dict[str, "ExpectedObjects"]
 
 
 class TestGarbage(BackathonTest):
     def setUp(self):
         super().setUp()
-        self.gc = backathon.garbage.GarbageCollector(self.repo)
+        self.back = self.init_basic_repo()
+        self.db = self.back.db
 
-    def find_garbage(self):
-        self.gc.build_filter()
-        yield from self.gc._iter_garbage()
+    def _insert_objects(self, *objs: tuple[str, Iterable[str]]):
+        with self.db.atomic(), self.db.cursor() as cursor:
+            for objid, obj_rels in objs:
+                cursor.execute(
+                    "INSERT INTO objects (objid, type) VALUES (?, 'tree')", (objid,)
+                )
+                for obj_rel in obj_rels:
+                    cursor.execute(
+                        "INSERT INTO object_relations (parent, child) VALUES (?,?)",
+                        (objid, obj_rel),
+                    )
+
+    def _create_snapshot(
+        self,
+        root_id: str,
+        date: datetime.datetime,
+    ):
+        with self.db.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO snapshots (path, root, timestamp) VALUES ('', ?,?)",
+                (root_id, date),
+            )
+
+    def assert_objects(
+        self,
+        objs: ExpectedObjects,
+        roots: list[str] | None = None,
+        no_extras: bool = True,
+    ):
+        with self.db.cursor() as cursor:
+            if roots is None:
+                cursor.execute(
+                    """SELECT objid FROM objects
+                    WHERE objid NOT IN (
+                        SELECT child FROM object_relations
+                    )"""
+                )
+                roots = [str(row[0]) for row in cursor]
+
+            for objid, children in objs.items():
+                self.assertIn(objid, roots)
+                roots.remove(objid)
+
+                cursor.execute(
+                    "SELECT child FROM object_relations WHERE parent=?", (objid,)
+                )
+                child_objids = [str(row[0]) for row in cursor]
+                self.assert_objects(children, child_objids, no_extras=no_extras)
+            if no_extras:
+                self.assertEqual([], roots, "Unexpected object found")
 
     def test_collect_garbage(self):
         self._insert_objects(
@@ -28,14 +80,10 @@ class TestGarbage(BackathonTest):
             ("I", ["F"]),
             ("J", []),
         )
-        self.snapshot.create(
-            root_id=b"A", date=datetime.datetime(2018, 1, 1, tzinfo=pytz.UTC)
-        )
-        self.snapshot.create(
-            root_id=b"G", date=datetime.datetime(2018, 1, 1, tzinfo=pytz.UTC)
-        )
+        self._create_snapshot(root_id="A", date=datetime.datetime(2018, 1, 1, tzinfo=UTC))
+        self._create_snapshot(root_id="G", date=datetime.datetime(2018, 1, 1, tzinfo=UTC))
 
-        self.assertEqual(10, self.object.count())
+        self.assert_object_count(self.back, 10)
         self.assert_objects(
             {
                 "A": {
