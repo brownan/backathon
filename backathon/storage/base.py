@@ -27,3 +27,7 @@ class StorageBase(ABC, Generic[C]):
     @abstractmethod
     def get_object(self, path: str | PathLike[str]) -> IO[bytes]:
         ...
+
+    @abstractmethod
+    def delete_object(self, path: str | PathLike[str]):
+        ...

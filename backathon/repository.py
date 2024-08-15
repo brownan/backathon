@@ -13,6 +13,7 @@ from typing import IO, Awaitable, Callable, Type
 from typing_extensions import Self
 
 import backathon.backup
+import backathon.garbage
 import backathon.restore
 from backathon import models, repoobject
 from backathon.backup import ObjectRequest
@@ -195,6 +196,11 @@ class Backathon:
                 get_object,
             )
         )
+
+    def collect_garbage(self):
+        """Initiates the garbage collection process"""
+        storage = self.get_storage()
+        backathon.garbage.collect_garbage(self.db, storage)
 
 
 def make_obj_putter(

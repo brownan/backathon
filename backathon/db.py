@@ -67,8 +67,17 @@ MIGRATIONS: list[list[str]] = [
             root BLOB NOT NULL REFERENCES objects (objid) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
             timestamp TEXT
         )""",
+        """CREATE TABLE garbage (
+            objid BLOB PRIMARY KEY ON CONFLICT IGNORE
+        )""",
     ]
 ]
+
+
+def batch_fetch_from_cursor(cursor: sqlite3.Cursor):
+    cursor.arraysize = 2048
+    while batch := cursor.fetchmany():
+        yield from batch
 
 
 class Database:
@@ -154,13 +163,8 @@ class Database:
         FSEntry and Object instances from the database.
         """
         with self.cursor(retdict=True) as cursor:
-            cursor.arraysize = 2048
             cursor.execute(query, args)
-            while True:
-                rows = cursor.fetchmany()
-                if not rows:
-                    break
-                yield from map(model_cls.model_validate, rows)
+            yield from map(model_cls.model_validate, batch_fetch_from_cursor(cursor))
 
     def config_get(self, key: str, default: Any = None) -> Any:
         cursor = self.conn.cursor()

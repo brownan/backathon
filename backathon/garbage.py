@@ -1,173 +1,159 @@
+"""
+Garbage collection routines
+
+The approach implemented is to construct a simple bloom filter tuned such that we
+find and collect about 95% of all garbage objects.
+
+This approach was chosen for two main reasons:
+* Only requires 2 linear-time passes over the objects table, where the first pass is
+  read-only, and the second pass removes rows
+* memory efficient: uses about 760k per million objects in the table
+
+
+"""
+
 import logging
 import math
 import random
+from typing import Iterator, NamedTuple
 
-from django.db import connections
+from rich import filesize
 
-from backathon import models
+from backathon import models, repoobject
+from backathon.db import Database, batch_fetch_from_cursor
+from backathon.storage.base import StorageBase
 
 logger = logging.getLogger("backathon.garbage")
 
 
-class GarbageCollector:
-    """Finds garbage objects in the Object table
+class BloomFilter(NamedTuple):
+    bloom: bytearray
+    hashes: list[int]
+    m: int
 
-    The approach implemented is to construct a simple bloom filter
-    such that we collect about 95% of all garbage objects.
 
-    This approach was chosen because it should be quick (2 passes over
-    the database, where the first pass is read-only) and memory
-    efficient (uses about 760k for a million objects in the table)
+def _build_filter(db: Database) -> BloomFilter:
+    """Builds the bloom filter"""
+    with db.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*) FROM objects")
+        num_objects: int = cursor.fetchone()[0] or 0
 
-    One alternative is to perform a query for objects with no
-    references, which is quick due to indices on the
-    object_relations table, but requires many queries in a loop
-    to collect all garbage. It's theoretically possible to do this with
-    a single recursive query, but that requires holding the entire
-    garbage set in memory, which could get big.
+    # m - number of bits in the filter. Depends on num_objects
+    # k - number of hash functions needed. Should be 4 for p=0.05
+    p = 0.05
+    m = int(
+        math.ceil((num_objects * math.log(p)) / math.log(1 / math.pow(2, math.log(2))))
+    )
+    k = 4  # = int(round(math.log(2) * m / num_objects))
 
-    Another approach is a traditional garbage collection strategy such as
-    mark-and-sweep. Problem with that is it would involve writing each
-    row on the first pass, which is a lot more IO and would probably be
-    slower.
+    arr_size = int(math.ceil(m / 8))
+    logger.debug(
+        f"{num_objects} objects in database, allocating {filesize.decimal(arr_size)} for bloom filter"
+    )
+    bloom = bytearray(arr_size)
+
+    # The "hash" functions will just be a random number that will be
+    # xor'd with the object IDs. Using a different random int each time
+    # also guards against false positives from collisions happening from
+    # the same two objects each run.
+    r = random.SystemRandom()
+    hashes = [r.getrandbits(256) for _ in range(k)]
+
+    # This query iterates over all the reachable objects by walking the
+    # hierarchy formed using the Snapshot table as the roots and
+    # traversing the links in the object_relations table
+    query = """
+        WITH RECURSIVE reachable(id) AS (
+            SELECT root FROM snapshots
+            UNION ALL
+            SELECT child FROM object_relations
+            INNER JOIN reachable ON reachable.id=parent
+        ) SELECT id FROM reachable
+        """
+    with db.cursor() as cursor:
+        cursor.execute(query)
+        for row in batch_fetch_from_cursor(cursor):
+            objid_int = int.from_bytes(row[0], "little")
+
+            for h in hashes:
+                h ^= objid_int
+                h %= m
+                bytepos, bitpos = divmod(h, 8)
+                bloom[bytepos] |= 1 << bitpos
+
+    return BloomFilter(bloom=bloom, hashes=hashes, m=m)
+
+
+def _iter_garbage(db: Database, bloomfilter: BloomFilter) -> Iterator[models.Object]:
+    """Iterates over garbage objects
+
+    Callers should take care to atomically delete objects in the remote
+    storage backend along with rows in the Object table. It's more
+    important to delete the rows, however, because if a row exists
+    without a backing object, that can corrupt future backups that may
+    try to reference that object. Leaving an un-referenced object on the
+    backing store doesn't hurt anything except by taking up space.
+
     """
+    hashes = bloomfilter.hashes
 
-    def __init__(self, repo, progress=None):
-        """
+    def hash_match(h, objid, bloom=bloomfilter.bloom, m=bloomfilter.m):
+        h ^= objid
+        h %= m
+        bytepos, bitpos = divmod(h, 8)
+        return bloom[bytepos] & (1 << bitpos)
 
-        :type repo: backathon.repository.Repository
-        :type progress: ProgressIndicator
-        """
-        self.repo = repo
-        self.db = repo.db
-        self.bloom = None
-        self.m = None
-        self.hashes = None
-        self.progress = progress or ProgressIndicator()
+    # Now we can iterate over all objects. If an object does not appear
+    # in the bloom filter, we can guarantee it's not reachable.
+    for obj in db.query(models.Object, "SELECT * FROM objects"):
+        objid = int.from_bytes(obj.objid, "little")
 
-    def build_filter(self):
-        """Builds the bloom filter"""
-        num_objects = models.Object.objects.using(self.db).all().count()
+        if not all(hash_match(h, objid) for h in hashes):
+            yield obj
 
-        # m - number of bits in the filter. Depends on num_objects
-        # k - number of hash functions needed. Should be 4 for p=0.05
-        p = 0.05
-        m = int(
-            math.ceil(
-                (num_objects * math.log(p)) / math.log(1 / math.pow(2, math.log(2)))
-            )
-        )
-        k = 4  # = int(round(math.log(2) * m / num_objects))
 
-        arr_size = int(math.ceil(m / 8))
-        bloom = bytearray(arr_size)
+def collect_garbage(db: Database, storage: StorageBase) -> tuple[int, int]:
+    """Collects and deletes garbage from the given database
 
-        # The "hash" functions will just be a random number that will be
-        # xor'd with the object IDs. Using a different random int each time
-        # also guards against false positives from collisions happening from
-        # the same two objects each run.
-        r = random.SystemRandom()
-        hashes = [r.getrandbits(256) for _ in range(k)]
+    Returns the number of objects deleted and the number of bytes deleted
+    """
+    n = 0
+    s = 0
+    logger.debug("Garbage collection beginning. Acquiring write lock on database")
+    with db.atomic(immediate=True), db.cursor() as cursor:
+        # Build the bloom filter
+        logger.info("Garbage scan, first pass...")
+        bloom_filter = _build_filter(db)
 
-        # This query iterates over all the reachable objects by walking the
-        # hierarchy formed using the Snapshot table as the roots and
-        # traversing the links in the ManyToMany relation.
-        query = """
-            WITH RECURSIVE reachable(id) AS (
-                SELECT root_id FROM snapshots
-                UNION ALL
-                SELECT child_id FROM object_relations
-                INNER JOIN reachable ON reachable.id=parent_id
-            ) SELECT id FROM reachable
-            """
-        with connections[self.db].cursor() as c:
-            c.execute(query)
-            for row in c:
-                objid_int = int.from_bytes(row[0], "little")
-
-                for h in hashes:
-                    h ^= objid_int
-                    h %= m
-                    bytepos, bitpos = divmod(h, 8)
-                    bloom[bytepos] |= 1 << bitpos
-
-                self.progress.build_filter_progress()
-
-        self.bloom = bloom
-        self.m = m
-        self.hashes = hashes
-
-    def _iter_garbage(self):
-        """Iterates over garbage objects
-
-        Callers should take care to atomically delete objects in the remote
-        storage backend along with rows in the Object table. It's more
-        important to delete the rows, however, because if a row exists
-        without a backing object, that can corrupt future backups that may
-        try to reference that object. Leaving an un-referenced object on the
-        backing store doesn't hurt anything except by taking up space.
-
-        """
-        hashes = self.hashes
-
-        def hash_match(h, objid, bloom=self.bloom, m=self.m):
-            h ^= objid
-            h %= m
-            bytepos, bitpos = divmod(h, 8)
-            return bloom[bytepos] & (1 << bitpos)
-
-        # Now we can iterate over all objects. If an object does not appear
-        # in the bloom filter, we can guarantee it's not reachable.
-        for obj in models.Object.objects.using(self.db).all().iterator():
-            objid = int.from_bytes(obj.objid, "little")
-
-            if not all(hash_match(h, objid) for h in hashes):
-                yield obj
-
-    def delete_garbage(self):
-        """Deletes garbage according to the filter built in a previous call
-        to build_filter()
-
-        Callers should take care to hold the SQLite reserved lock between
-        calls to build_filter() and delete_garbage() if there's a chance of
-        any other connections manipulating the Object table simultaneously.
-        Otherwise, new objects or references could be created between the calls.
-
-        In order to preserve consistency between the local db and the
-        repository, this method swallows all exceptions and logs them to the
-        backathon.garbage logger. This way the caller's DB transaction is not
-        rolled back from any exceptions.
-
-        Returns the number of objects deleted and the number of bytes deleted
-        """
-        n = 0
-        s = 0
-        try:
-            for obj in self._iter_garbage():  # type: models.Object
-                self.repo.delete_object(obj)
-                n += 1
+        # Log garbage objects to the garbage table for deletion in the next step
+        # We don't want to delete the garbage from the remote repo within this
+        # transaction since if there's an error and the transaction can't be committed,
+        # the local database will lose track of which objects in the remote repo were
+        # deleted and which still exist.
+        logger.info("Garbage scan, counting garbage objects")
+        for obj in _iter_garbage(db, bloom_filter):
+            cursor.execute("DELETE FROM objects WHERE objid=?", (obj.objid,))
+            cursor.execute("INSERT INTO garbage (objid) VALUES (?)", (obj.objid,))
+            n += 1
+            if obj.uploaded_size:
                 s += obj.uploaded_size
-                self.progress.delete_progress(obj.uploaded_size)
-        except KeyboardInterrupt:
-            self.progress.close()
-            logger.info("Ctrl-C caught, canceling garbage collection")
-        except Exception:
-            self.progress.close()
-            logger.critical("Error in garbage collection", exc_info=True)
-        finally:
-            self.progress.close()
+            logger.log(5, "Found garbage: %r", obj)
+
+        logger.debug("Committing transaction")
+        cursor.execute("COMMIT")
+        cursor.execute("BEGIN IMMEDIATE")
+
+        logger.info("Found %s objects to delete, totaling %s", n, filesize.decimal(s))
+        cursor.execute("SELECT objid FROM garbage")
+        for row in batch_fetch_from_cursor(cursor):
+            objid = row[0]
+            path = repoobject.make_object_path(objid)
+            logger.log(5, "Deleting %s", objid.hex())
+            storage.delete_object(path)
+
+        # Clear the garbage table. A DELETE FROM statement without a WHERE clause in sqlite
+        # efficiently clears the table without visiting each row.
+        # noinspection SqlWithoutWhere
+        cursor.execute("DELETE FROM garbage")
 
         return n, s
-
-
-class ProgressIndicator:
-    def build_filter_progress(self):
-        """Called for each step of building the filter"""
-        pass
-
-    def delete_progress(self, s):
-        """Called for each object deleted"""
-        pass
-
-    def close(self):
-        pass

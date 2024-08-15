@@ -1,13 +1,10 @@
 import datetime
 
-import pytz
-from django.db.transaction import atomic
-
 import backathon.garbage
-from tests.base import TestBase
+from tests.base import BackathonTest
 
 
-class TestGarbage(TestBase):
+class TestGarbage(BackathonTest):
     def setUp(self):
         super().setUp()
         self.gc = backathon.garbage.GarbageCollector(self.repo)
