@@ -16,6 +16,9 @@ dependencies = [
     "click~=8.1.0",
 ]
 
+[project.scripts]
+backathon = "backathon.cmdline.main:main"
+
 [tool.black]
 target-version = ["py39"]
 line-length = 90
