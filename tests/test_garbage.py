@@ -1,6 +1,7 @@
 import datetime
 from typing import Iterable
 
+from backathon import garbage, models
 from tests.base import BackathonTest
 
 UTC = datetime.timezone.utc
@@ -14,16 +15,21 @@ class TestGarbage(BackathonTest):
         self.back = self.init_basic_repo()
         self.db = self.back.db
 
+    def find_garbage(self) -> list[models.Object]:
+        bloom = garbage._build_filter(self.db)
+        return list(garbage._iter_garbage(self.db, bloom))
+
     def _insert_objects(self, *objs: tuple[str, Iterable[str]]):
         with self.db.atomic(), self.db.cursor() as cursor:
             for objid, obj_rels in objs:
                 cursor.execute(
-                    "INSERT INTO objects (objid, type) VALUES (?, 'tree')", (objid,)
+                    "INSERT INTO objects (objid, type) VALUES (?, 'tree')",
+                    (objid.encode(),),
                 )
                 for obj_rel in obj_rels:
                     cursor.execute(
                         "INSERT INTO object_relations (parent, child) VALUES (?,?)",
-                        (objid, obj_rel),
+                        (objid.encode(), obj_rel.encode()),
                     )
 
     def _create_snapshot(
@@ -34,7 +40,7 @@ class TestGarbage(BackathonTest):
         with self.db.cursor() as cursor:
             cursor.execute(
                 "INSERT INTO snapshots (path, root, timestamp) VALUES ('', ?,?)",
-                (root_id, date),
+                (root_id.encode(), date),
             )
 
     def assert_objects(
@@ -51,16 +57,16 @@ class TestGarbage(BackathonTest):
                         SELECT child FROM object_relations
                     )"""
                 )
-                roots = [str(row[0]) for row in cursor]
+                roots = [row[0].decode() for row in cursor]
 
             for objid, children in objs.items():
                 self.assertIn(objid, roots)
                 roots.remove(objid)
 
                 cursor.execute(
-                    "SELECT child FROM object_relations WHERE parent=?", (objid,)
+                    "SELECT child FROM object_relations WHERE parent=?", (objid.encode(),)
                 )
-                child_objids = [str(row[0]) for row in cursor]
+                child_objids = [row[0].decode() for row in cursor]
                 self.assert_objects(children, child_objids, no_extras=no_extras)
             if no_extras:
                 self.assertEqual([], roots, "Unexpected object found")
@@ -113,7 +119,8 @@ class TestGarbage(BackathonTest):
         )
 
         # Remove snapshot A
-        self.snapshot.filter(root_id=b"A").delete()
+        with self.db.cursor() as cursor:
+            cursor.execute("DELETE FROM snapshots WHERE root=?", (b"A",))
 
         garbage = list(self.find_garbage())
         # Garbage collection is stochastic, but should never collect
@@ -122,9 +129,9 @@ class TestGarbage(BackathonTest):
             {g.objid for g in garbage}.issubset({b"A", b"C"}),
         )
 
-        with atomic():
+        with self.db.atomic(), self.db.cursor() as cursor:
             for g in garbage:
-                g.delete()
+                cursor.execute("DELETE FROM objects WHERE objid=?", (g.objid,))
 
         self.assert_objects(
             {
