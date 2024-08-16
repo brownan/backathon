@@ -1,7 +1,8 @@
 import datetime
-from typing import Iterable
+from typing import Iterable, Iterator
 
-from backathon import garbage, models
+import backathon.garbage
+from backathon import models
 from tests.base import BackathonTest
 
 UTC = datetime.timezone.utc
@@ -15,22 +16,33 @@ class TestGarbage(BackathonTest):
         self.back = self.init_basic_repo()
         self.db = self.back.db
 
-    def find_garbage(self) -> list[models.Object]:
-        bloom = garbage._build_filter(self.db)
-        return list(garbage._iter_garbage(self.db, bloom))
+    def find_garbage(self) -> Iterator[models.Object]:
+        bloom = backathon.garbage._build_filter(self.db)
+        return backathon.garbage._iter_garbage(self.db, bloom)
 
     def _insert_objects(self, *objs: tuple[str, Iterable[str]]):
-        with self.db.atomic(), self.db.cursor() as cursor:
+        with self.db.atomic():
             for objid, obj_rels in objs:
-                cursor.execute(
-                    "INSERT INTO objects (objid, type) VALUES (?, 'tree')",
-                    (objid.encode(),),
-                )
+                self._create_obj(objid)
+                # Making use of deferred foreign keys, we can create the relations before
+                # we create all the objects, as long as everything's in place when the
+                # transaction commits
                 for obj_rel in obj_rels:
-                    cursor.execute(
-                        "INSERT INTO object_relations (parent, child) VALUES (?,?)",
-                        (objid.encode(), obj_rel.encode()),
-                    )
+                    self._create_rel(objid, obj_rel)
+
+    def _create_obj(self, objid: str):
+        with self.db.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO objects (objid, type) VALUES (?,'tree')",
+                (objid.encode(),),
+            )
+
+    def _create_rel(self, parent: str, child: str):
+        with self.db.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO object_relations (parent, child) VALUES (?,?)",
+                (parent.encode(), child.encode()),
+            )
 
     def _create_snapshot(
         self,
@@ -150,31 +162,30 @@ class TestGarbage(BackathonTest):
         )
 
     def test_collect_garbage_2(self):
-        N = 100
+        cursor = self.db.cursor()
+        N = 1000
         for root in ["A", "B"]:
-            obj = self.object.create(objid="root_{}".format(root).encode("ASCII"))
+            objid = f"root_{root}"
+            self._create_obj(objid)
             for i in range(N):
-                obj2 = self.object.create(
-                    objid="obj_{}_{}".format(root, i).encode("ASCII")
-                )
-                self.obj_relation.create(parent=obj, child=obj2)
-                obj = obj2
+                sub_objid = f"obj_{root}_{i}"
+                self._create_obj(sub_objid)
+                self._create_rel(objid, sub_objid)
+                objid = sub_objid
 
-        self.snapshot.create(
-            root_id=b"root_A", date=datetime.datetime(2018, 1, 1, tzinfo=pytz.UTC)
+        self._create_snapshot(
+            root_id="root_A", date=datetime.datetime(2018, 1, 1, tzinfo=UTC)
         )
-        self.snapshot.create(
-            root_id=b"root_B", date=datetime.datetime(2018, 1, 1, tzinfo=pytz.UTC)
+        self._create_snapshot(
+            root_id="root_B", date=datetime.datetime(2018, 1, 1, tzinfo=UTC)
         )
 
-        self.assertEqual(
-            N * 2 + 2,
-            self.object.count(),
-        )
+        self.assert_object_count(self.back, N * 2 + 2)
         garbage = list(self.find_garbage())
         self.assertListEqual([], garbage)
 
-        self.snapshot.get(root_id=b"root_B").delete()
+        with self.db.cursor() as cursor:
+            cursor.execute("DELETE FROM snapshots WHERE root=?", (b"root_B",))
         garbage = list(self.find_garbage())
         self.assertLessEqual(
             len(garbage),
@@ -189,5 +200,5 @@ class TestGarbage(BackathonTest):
             1,
         )
         for obj in garbage:
-            objid = obj.objid.decode("ASCII")
+            objid = obj.objid.decode()
             self.assertTrue(objid.startswith("obj_B") or objid == "root_B")
