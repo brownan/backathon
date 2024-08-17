@@ -144,9 +144,9 @@ class Backathon:
         put_object = self._make_obj_putter(compressor, encrypter, storage)
         put_snapshot = self._make_snapshot_putter(encrypter, storage)
 
-        backup_coro = backathon.backup.backup(self.db, put_object, put_snapshot)
+        backup = backathon.backup.Backup(self.db, put_object, put_snapshot)
         logger.debug("Starting event loop")
-        asyncio.run(backup_coro, debug=logger.isEnabledFor(logging.DEBUG))
+        asyncio.run(backup.backup(), debug=logger.isEnabledFor(logging.DEBUG))
 
     def get_encrypter(self) -> EncrypterBase:
         encrypter_cls_name = self.db.config_get("encrypter")

@@ -169,7 +169,7 @@ def scan_entry(
         entry.new = False
 
     if entry.matches_glob(excludes):
-        logger.debug("\t...matches exclude pattern. deleting")
+        logger.log(5, "\t...matches exclude pattern. deleting")
         delete_entry()
         return
 
@@ -180,7 +180,7 @@ def scan_entry(
         except (FileNotFoundError, NotADirectoryError):
             # NotADirectoryError can happen when scanning a file but one of its parent
             # directories is no longer a directory.
-            logger.debug("\t...not found, deleting")
+            logger.log(5, "\t...not found, deleting")
             delete_entry()
             return
 
@@ -221,7 +221,7 @@ def scan_entry(
             try:
                 entries = set(os.listdir(entry.decoded_path))
             except PermissionError:
-                logger.debug("\t...Permission denied")
+                logger.log(5, "\t...Permission denied")
                 entries = set()
 
             times.append(time.monotonic_ns())
@@ -251,7 +251,9 @@ def scan_entry(
                             (entry.id, models.FSEntry.encode_path(newpath)),
                         )
             if new_names:
-                logger.debug(f"\t...Found {len(new_names)} new entries in this directory")
+                logger.log(
+                    5, f"\t...Found {len(new_names)} new entries in this directory"
+                )
 
             times.append(time.monotonic_ns())
             # Delete old entries

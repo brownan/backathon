@@ -3,11 +3,13 @@ import concurrent.futures
 import datetime
 import io
 import os
+import signal
 import stat
+import threading
 import time
 from asyncio import Future
 from concurrent.futures.thread import ThreadPoolExecutor
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from logging import getLogger
 from operator import attrgetter
 from typing import (
@@ -65,23 +67,54 @@ class _TuningParams(NamedTuple):
     # chunk_size determines how large each chunk is.
     chunk_size: int
 
+    max_backup_workers: int
 
-async def backup(
-    db: Database,
-    put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
-    put_snapshot: Callable[[models.Snapshot], None],
-):
-    """Performs a backup of all outstanding files in the backup set"""
 
-    def backup_items_remain() -> bool:
-        with db.cursor() as c:
-            c.execute("SELECT 1 FROM fsentry WHERE objid IS NULL LIMIT 1")
-            return bool(c.fetchone())
+@contextmanager
+def install_sigint_handler(handler):
+    loop = asyncio.get_running_loop()
+    try:
+        loop.add_signal_handler(signal.SIGINT, handler)
+        yield
+    finally:
+        loop.remove_signal_handler(signal.SIGINT)
 
-    def finalize_entry(e: models.FSEntry, result: _ProcessingResult | None):
-        nonlocal backup_count
-        backup_count += 1
-        with db.atomic():
+
+class Backup:
+    def __init__(
+        self,
+        db: Database,
+        put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
+        put_snapshot: Callable[[models.Snapshot], None],
+    ):
+        self.db = db
+        self.put_object = put_object
+        self.put_snapshot = put_snapshot
+
+        # Get some config items
+        inline_threshold = max(0, db.config_get("inline-threshold", 2**20))
+        self.params = _TuningParams(
+            inline_threshold=inline_threshold,
+            chunk_threshold=max(
+                0, inline_threshold, db.config_get("chunk-threshold", 30 * 2**20)
+            ),
+            chunk_size=max(2**16, db.config_get("chunk-size", 10 * 2**20)),
+            max_backup_workers=max(1, db.config_get("max-backup-workers", 1)),
+        )
+
+        self.backup_count: int = 0
+        self.backup_total: int = 0
+
+        self._shutdown: bool = False
+
+    def _backup_items_remain(self) -> bool:
+        with self.db.cursor() as cursor:
+            cursor.execute("SELECT 1 FROM fsentry WHERE objid IS NULL LIMIT 1")
+            return bool(cursor.fetchone())
+
+    def _finalize_entry(self, e: models.FSEntry, result: _ProcessingResult | None):
+        self.backup_count += 1
+        with self.db.atomic(), self.db.cursor() as cursor:
             if result is None:
                 # Item was not backed up. We need to delete its entry
                 cursor.execute("DELETE FROM fsentry WHERE id=?", (e.id,))
@@ -92,48 +125,113 @@ async def backup(
                         f"process_entry() returned an object with no id: {result.obj}"
                     )
                 e.update(
-                    db,
+                    self.db,
                     result.obj.objid,
                     new=False,
                     stat_result=result.stat_result,
                 )
 
-    # Get some config items
-    inline_threshold: int = max(0, db.config_get("inline-threshold", 2**20))
-    chunk_threshold: int = max(
-        0, inline_threshold, db.config_get("chunk-threshold", 30 * 2**20)
-    )
-    chunk_size: int = max(2**16, db.config_get("chunk-size", 10 * 2**20))
+    async def backup(self):
+        with ExitStack() as exitstack:
+            cursor = exitstack.enter_context(self.db.cursor())
+            cursor.execute("SELECT COUNT(*) FROM fsentry WHERE objid IS NULL")
+            self.backup_total = cursor.fetchone()[0]
+            self.backup_count = 0
 
-    with ExitStack() as exitstack:
-        cursor = exitstack.enter_context(db.cursor())
-        cursor.execute("SELECT COUNT(*) FROM fsentry WHERE objid IS NULL")
-        backup_total = cursor.fetchone()[0]
-        backup_count = 0
+            logger.info("Starting backup. %s items to backup", self.backup_total)
 
-        logger.info("Starting backup. %s items to backup", backup_total)
+            executor: ThreadPoolExecutor = exitstack.enter_context(
+                ThreadPoolExecutor(thread_name_prefix="backup-thread-")
+            )
 
-        tasks: set[Future[tuple[models.FSEntry, _ProcessingResult | None]]] = set()
+            try:
+                while self._backup_items_remain() and not self._shutdown:
+                    await self._backup_single_pass(executor)
 
-        # The backup routine MUST use a separate thread pool from the event loop's default,
-        # because the threads will call back in to the main thread to upload objects,
-        # and those calls may themselves call back into the default thread pool. That
-        # could cause deadlocks if all threads in the pool are busy.
-        executor = exitstack.enter_context(
-            ThreadPoolExecutor(thread_name_prefix="backup-thread-")
+                    with self.db.cursor() as cursor:
+                        cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
+                        cursor.execute("PRAGMA optimize")
+
+            finally:
+                executor.shutdown(wait=True, cancel_futures=True)
+
+        # Add a snapshot object for each root
+        if not self._shutdown:
+            logger.debug("Backup finished. Creating snapshot objects")
+            now = datetime.datetime.now(tz=datetime.timezone.utc)
+            with self.db.atomic(immediate=True), self.db.cursor() as cursor:
+                for entry in self.db.query(
+                    models.FSEntry, "SELECT * FROM fsentry WHERE parent IS NULL"
+                ):
+                    if entry.objid is None:
+                        raise RuntimeError(f"Root not backed up {entry}")
+                    logger.debug(
+                        "Snapshot: %s: %s (%s)",
+                        now,
+                        entry.objid.hex(),
+                        entry.printable_path,
+                    )
+                    self.put_snapshot(
+                        models.Snapshot.model_construct(
+                            path=entry.printable_path, root=entry.objid, timestamp=now
+                        )
+                    )
+                cursor.execute("PRAGMA optimize")
+            with self.db.cursor() as cursor:
+                cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
+            logger.info("Backup finished. %s entries backed up", self.backup_count)
+        else:
+            logger.info("Backup cancelled")
+
+    def shutdown(self):
+        self._shutdown = True
+
+    async def _backup_single_pass(self, executor: ThreadPoolExecutor):
+        """Fetches a batch of fsentry rows which need backing up, and dispatches tasks
+        to a thread pool
+
+        This function will usually return early after backing up some, but not all,
+        of what needs backing up. The reason is to let the caller commit the transaction,
+        saving progress and preventing the write-ahead-log from growing unbounded.
+
+        This function makes the guarantee that all threadpool tasks will have finished
+        when it returns, regardless of whether this function returns normally or via
+        exception, including an asyncio.CanceledError.
+
+        This guarantee is necessary to let the caller commit the transaction, since it
+        knows no uploads will be in progress which still may need to update the database.
+
+        This guarantee also lets the caller close the threadpool without worrying about
+        the threads being blocked waiting on some event loop task to complete.
+        """
+        ct = 0
+        time_start = time.monotonic()
+        logger.debug(
+            "Fetching next batch of entries to backup. Current progress: %s/%s",
+            self.backup_count,
+            self.backup_total,
         )
 
-        exitstack.enter_context(db.atomic(immediate=True))
-        while backup_items_remain():
-            ct = 0
-            last_checkpoint = time.monotonic()
+        # Threadpool tasks
+        tasks: set[Future[tuple[models.FSEntry, _ProcessingResult | None]]] = set()
 
-            logger.debug(
-                "Fetching next batch of entries to backup. Current progress: %s/%s",
-                backup_count,
-                backup_total,
-            )
-            entry_iterator = db.query(
+        # Tasks initiated by the threads calling back into the main event loop to
+        # perform an upload. When these are canceled, the event loop must run in order
+        # for the threads to get notified of the cancellation. If the event loop doesn't
+        # have a chance to run e.g. during exception unwinding, then the threads will
+        # hang. So care must be taken to catch ALL exceptions and cancel all tasks, then
+        # yield to the event loop waiting for the tasks to finish. Only then can we
+        # propagate the exception out of this function.
+        upload_tasks: set[Future] = set()
+
+        def sigint_handler():
+            logger.info("Ctrl-C caught. Finishing current items and shutting down")
+            self.shutdown()
+
+        with ExitStack() as exitstack:
+            exitstack.enter_context(self.db.atomic(immediate=True))
+            exitstack.enter_context(install_sigint_handler(sigint_handler))
+            entry_iterator = self.db.query(
                 models.FSEntry,
                 """SELECT * FROM fsentry WHERE
                 objid IS NULL
@@ -143,101 +241,82 @@ async def backup(
                     AND children.objid IS NULL
                 ) """,
             )
-            for entry in entry_iterator:
-                ct += 1
-                if entry.objid is not None:
-                    raise RuntimeError(
-                        f"Backup query received entry already backed up! {entry}"
-                    )
-
-                child_entries = list(
-                    db.query(
-                        models.FSEntry,
-                        "SELECT * FROM fsentry WHERE parent=?",
-                        (entry.id,),
-                    )
-                )
-                # Order child entries consistently so database ordering differences
-                # doesn't result in different tree objects
-                child_entries.sort(key=attrgetter("name"))
-
-                tasks.add(
-                    asyncio.create_task(
-                        _dispatch(
-                            executor,
-                            entry,
-                            child_entries,
-                            put_object,
-                            _TuningParams(inline_threshold, chunk_threshold, chunk_size),
+            try:
+                for entry in entry_iterator:
+                    if self._shutdown:
+                        break
+                    ct += 1
+                    if entry.objid is not None:
+                        raise RuntimeError(
+                            f"Backup query received entry already backed up! {entry}"
+                        )
+                    child_entries = list(
+                        self.db.query(
+                            models.FSEntry,
+                            "SELECT * FROM fsentry WHERE parent=?",
+                            (entry.id,),
                         )
                     )
-                )
+                    # Order child entries consistently so database ordering differences
+                    # doesn't result in different tree objects
+                    child_entries.sort(key=attrgetter("name"))
 
-                if len(tasks) >= 100:
-                    done, tasks = await asyncio.wait(
-                        tasks,
-                        timeout=None,
-                        return_when=asyncio.FIRST_COMPLETED,
+                    tasks.add(
+                        asyncio.create_task(
+                            _dispatch(
+                                executor,
+                                entry,
+                                child_entries,
+                                self.put_object,
+                                self.params,
+                                upload_tasks,
+                            )
+                        )
                     )
 
-                    for task in done:
-                        finalize_entry(*(await task))
+                    if len(tasks) >= 20:
+                        done, tasks = await asyncio.wait(
+                            tasks,
+                            timeout=None,
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
 
-                if time.monotonic() - last_checkpoint > 30:
-                    # Perform a periodic checkpoint. We have to break out of the inner
-                    # loop because the iterator holds a db cursor open.
-                    logger.debug("Breaking to checkpoint")
-                    break
+                        for task in done:
+                            self._finalize_entry(*(await task))
 
-            entry_iterator.close()
-            # Checkpoint now that the object iterator cursor has closed
-            cursor.execute("COMMIT")
-            cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
-            cursor.execute("PRAGMA optimize")
-            cursor.execute("BEGIN IMMEDIATE")
+                    if time.monotonic() - time_start > 30:
+                        logger.debug("Breaking to checkpoint")
+                        break
+            except BaseException:
+                entry_iterator.close()
+                # Cancel all tasks
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+                for t in upload_tasks:
+                    if not t.done():
+                        t.cancel()
+                # Wait for all tasks to complete, regardless of whether they error or not
+                # The important part is we yield to the event loop. Otherwise cancelled
+                # tasks will never notify the threads and the thread workers will
+                # never return.
+                await asyncio.gather(*tasks, *upload_tasks, return_exceptions=True)
+                raise
+            else:
+                entry_iterator.close()
 
-            # Make sure we're making progress and at least one item was backed up this
-            # iteration, or items are still being processed. Otherwise we may be caught in an
-            # infinite loop.
-            if ct == 0 and not tasks:
-                raise RuntimeError("Backup loop found no items")
+                if ct == 0 and not tasks:
+                    raise RuntimeError("Backup loop found no items")
 
-            # Collect any remaining tasks from this loop iteration before moving on to the next.
-            # We have to make sure all tasks are finished before performing another query for
-            # new ready-to-backup entries, because any entries currently being processed would
-            # show up in that query again and get backed up a second time.
-            # This flushes the queue and stalls the workers briefly, but it doesn't end up costing
-            # all that much time compared to the time spent working. If this is turns out to be a
-            # problem, then it may be better to find a different periodic-checkpoint strategy or
-            # forego the periodic checkpointing altogether.
-            logger.debug("Flushing queue")
-            for task in asyncio.as_completed(tasks):
-                finalize_entry(*(await task))
-            tasks.clear()
+                # Gather any remaining tasks before returning
+                for t in asyncio.as_completed(tasks):
+                    self._finalize_entry(*(await t))
 
-    # Exiting the outer "while" loop and the context with the executor
-
-    # Add a snapshot object for each root
-    logger.debug("Backup finished. Creating snapshot objects")
-    now = datetime.datetime.now(tz=datetime.timezone.utc)
-    with db.atomic(immediate=True), db.cursor() as cursor:
-        for entry in db.query(
-            models.FSEntry, "SELECT * FROM fsentry WHERE parent IS NULL"
-        ):
-            if entry.objid is None:
-                raise RuntimeError(f"Root not backed up {entry}")
-            logger.debug(
-                "Snapshot: %s: %s (%s)", now, entry.objid.hex(), entry.printable_path
-            )
-            put_snapshot(
-                models.Snapshot.model_construct(
-                    path=entry.printable_path, root=entry.objid, timestamp=now
-                )
-            )
-        cursor.execute("PRAGMA optimize")
-    with db.cursor() as cursor:
-        cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
-    logger.info("Backup finished. %s entries backed up", backup_count)
+                if upload_tasks:
+                    raise RuntimeError(
+                        "Upload tasks are still running, even though all"
+                        " backup tasks returned"
+                    )
 
 
 async def _dispatch(
@@ -246,29 +325,36 @@ async def _dispatch(
     child_entries: list[models.FSEntry],
     put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
     params: _TuningParams,
+    upload_tasks: set[asyncio.Future],
 ) -> tuple[models.FSEntry, _ProcessingResult | None]:
-    """Shim to dispatch a sub-thread to process an entry
+    """This is the launch point of the asyncio Task to process a single FSEntry
+    for backup
 
-    Returns a tuple of the FSEntry that was processed and the ProcessingResult from
-    process_entry()
+    This function's job is to set up the upload callback and dispatch to the
+    thread pool.
 
     """
     loop = asyncio.get_running_loop()
 
-    # Called from the sub-threads to upload an object, scheduling the upload code to run
-    # in this thread
+    # This function is called from the sub-threads to upload an object. This adds
+    # a task to the main async event loop to perform the upload, blocking the
+    # thread until the upload is done.
     def upload(req: ObjectRequest) -> models.Object:
         fut = asyncio.run_coroutine_threadsafe(put_object(req), loop)
         return fut.result()
 
-    result: _ProcessingResult | None
-    result = await loop.run_in_executor(
-        executor, process_entry, entry, child_entries, upload, params
+    logger.log(5, "Dispatching process_entry call for %s", entry)
+    fut = loop.run_in_executor(
+        executor, _process_entry, entry, child_entries, upload, params
     )
+    upload_tasks.add(fut)
+    fut.add_done_callback(lambda _: upload_tasks.remove(fut))
+    result = await fut
+    logger.log(5, "process_entry finished for %s", entry)
     return entry, result
 
 
-def process_entry(
+def _process_entry(
     entry: models.FSEntry,
     children: list[models.FSEntry],
     upload: Callable[[ObjectRequest], models.Object],
@@ -294,6 +380,7 @@ def process_entry(
     When this function returns None, the caller is responsible for deleting the FSEntry row from
     the database.
     """
+    logger.log(5, "Begun processing %s in thread %s", entry, threading.current_thread())
     try:
         stat_result = os.lstat(entry.path)
     except (FileNotFoundError, NotADirectoryError):
