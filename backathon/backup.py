@@ -205,6 +205,7 @@ class Backup:
         the threads being blocked waiting on some event loop task to complete.
         """
         ct = 0
+        loop = asyncio.get_running_loop()
         time_start = time.monotonic()
         logger.debug(
             "Fetching next batch of entries to backup. Current progress: %s/%s",
@@ -230,7 +231,7 @@ class Backup:
 
         with ExitStack() as exitstack:
             exitstack.enter_context(self.db.atomic(immediate=True))
-            exitstack.enter_context(install_sigint_handler(sigint_handler))
+            loop.add_signal_handler(signal.SIGINT, sigint_handler)
             entry_iterator = self.db.query(
                 models.FSEntry,
                 """SELECT * FROM fsentry WHERE
@@ -263,7 +264,7 @@ class Backup:
 
                     tasks.add(
                         asyncio.create_task(
-                            _dispatch(
+                            self._dispatch(
                                 executor,
                                 entry,
                                 child_entries,
@@ -286,9 +287,16 @@ class Backup:
 
                     if time.monotonic() - time_start > 30:
                         logger.debug("Breaking to checkpoint")
+                        logger.debug(
+                            "%s tasks and %s upload tasks pending",
+                            len(tasks),
+                            len(upload_tasks),
+                        )
                         break
             except BaseException:
                 entry_iterator.close()
+                loop.remove_signal_handler(signal.SIGINT)
+                logger.debug("_backup_single_pass() canceling all tasks and returning...")
                 # Cancel all tasks
                 for t in tasks:
                     if not t.done():
@@ -304,13 +312,20 @@ class Backup:
                 raise
             else:
                 entry_iterator.close()
+                loop.remove_signal_handler(signal.SIGINT)
 
                 if ct == 0 and not tasks:
                     raise RuntimeError("Backup loop found no items")
 
                 # Gather any remaining tasks before returning
+                logger.debug("Gathering %s unfinished tasks", len(tasks))
                 for t in asyncio.as_completed(tasks):
-                    self._finalize_entry(*(await t))
+                    try:
+                        self._finalize_entry(*(await t))
+                    except asyncio.CancelledError:
+                        logger.debug("Task was canceled. Ignoring")
+                    else:
+                        logger.debug("Task finalized")
 
                 if upload_tasks:
                     raise RuntimeError(
@@ -318,40 +333,45 @@ class Backup:
                         " backup tasks returned"
                     )
 
+    async def _dispatch(
+        self,
+        executor: ThreadPoolExecutor,
+        entry: models.FSEntry,
+        child_entries: list[models.FSEntry],
+        put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
+        params: _TuningParams,
+        upload_tasks: set[asyncio.Future],
+    ) -> tuple[models.FSEntry, _ProcessingResult | None]:
+        """This is the launch point of the asyncio Task to process a single FSEntry
+        for backup
 
-async def _dispatch(
-    executor: ThreadPoolExecutor,
-    entry: models.FSEntry,
-    child_entries: list[models.FSEntry],
-    put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
-    params: _TuningParams,
-    upload_tasks: set[asyncio.Future],
-) -> tuple[models.FSEntry, _ProcessingResult | None]:
-    """This is the launch point of the asyncio Task to process a single FSEntry
-    for backup
+        This function's job is to set up the upload callback and dispatch to the
+        thread pool.
 
-    This function's job is to set up the upload callback and dispatch to the
-    thread pool.
+        """
+        loop = asyncio.get_running_loop()
 
-    """
-    loop = asyncio.get_running_loop()
+        # This function is called from the sub-threads to upload an object. This adds
+        # a task to the main async event loop to perform the upload, blocking the
+        # thread until the upload is done.
+        def upload(req: ObjectRequest) -> models.Object:
+            if self._shutdown:
+                # Disallow any further uploads. This will bubble up through the
+                # _process_entry() function and then out of _dispatch() where
+                # it's caught by _backup_single_pass()
+                raise asyncio.CancelledError
+            fut = asyncio.run_coroutine_threadsafe(put_object(req), loop)
+            return fut.result()
 
-    # This function is called from the sub-threads to upload an object. This adds
-    # a task to the main async event loop to perform the upload, blocking the
-    # thread until the upload is done.
-    def upload(req: ObjectRequest) -> models.Object:
-        fut = asyncio.run_coroutine_threadsafe(put_object(req), loop)
-        return fut.result()
-
-    logger.log(5, "Dispatching process_entry call for %s", entry)
-    fut = loop.run_in_executor(
-        executor, _process_entry, entry, child_entries, upload, params
-    )
-    upload_tasks.add(fut)
-    fut.add_done_callback(lambda _: upload_tasks.remove(fut))
-    result = await fut
-    logger.log(5, "process_entry finished for %s", entry)
-    return entry, result
+        logger.log(5, "Dispatching process_entry call for %s", entry)
+        fut = loop.run_in_executor(
+            executor, _process_entry, entry, child_entries, upload, params
+        )
+        upload_tasks.add(fut)
+        fut.add_done_callback(lambda _: upload_tasks.remove(fut))
+        result = await fut
+        logger.log(5, "process_entry finished for %s", entry)
+        return entry, result
 
 
 def _process_entry(
