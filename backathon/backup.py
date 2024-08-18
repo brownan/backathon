@@ -5,9 +5,9 @@ import io
 import os
 import signal
 import stat
+import sys
 import threading
 import time
-from asyncio import Future
 from concurrent.futures.thread import ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
 from logging import getLogger
@@ -105,6 +105,20 @@ class Backup:
         self.backup_count: int = 0
         self.backup_total: int = 0
 
+        # Tracks tasks sent to the thread pool to process a single FSEntry
+        # Tasks are removed from this set when they have been finalized
+        # Maps fsentry paths to the task submitted to process that path
+        self._processing_tasks: dict[
+            bytes, asyncio.Future[tuple[models.FSEntry, _ProcessingResult | None]]
+        ] = dict()
+
+        # Set of upload tasks that the process tasks have submitted to request an
+        # upload. Processing tasks will block waiting for these to complete, and
+        # since these tasks run in the main thread's event loop, the event loop
+        # must run in order for these to return and unblock the threads. Be careful
+        # when cleaning up the thread pool to let the event loop run!
+        self._upload_tasks: set[asyncio.Future] = set()
+
         self._shutdown: bool = False
 
     def _backup_items_remain(self) -> bool:
@@ -114,6 +128,8 @@ class Backup:
 
     def _finalize_entry(self, e: models.FSEntry, result: _ProcessingResult | None):
         self.backup_count += 1
+        task = self._processing_tasks[e.path]
+        assert task.done()
         with self.db.atomic(), self.db.cursor() as cursor:
             if result is None:
                 # Item was not backed up. We need to delete its entry
@@ -130,10 +146,21 @@ class Backup:
                     new=False,
                     stat_result=result.stat_result,
                 )
+            del self._processing_tasks[e.path]
 
     async def backup(self):
         with ExitStack() as exitstack:
             cursor = exitstack.enter_context(self.db.cursor())
+
+            def catch_cancel(exc_type, exc_val, tb):
+                # Catch canceled errors and ignore, but also set the shutdown flag
+                # so the snapshot code doesn't run
+                if exc_type and isinstance(exc_val, asyncio.CancelledError):
+                    self._shutdown = True
+                    return True
+
+            exitstack.push(catch_cancel)
+
             cursor.execute("SELECT COUNT(*) FROM fsentry WHERE objid IS NULL")
             self.backup_total = cursor.fetchone()[0]
             self.backup_count = 0
@@ -141,19 +168,64 @@ class Backup:
             logger.info("Starting backup. %s items to backup", self.backup_total)
 
             executor: ThreadPoolExecutor = exitstack.enter_context(
-                ThreadPoolExecutor(thread_name_prefix="backup-thread-")
+                ThreadPoolExecutor(thread_name_prefix="backup-thread")
             )
 
+            def sigint_handler():
+                logger.info("Ctrl-C caught. Stopping backup")
+                self.shutdown()
+
+            loop = asyncio.get_running_loop()
+            loop.add_signal_handler(signal.SIGINT, sigint_handler)
             try:
                 while self._backup_items_remain() and not self._shutdown:
-                    await self._backup_single_pass(executor)
+                    with self.db.atomic(immediate=True):
+                        await self._backup_batch(executor)
 
                     with self.db.cursor() as cursor:
                         cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
                         cursor.execute("PRAGMA optimize")
 
+                # Loop exited with no error
+                logger.debug(
+                    "Backup loop exited without exception. Finalizing %s tasks",
+                    len(self._processing_tasks),
+                )
+                logger.debug(
+                    "Upload tasks still in progress: %s", len(self._upload_tasks)
+                )
+                with self.db.atomic(immediate=True):
+                    for t in asyncio.as_completed(self._processing_tasks.values()):
+                        self._finalize_entry(*(await t))
+                logger.debug("All tasks done")
+
             finally:
-                executor.shutdown(wait=True, cancel_futures=True)
+                if sys.exc_info():
+                    self._shutdown = True
+                    logger.debug("Exiting via exception", exc_info=True)
+                logger.debug("Cleaning up backup tasks")
+                loop.remove_signal_handler(signal.SIGINT)
+                logger.debug(
+                    "Remaining proecssing tasks: %s", len(self._processing_tasks)
+                )
+                logger.debug("Remaining upload tasks: %s", len(self._upload_tasks))
+                executor.shutdown(wait=False, cancel_futures=True)
+
+                # yield to the event loop while we wait for all threads to finish. The
+                # event loop must run so that callbacks into the main event loop won't
+                # block threads from finishing, which is often the case for incomplete,
+                # cancelled backups.
+                logger.debug("Waiting for tasks to finish")
+                with self.db.atomic(immediate=True):
+                    await asyncio.gather(
+                        *self._processing_tasks.values(),
+                        *self._upload_tasks,
+                        return_exceptions=True,
+                    )
+                    assert all(t.done for t in self._processing_tasks.values())
+                    assert all(t.done for t in self._upload_tasks)
+                logger.debug("Shutting down thread pool")
+                executor.shutdown(wait=True)
 
         # Add a snapshot object for each root
         if not self._shutdown:
@@ -186,7 +258,7 @@ class Backup:
     def shutdown(self):
         self._shutdown = True
 
-    async def _backup_single_pass(self, executor: ThreadPoolExecutor):
+    async def _backup_batch(self, executor: ThreadPoolExecutor):
         """Fetches a batch of fsentry rows which need backing up, and dispatches tasks
         to a thread pool
 
@@ -194,18 +266,14 @@ class Backup:
         of what needs backing up. The reason is to let the caller commit the transaction,
         saving progress and preventing the write-ahead-log from growing unbounded.
 
-        This function makes the guarantee that all threadpool tasks will have finished
-        when it returns, regardless of whether this function returns normally or via
-        exception, including an asyncio.CanceledError.
+        Tasks dispatched by this function may still be running when this function returns.
+        Callers are responsible for reaping any remaining tasks if this function exits,
+        even via exception.
 
-        This guarantee is necessary to let the caller commit the transaction, since it
-        knows no uploads will be in progress which still may need to update the database.
-
-        This guarantee also lets the caller close the threadpool without worrying about
-        the threads being blocked waiting on some event loop task to complete.
+        A database transaction should be held by the caller for the duration of the
+        call to this method.
         """
         ct = 0
-        loop = asyncio.get_running_loop()
         time_start = time.monotonic()
         logger.debug(
             "Fetching next batch of entries to backup. Current progress: %s/%s",
@@ -213,25 +281,7 @@ class Backup:
             self.backup_total,
         )
 
-        # Threadpool tasks
-        tasks: set[Future[tuple[models.FSEntry, _ProcessingResult | None]]] = set()
-
-        # Tasks initiated by the threads calling back into the main event loop to
-        # perform an upload. When these are canceled, the event loop must run in order
-        # for the threads to get notified of the cancellation. If the event loop doesn't
-        # have a chance to run e.g. during exception unwinding, then the threads will
-        # hang. So care must be taken to catch ALL exceptions and cancel all tasks, then
-        # yield to the event loop waiting for the tasks to finish. Only then can we
-        # propagate the exception out of this function.
-        upload_tasks: set[Future] = set()
-
-        def sigint_handler():
-            logger.info("Ctrl-C caught. Finishing current items and shutting down")
-            self.shutdown()
-
-        with ExitStack() as exitstack:
-            exitstack.enter_context(self.db.atomic(immediate=True))
-            loop.add_signal_handler(signal.SIGINT, sigint_handler)
+        with self.db.atomic(immediate=True):
             entry_iterator = self.db.query(
                 models.FSEntry,
                 """SELECT * FROM fsentry WHERE
@@ -251,6 +301,9 @@ class Backup:
                         raise RuntimeError(
                             f"Backup query received entry already backed up! {entry}"
                         )
+                    if entry.path in self._processing_tasks:
+                        # This entry has already been submitted by a previous iteration. Skip it.
+                        continue
                     child_entries = list(
                         self.db.query(
                             models.FSEntry,
@@ -262,22 +315,20 @@ class Backup:
                     # doesn't result in different tree objects
                     child_entries.sort(key=attrgetter("name"))
 
-                    tasks.add(
-                        asyncio.create_task(
-                            self._dispatch(
-                                executor,
-                                entry,
-                                child_entries,
-                                self.put_object,
-                                self.params,
-                                upload_tasks,
-                            )
+                    self._processing_tasks[entry.path] = asyncio.create_task(
+                        self._dispatch(
+                            executor,
+                            entry,
+                            child_entries,
+                            self.put_object,
+                            self.params,
                         )
                     )
 
-                    if len(tasks) >= 20:
-                        done, tasks = await asyncio.wait(
-                            tasks,
+                    if len(self._processing_tasks) >= 20:
+                        task_set = self._processing_tasks.values()
+                        done, _ = await asyncio.wait(
+                            task_set,
                             timeout=None,
                             return_when=asyncio.FIRST_COMPLETED,
                         )
@@ -289,49 +340,18 @@ class Backup:
                         logger.debug("Breaking to checkpoint")
                         logger.debug(
                             "%s tasks and %s upload tasks pending",
-                            len(tasks),
-                            len(upload_tasks),
+                            len(self._processing_tasks),
+                            len(self._upload_tasks),
                         )
                         break
-            except BaseException:
-                entry_iterator.close()
-                loop.remove_signal_handler(signal.SIGINT)
-                logger.debug("_backup_single_pass() canceling all tasks and returning...")
-                # Cancel all tasks
-                for t in tasks:
-                    if not t.done():
-                        t.cancel()
-                for t in upload_tasks:
-                    if not t.done():
-                        t.cancel()
-                # Wait for all tasks to complete, regardless of whether they error or not
-                # The important part is we yield to the event loop. Otherwise cancelled
-                # tasks will never notify the threads and the thread workers will
-                # never return.
-                await asyncio.gather(*tasks, *upload_tasks, return_exceptions=True)
-                raise
-            else:
-                entry_iterator.close()
-                loop.remove_signal_handler(signal.SIGINT)
 
-                if ct == 0 and not tasks:
+                # Exited the for loop with no new entries fetched from the database AND
+                # nothing currently being processed? This is an error and could indicate
+                # some kind of dependency loop or other bug
+                if ct == 0 and not self._processing_tasks:
                     raise RuntimeError("Backup loop found no items")
-
-                # Gather any remaining tasks before returning
-                logger.debug("Gathering %s unfinished tasks", len(tasks))
-                for t in asyncio.as_completed(tasks):
-                    try:
-                        self._finalize_entry(*(await t))
-                    except asyncio.CancelledError:
-                        logger.debug("Task was canceled. Ignoring")
-                    else:
-                        logger.debug("Task finalized")
-
-                if upload_tasks:
-                    raise RuntimeError(
-                        "Upload tasks are still running, even though all"
-                        " backup tasks returned"
-                    )
+            finally:
+                entry_iterator.close()
 
     async def _dispatch(
         self,
@@ -340,7 +360,6 @@ class Backup:
         child_entries: list[models.FSEntry],
         put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
         params: _TuningParams,
-        upload_tasks: set[asyncio.Future],
     ) -> tuple[models.FSEntry, _ProcessingResult | None]:
         """This is the launch point of the asyncio Task to process a single FSEntry
         for backup
@@ -367,8 +386,8 @@ class Backup:
         fut = loop.run_in_executor(
             executor, _process_entry, entry, child_entries, upload, params
         )
-        upload_tasks.add(fut)
-        fut.add_done_callback(lambda _: upload_tasks.remove(fut))
+        self._upload_tasks.add(fut)
+        fut.add_done_callback(lambda _: self._upload_tasks.remove(fut))
         result = await fut
         logger.log(5, "process_entry finished for %s", entry)
         return entry, result
