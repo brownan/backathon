@@ -177,6 +177,7 @@ class Backup:
 
             loop = asyncio.get_running_loop()
             loop.add_signal_handler(signal.SIGINT, sigint_handler)
+
             try:
                 while self._backup_items_remain() and not self._shutdown:
                     with self.db.atomic(immediate=True):
@@ -200,7 +201,7 @@ class Backup:
                 logger.debug("All tasks done")
 
             finally:
-                if sys.exc_info():
+                if sys.exc_info()[0]:
                     self._shutdown = True
                     logger.debug("Exiting via exception", exc_info=True)
                 logger.debug("Cleaning up backup tasks")
@@ -343,13 +344,28 @@ class Backup:
                             len(self._processing_tasks),
                             len(self._upload_tasks),
                         )
-                        break
+                        return
 
                 # Exited the for loop with no new entries fetched from the database AND
                 # nothing currently being processed? This is an error and could indicate
                 # some kind of dependency loop or other bug
                 if ct == 0 and not self._processing_tasks:
                     raise RuntimeError("Backup loop found no items")
+
+                # Loop exited normally, meaning there are no other items to back up
+                # at the moment. (There may be later once some current tasks finish though)
+                # Process at least one before returning, then let the caller loop us back
+                # around to try for more entries, wait on more, or exit if everything's
+                # done.
+                task_set = self._processing_tasks.values()
+                done, _ = await asyncio.wait(
+                    task_set,
+                    timeout=None,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in done:
+                    self._finalize_entry(*(await task))
+
             finally:
                 entry_iterator.close()
 
