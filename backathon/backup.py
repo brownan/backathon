@@ -183,6 +183,7 @@ class Backup:
                     with self.db.atomic(immediate=True):
                         await self._backup_batch(executor)
 
+                    logger.debug("Checkpointing database")
                     with self.db.cursor() as cursor:
                         cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
                         cursor.execute("PRAGMA optimize")
@@ -207,7 +208,7 @@ class Backup:
                 logger.debug("Cleaning up backup tasks")
                 loop.remove_signal_handler(signal.SIGINT)
                 logger.debug(
-                    "Remaining proecssing tasks: %s", len(self._processing_tasks)
+                    "Remaining processing tasks: %s", len(self._processing_tasks)
                 )
                 logger.debug("Remaining upload tasks: %s", len(self._upload_tasks))
                 executor.shutdown(wait=False, cancel_futures=True)
@@ -217,14 +218,13 @@ class Backup:
                 # block threads from finishing, which is often the case for incomplete,
                 # cancelled backups.
                 logger.debug("Waiting for tasks to finish")
-                with self.db.atomic(immediate=True):
-                    await asyncio.gather(
-                        *self._processing_tasks.values(),
-                        *self._upload_tasks,
-                        return_exceptions=True,
-                    )
-                    assert all(t.done for t in self._processing_tasks.values())
-                    assert all(t.done for t in self._upload_tasks)
+                await asyncio.gather(
+                    *self._processing_tasks.values(),
+                    *self._upload_tasks,
+                    return_exceptions=True,
+                )
+                assert all(t.done for t in self._processing_tasks.values())
+                assert all(t.done for t in self._upload_tasks)
                 logger.debug("Shutting down thread pool")
                 executor.shutdown(wait=True)
 
