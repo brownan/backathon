@@ -1,5 +1,6 @@
 import asyncio
 import concurrent.futures
+import dataclasses
 import datetime
 import io
 import os
@@ -19,6 +20,8 @@ from typing import (
     NamedTuple,
     cast,
 )
+
+import rich.filesize
 
 from backathon import chunker, models
 from backathon.db import Database
@@ -43,6 +46,24 @@ class ObjectRequest(NamedTuple):
 
     header: ObjectHeader
     body: IO[bytes] | None
+
+
+@dataclasses.dataclass
+class _EntryProgress:
+    path: str
+    started: bool = False
+    bytes_backed_up: int = 0
+    bytes_total: int = 0
+
+
+@dataclasses.dataclass
+class BackupProgressReport:
+    count_progress: int = 0
+    count_total: int = 0
+    size_progress: int = 0
+    size_total: int = 0
+    actual_uploaded: int = 0
+    current_uploads: list[_EntryProgress] = dataclasses.field(default_factory=list)
 
 
 class _ProcessingResult(NamedTuple):
@@ -86,10 +107,12 @@ class Backup:
         db: Database,
         put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
         put_snapshot: Callable[[models.Snapshot], None],
+        progress: None | Callable[[BackupProgressReport], None] = None,
     ):
         self.db = db
         self.put_object = put_object
         self.put_snapshot = put_snapshot
+        self.progress_callback = progress
 
         # Get some config items
         inline_threshold = max(0, db.config_get("inline-threshold", 2**20))
@@ -102,8 +125,7 @@ class Backup:
             max_backup_workers=max(1, db.config_get("max-backup-workers", 1)),
         )
 
-        self.backup_count: int = 0
-        self.backup_total: int = 0
+        self.progress = BackupProgressReport()
 
         # Tracks tasks sent to the thread pool to process a single FSEntry
         # Tasks are removed from this set when they have been finalized
@@ -127,9 +149,13 @@ class Backup:
             return bool(cursor.fetchone())
 
     def _finalize_entry(self, e: models.FSEntry, result: _ProcessingResult | None):
-        self.backup_count += 1
         task = self._processing_tasks[e.path]
         assert task.done()
+
+        self.progress.count_progress += 1
+        if e.st_mode and e.st_size and stat.S_ISREG(e.st_mode):
+            self.progress.size_progress += e.st_size
+
         with self.db.atomic(), self.db.cursor() as cursor:
             if result is None:
                 # Item was not backed up. We need to delete its entry
@@ -162,10 +188,21 @@ class Backup:
             exitstack.push(catch_cancel)
 
             cursor.execute("SELECT COUNT(*) FROM fsentry WHERE objid IS NULL")
-            self.backup_total = cursor.fetchone()[0]
-            self.backup_count = 0
+            self.progress.count_total = cursor.fetchone()[0] or 0
+            self.progress.count_progress = 0
 
-            logger.info("Starting backup. %s items to backup", self.backup_total)
+            cursor.execute(
+                "SELECT SUM(st_size) FROM fsentry WHERE objid IS NULL AND st_mode & ?",
+                (stat.S_IFREG,),
+            )
+            self.progress.size_total = cursor.fetchone()[0] or 0
+            self.progress.size_progress = 0
+
+            logger.info(
+                "Starting backup. %s items to backup, totaling %s",
+                self.progress.count_total,
+                rich.filesize.decimal(self.progress.size_total),
+            )
 
             executor: ThreadPoolExecutor = exitstack.enter_context(
                 ThreadPoolExecutor(thread_name_prefix="backup-thread")
@@ -252,7 +289,9 @@ class Backup:
                 cursor.execute("PRAGMA optimize")
             with self.db.cursor() as cursor:
                 cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
-            logger.info("Backup finished. %s entries backed up", self.backup_count)
+            logger.info(
+                "Backup finished. %s entries backed up", self.progress.count_progress
+            )
         else:
             logger.info("Backup cancelled")
 
@@ -278,8 +317,8 @@ class Backup:
         time_start = time.monotonic()
         logger.debug(
             "Fetching next batch of entries to backup. Current progress: %s/%s",
-            self.backup_count,
-            self.backup_total,
+            self.progress.count_progress,
+            self.progress.count_total,
         )
 
         with self.db.atomic(immediate=True):
@@ -396,15 +435,24 @@ class Backup:
                 # it's caught by _backup_single_pass()
                 raise asyncio.CancelledError
             fut = asyncio.run_coroutine_threadsafe(put_object(req), loop)
-            return fut.result()
+            obj = fut.result()
+            if obj.uploaded_size and not obj.from_cache:
+                self.progress.actual_uploaded += obj.uploaded_size
+            return obj
+
+        progress = _EntryProgress(entry.printable_path)
+        self.progress.current_uploads.append(progress)
 
         logger.log(5, "Dispatching process_entry call for %s", entry)
         fut = loop.run_in_executor(
-            executor, _process_entry, entry, child_entries, upload, params
+            executor, _process_entry, entry, child_entries, upload, params, progress
         )
         self._upload_tasks.add(fut)
-        fut.add_done_callback(lambda _: self._upload_tasks.remove(fut))
-        result = await fut
+        try:
+            result = await fut
+        finally:
+            self._upload_tasks.remove(fut)
+            self.progress.current_uploads.remove(progress)
         logger.log(5, "process_entry finished for %s", entry)
         return entry, result
 
@@ -414,6 +462,7 @@ def _process_entry(
     children: list[models.FSEntry],
     upload: Callable[[ObjectRequest], models.Object],
     params: _TuningParams,
+    progress: _EntryProgress,
 ) -> _ProcessingResult | None:
     """Prepares the payloads for an FSEntry and performs the calls to upload them
 
@@ -436,6 +485,7 @@ def _process_entry(
     the database.
     """
     logger.log(5, "Begun processing %s in thread %s", entry, threading.current_thread())
+    progress.started = True
     try:
         stat_result = os.lstat(entry.path)
     except (FileNotFoundError, NotADirectoryError):
@@ -444,6 +494,7 @@ def _process_entry(
 
     if stat.S_ISREG(stat_result.st_mode):
         # Regular file
+        progress.bytes_total = stat_result.st_size
         payload: io.BytesIO | None
         blob_objs: list[tuple[int, models.Object]] = []
 
@@ -472,6 +523,7 @@ def _process_entry(
                                 body=io.BytesIO(chunk),
                             )
                         )
+                        progress.bytes_backed_up += len(chunk)
                         blob_objs.append((pos, chunk_obj))
 
         except FileNotFoundError:
@@ -496,6 +548,7 @@ def _process_entry(
                 body=payload,
             )
         )
+        progress.bytes_backed_up = progress.bytes_total
         return _ProcessingResult(
             obj=file_obj,
             stat_result=stat_result,

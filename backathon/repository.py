@@ -68,7 +68,12 @@ class Backathon:
 
         return cls(db)
 
-    def scan(self, skip_existing=False, progress=None, rescan_dirs: bool = False):
+    def scan(
+        self,
+        skip_existing=False,
+        progress: None | Callable[[int, int | None, str], None] = None,
+        rescan_dirs: bool = False,
+    ):
         """Scans the backup set
 
         The backup set is the set of files and directories starting at the
@@ -238,7 +243,9 @@ def make_obj_putter(
             cursor.execute("SELECT * FROM objects WHERE objid=?", (objid,))
             row = cursor.fetchone()
             if row is not None:
-                return models.Object.model_validate(row)
+                obj = models.Object.model_validate(row)
+                obj.from_cache = True
+                return obj
 
         # Compress
         if compressor is not None:

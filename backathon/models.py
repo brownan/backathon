@@ -15,6 +15,7 @@ import msgpack
 from pydantic import (
     BaseModel,
     EncoderProtocol,
+    Field,
     PlainSerializer,
     WrapSerializer,
     WrapValidator,
@@ -101,6 +102,8 @@ class Object(BaseModel):
         bytes | None,
         WrapSerializer(func=lambda b, _: b.hex(), when_used="json-unless-none"),
     ]
+
+    from_cache: Annotated[bool, Field(exclude=True, repr=False)] = False
 
     @property
     def objid_hex(self):
