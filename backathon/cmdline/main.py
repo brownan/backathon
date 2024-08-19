@@ -52,11 +52,13 @@ class BackathonContext:
     "configfile", type=click.Path(dir_okay=False, readable=True, path_type=pathlib.Path)
 )
 @click.option("--verbose", "-v", is_flag=True)
+@click.option("--profile", is_flag=True)
 @click.pass_context
 def main(
     ctx: click.Context,
     configfile: pathlib.Path,
     verbose: bool,
+    profile: bool,
 ):
     loglevel = logging.INFO if not verbose else logging.DEBUG
     logging.basicConfig(
@@ -66,6 +68,22 @@ def main(
 
     ctx.ensure_object(dict)
     ctx.obj["db_path"] = configfile
+
+    if profile:
+        import atexit
+        import cProfile
+
+        logger.info("Profiling enabled")
+
+        p = cProfile.Profile()
+
+        def onexit():
+            p.disable()
+            p.dump_stats("backathon.pstats")
+            print("Profile data dumped to backathon.pstats")
+
+        atexit.register(onexit)
+        p.enable()
 
 
 @main.command()

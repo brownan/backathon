@@ -231,7 +231,7 @@ def make_obj_putter(
         raw_payload = repoobject.make_obj_payload(obj_req)
 
         # Make the objid
-        objid = encrypter.make_objid(raw_payload)
+        objid = await asyncio.to_thread(encrypter.make_objid, raw_payload)
 
         # Check if this object already exists
         with db.cursor(retdict=True) as cursor:
@@ -242,16 +242,15 @@ def make_obj_putter(
 
         # Compress
         if compressor is not None:
-            compressed_payload = compressor(raw_payload)
+            compressed_payload = await asyncio.to_thread(compressor, raw_payload)
         else:
             compressed_payload = raw_payload
         del raw_payload
 
         # Encrypt
-        encrypted_payload = encrypter.encrypt(compressed_payload)
+        encrypted_payload = await asyncio.to_thread(encrypter.encrypt, compressed_payload)
         del compressed_payload
 
-        # Do the actual uploading in a subthread since it's likely IO bound
         await asyncio.to_thread(
             storage.put_object, repoobject.make_object_path(objid), encrypted_payload
         )
