@@ -5,18 +5,13 @@ import rich
 from rich.console import Group
 from rich.live import Live
 from rich.progress import (
-    BarColumn,
     Progress,
-    TaskProgressColumn,
-    TextColumn,
 )
 
 from backathon.cmdline.common import (
     BackathonContext,
-    CountCompleteColumn,
     FileListRenderable,
-    SpeedColumn,
-    TimerColumn,
+    default_columns,
 )
 
 
@@ -31,12 +26,7 @@ def scan(ctx: click.Context, rescan_dirs: bool, no_rich: bool = False):
         repo.scan(rescan_dirs=rescan_dirs)
     else:
         progress = Progress(
-            TextColumn("[progress.description]{task.description}"),
-            TaskProgressColumn(),
-            BarColumn(),
-            CountCompleteColumn(),
-            TimerColumn(),
-            SpeedColumn(),
+            *default_columns,
             speed_estimate_period=20,
         )
         task1 = progress.add_task("Scanning", total=0)

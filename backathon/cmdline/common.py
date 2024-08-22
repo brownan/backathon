@@ -5,7 +5,13 @@ from typing import Sequence
 import click
 import rich.filesize
 from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
-from rich.progress import ProgressColumn, Task
+from rich.progress import (
+    BarColumn,
+    ProgressColumn,
+    Task,
+    TaskProgressColumn,
+    TextColumn,
+)
 from rich.text import Text
 
 import backathon.db
@@ -76,6 +82,17 @@ class SpeedColumn(ProgressColumn):
             return Text(speed_str, style="progress.download")
         else:
             return ""
+
+
+# Set of default columns we use throughout
+default_columns = (
+    TextColumn("[progress.description]{task.description}"),
+    TaskProgressColumn(),
+    BarColumn(),
+    CountCompleteColumn(),
+    TimerColumn(),
+    SpeedColumn(),
+)
 
 
 class FileListRenderable:

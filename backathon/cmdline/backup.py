@@ -1,14 +1,11 @@
 import click
 import rich.live
 import rich.progress
-from rich.progress import BarColumn, TaskProgressColumn, TextColumn
 
 from backathon.backup import BackupProgressReport
 from backathon.cmdline.common import (
     BackathonContext,
-    CountCompleteColumn,
-    SpeedColumn,
-    TimerColumn,
+    default_columns,
 )
 
 
@@ -19,12 +16,7 @@ def backup(ctx: click.Context):
     repo = b.repo
 
     progress = rich.progress.Progress(
-        TextColumn("[progress.description]{task.description}"),
-        TaskProgressColumn(),
-        BarColumn(),
-        CountCompleteColumn(),
-        TimerColumn(),
-        SpeedColumn(),
+        *default_columns,
         speed_estimate_period=20,
     )
     entry_progress = progress.add_task("Items")
