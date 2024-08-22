@@ -8,6 +8,7 @@ import sys
 import click
 from rich.logging import RichHandler
 
+import backathon.cmdline.backup
 import backathon.cmdline.scan
 import backathon.db
 import backathon.repository
@@ -61,6 +62,7 @@ def main(
 
 
 main.add_command(backathon.cmdline.scan.scan)
+main.add_command(backathon.cmdline.backup.backup)
 
 
 @main.command()
@@ -191,14 +193,6 @@ def set_local_target(ctx: click.Context, path: pathlib.Path):
     b = BackathonContext.from_click_context(ctx)
     repo = b.repo
     repo.db.config_set_json("local_storage_config", {"base_path": str(path.absolute())})
-
-
-@main.command()
-@click.pass_context
-def backup(ctx: click.Context):
-    b = BackathonContext.from_click_context(ctx)
-    repo = b.repo
-    repo.backup()
 
 
 @main.command()

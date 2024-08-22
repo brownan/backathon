@@ -174,6 +174,9 @@ class Backup:
                 )
             del self._processing_tasks[e.path]
 
+        if self.progress_callback is not None:
+            self.progress_callback(self.progress)
+
     async def backup(self):
         with ExitStack() as exitstack:
             cursor = exitstack.enter_context(self.db.cursor())

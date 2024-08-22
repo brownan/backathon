@@ -16,7 +16,7 @@ import backathon.backup
 import backathon.garbage
 import backathon.restore
 from backathon import models, repoobject
-from backathon.backup import ObjectRequest
+from backathon.backup import BackupProgressReport, ObjectRequest
 from backathon.db import Database
 from backathon.encryption.base import EncrypterBase, Payload
 from backathon.encryption.nacl import NaclEncrypter
@@ -134,7 +134,7 @@ class Backathon:
     ) -> GetObject:
         return make_obj_getter(encrypter, storage)
 
-    def backup(self):
+    def backup(self, progress: None | Callable[[BackupProgressReport], None] = None):
         """Perform a backup
 
         See documentation in the backathon.backup module
@@ -149,9 +149,11 @@ class Backathon:
         put_object = self._make_obj_putter(compressor, encrypter, storage)
         put_snapshot = self._make_snapshot_putter(encrypter, storage)
 
-        backup = backathon.backup.Backup(self.db, put_object, put_snapshot)
+        backup = backathon.backup.Backup(
+            self.db, put_object, put_snapshot, progress=progress
+        )
         logger.debug("Starting event loop")
-        asyncio.run(backup.backup(), debug=logger.isEnabledFor(logging.DEBUG))
+        asyncio.run(backup.backup())
 
     def get_encrypter(self) -> EncrypterBase:
         encrypter_cls_name = self.db.config_get("encrypter")
