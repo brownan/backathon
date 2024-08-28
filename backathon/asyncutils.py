@@ -1,4 +1,5 @@
 import asyncio
+import os
 from asyncio import Task
 from collections.abc import Coroutine
 from contextvars import Context
@@ -8,7 +9,7 @@ _T = TypeVar("_T")
 
 
 def parallel_coroutines(
-    coros: Iterable[Coroutine[Any, Any, _T]], max_tasks: int
+    coros: Iterable[Coroutine[Any, Any, _T]], max_tasks: int | None
 ) -> Task[Sequence[_T]]:
     """Runs all given coroutines as tasks, limiting the number that can run at once
 
@@ -48,7 +49,13 @@ def parallel_coroutines(
 
 
 class BoundedTaskGroup:
-    def __init__(self, max_tasks: int):
+    def __init__(self, max_tasks: int | None):
+        if not max_tasks:
+            # A few more than the default thread pool workers. Common case is for the
+            # parallel_coroutines() method to dispatch something to a thread pool,
+            # and we'd want to be able to fill it up, plus have a few tasks in the queue
+            # ready to go.
+            max_tasks = min(36, (os.cpu_count() or 1) + 8)
         self.max_tasks = max_tasks
         self.tg = asyncio.TaskGroup()
         self._sem = asyncio.Semaphore(value=max_tasks)
@@ -69,5 +76,5 @@ class BoundedTaskGroup:
     ) -> asyncio.Task[_T]:
         await self._sem.acquire()
         task = self.tg.create_task(coro, name=name, context=context)
-        task.add_done_callback(lambda _: self._sem.release)
+        task.add_done_callback(lambda _: self._sem.release())
         return task
