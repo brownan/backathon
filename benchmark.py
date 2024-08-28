@@ -5,11 +5,14 @@ import itertools
 import logging
 import pathlib
 import random
+import re
 import subprocess
 import tempfile
 from contextlib import ExitStack
+from typing import Callable
 
 import click
+import yappi
 from rich.logging import RichHandler
 from rich.progress import Progress
 from typing_extensions import NamedTuple
@@ -32,7 +35,8 @@ class BackupResults(NamedTuple):
 
 
 @click.command()
-def main():
+@click.option("-k", "--test-pattern")
+def main(test_pattern: str):
     logging.basicConfig(
         level=logging.WARNING,
         format="%(message)s",
@@ -41,12 +45,38 @@ def main():
     )
     logger.setLevel(logging.INFO)
 
+    yappi.set_clock_type("wall")
+
     with ExitStack() as context:
         backup_dir = pathlib.Path(context.enter_context(tempfile.TemporaryDirectory()))
         context.callback(lambda: logger.info("Removing backup dir..."))
         logger.info("Setting up test files for backing up at %s", backup_dir)
-        test_definitions = populate_backup_files(backup_dir)
+        test_definitions: dict[str, pathlib.Path] = {}
         benchmarks: dict[str, BackupResults] = {}
+
+        patterns: None | list[re.Pattern] = None
+        if test_pattern:
+            patterns = [
+                re.compile(".*".join(re.escape(c) for c in s.split("*")))
+                for s in test_pattern.split(",")
+            ]
+
+        with Progress() as progress:
+            for testname, testgen in TEST_DEFS.items():
+                if patterns and not any(p.search(testname) for p in patterns):
+                    continue
+                logger.info("Generating files for test %s", testname)
+                task_id = progress.add_task(f"Generating Test Data for {testname}")
+                testdir = pathlib.Path(
+                    context.enter_context(tempfile.TemporaryDirectory())
+                )
+                testgen(
+                    testdir,
+                    lambda count, total: progress.update(
+                        task_id, completed=count, total=total
+                    ),
+                )
+                test_definitions[testname] = testdir
 
         for testname, testdir in test_definitions.items():
             logger.info("Running test %s", testname)
@@ -82,6 +112,8 @@ def main():
             )
         writer.writerow([git_hash, *cols])
         logger.info("Results written to %s", benchmark_file)
+        yappi.get_func_stats().save("benchmark.pstat", type="pstat")
+        logger.info("Function profile information written to benchmark.pstat")
 
 
 def perform_single_benchmark(
@@ -110,20 +142,22 @@ def perform_single_benchmark(
         scan_task_id = progress.add_task(description="Scan")
         backup_task_id = progress.add_task(description="Backup", start=False)
 
-        repo.scan(
-            progress=lambda count, total, _: progress.update(
-                scan_task_id, total=total, completed=count
+        with yappi.run():
+            repo.scan(
+                progress=lambda count, total, _: progress.update(
+                    scan_task_id, total=total, completed=count
+                )
             )
-        )
         progress.stop_task(scan_task_id)
         progress.start_task(backup_task_id)
 
         logger.info("Performing backup")
-        repo.backup(
-            lambda info: progress.update(
-                backup_task_id, total=info.count_total, completed=info.count_progress
+        with yappi.run():
+            repo.backup(
+                lambda info: progress.update(
+                    backup_task_id, total=info.count_total, completed=info.count_progress
+                )
             )
-        )
         progress.stop_task(backup_task_id)
 
     tasks = {task.id: task for task in progress.tasks}
@@ -139,44 +173,46 @@ def perform_single_benchmark(
     )
 
 
-def populate_backup_files(base: pathlib.Path):
+TestFileGenerator = Callable[[pathlib.Path, Callable[[int, int], None]], None]
+
+
+def test_dir_tree(testdir: pathlib.Path, update: Callable[[int, int], None]):
+    # Create a tree of directories each with a 10MB file at the end
     rnd = random.Random(1)
+    dir_paths = list(itertools.product(["A", "B", "C", "D"], repeat=4))
+    i = 0
+    for d in dir_paths:
+        path = testdir.joinpath(*d)
+        path.mkdir(parents=True)
+        path.joinpath("file").write_bytes(rnd.randbytes(10 * 2**20))
+        i += 1
+        update(i, len(dir_paths))
 
-    progress = Progress(*default_columns)
-    task1 = progress.add_task("Generating large directory tree")
-    task2 = progress.add_task("Generating small files", total=0, start=False)
-    task3 = progress.add_task("Generating large file", total=0, start=False)
 
-    with progress:
-        # Create a tree of directories each with a 10MB file at the end
-        dir_paths = list(itertools.product(["A", "B", "C", "D"], repeat=4))
-        for d in progress.track(dir_paths, task_id=task1):
-            path = base.joinpath("tree", *d)
-            path.mkdir(parents=True)
-            path.joinpath("file").write_bytes(rnd.randbytes(10 * 2**20))
+def test_small_files(testdir: pathlib.Path, update: Callable[[int, int], None]):
+    # Create a directory with lots of small files
+    rnd = random.Random(1)
+    count = 10_000
+    for i in range(count):
+        testdir.joinpath(str(i)).write_bytes(rnd.randbytes(1024))
+        update(i + 1, count)
 
-        # Create a directory with lots of small files
-        path = base / "manyfiles"
-        path.mkdir()
-        progress.stop_task(task1)
-        progress.start_task(task2)
-        for i in progress.track(range(10_000), task_id=task2):
-            path.joinpath(str(i)).write_bytes(rnd.randbytes(1024))
 
-        # Create a really huge file
-        progress.stop_task(task2)
-        progress.start_task(task3)
-        hugefile_dir = base / "hugefile"
-        hugefile_dir.mkdir()
-        with hugefile_dir.joinpath("hugefile").open("wb") as fobj:
-            for _ in progress.track(range(1_000), task_id=task3):
-                fobj.write(rnd.randbytes(2**20))
+def test_huge_file(testdir: pathlib.Path, update: Callable[[int, int], None]):
+    # Create a really huge file
+    rnd = random.Random(1)
+    with testdir.joinpath("hugefile").open("wb") as fobj:
+        count = 1_000
+        for i in range(count):
+            fobj.write(rnd.randbytes(2**20))
+            update(int(count + 1 // count * 100), 100)
 
-    return {
-        "Dir Tree": base / "tree",
-        "Many Files": base / "manyfiles",
-        "Huge file": hugefile_dir,
-    }
+
+TEST_DEFS: dict[str, TestFileGenerator] = {
+    "dir_tree": test_dir_tree,
+    "small_files": test_small_files,
+    "huge_file": test_huge_file,
+}
 
 
 if __name__ == "__main__":
