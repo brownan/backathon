@@ -3,49 +3,34 @@ import os
 from asyncio import Task
 from collections.abc import Coroutine
 from contextvars import Context
-from typing import Any, Iterable, Sequence, TypeVar
+from typing import Any, AsyncGenerator, Iterable, TypeVar
 
 _T = TypeVar("_T")
 
 
-def parallel_coroutines(
+async def bounded_as_completed(
     coros: Iterable[Coroutine[Any, Any, _T]], max_tasks: int | None = None
-) -> Task[Sequence[_T]]:
-    """Runs all given coroutines as tasks, limiting the number that can run at once
+) -> AsyncGenerator[Task[_T], None]:
+    """Submits the given iterable of coroutines as tasks, yielding the task objects
+    as they are submitted
 
-    Gathers all the results and returns a list
-
-    This is useful when each task consumes resources and you want to limit
-    parallelism. This function encapsulates the logic to launch tasks, waiting
-    for them to complete before launching more.
-
-    Tasks are always run in sequence, but no guarantees are made that any
-    will finish before or after any others.
-
-    All results are gathered in memory before returning.
-
-    If any task errors, all other tasks are canceled and task exceptions
-    are re-raised as an ExceptionGroup.
-
-    If any sub-task is Canceled, all tasks are allowed to finish, and a
-    CancelledError is re-raised when finished.
-
-    If /this/ task is itself canceled, then all sub-tasks are immediately
-    canceled and a CancelledError is re-raised.
-
-
-
-
+    A maximum of max_tasks are submitted at any one time. Once the maximum number of
+    tasks is running, the for-loop will block until a task finishes, at which point a
+    new task will be submitted and yielded.
     """
+    q = asyncio.Queue()
 
-    async def inner() -> list[_T]:
-        tasks: list[Task[_T]] = []
+    async def inner():
         async with BoundedTaskGroup(max_tasks) as tg:
             for c in coros:
-                tasks.append(await tg.create_task(c))
-        return [t.result() for t in tasks]
+                t = await tg.create_task(c)
+                q.put_nowait(t)
+        q.put_nowait(None)
 
-    return asyncio.create_task(inner())
+    async with asyncio.TaskGroup() as outer_tg:
+        outer_tg.create_task(inner())
+        while (ret_task := await q.get()) is not None:
+            yield ret_task
 
 
 class BoundedTaskGroup:
@@ -87,7 +72,7 @@ class BoundedTaskGroup:
     def __init__(self, max_tasks: int | None = None):
         if not max_tasks:
             # A few more than the default thread pool workers. Common case is for the
-            # parallel_coroutines() method to dispatch something to a thread pool,
+            # bounded_coroutine_gather() method to dispatch something to a thread pool,
             # and we'd want to be able to fill it up, plus have a few tasks in the queue
             # ready to go.
             max_tasks = min(36, (os.cpu_count() or 1) + 8)

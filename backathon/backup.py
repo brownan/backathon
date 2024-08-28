@@ -9,11 +9,12 @@ import threading
 import time
 from contextlib import ExitStack, contextmanager
 from logging import getLogger
-from operator import attrgetter
+from operator import attrgetter, itemgetter
 from typing import (
     IO,
     Awaitable,
     Callable,
+    Coroutine,
     NamedTuple,
     cast,
 )
@@ -367,7 +368,7 @@ class Backup:
 async def _process_entry(
     entry: models.FSEntry,
     children: list[models.FSEntry],
-    upload: Callable[[ObjectRequest], Awaitable[models.Object]],
+    upload: Callable[[ObjectRequest], Coroutine[None, None, models.Object]],
     params: _TuningParams,
     progress: _EntryProgress,
 ) -> _ProcessingResult | None:
@@ -401,65 +402,7 @@ async def _process_entry(
 
     if stat.S_ISREG(stat_result.st_mode):
         # Regular file
-        progress.bytes_total = stat_result.st_size
-        payload: io.BytesIO | None
-        blob_objs: list[tuple[int, models.Object]] = []
-
-        try:
-            with _open_file(entry.path) as fobj:
-                if stat_result.st_size < params.inline_threshold:
-                    # Upload the file as a payload in this object
-                    # We read the entire file into memory here because it's not huge, and to
-                    # make sure the ObjectHeader length field is correct.
-                    payload = io.BytesIO(fobj.read())
-                else:
-                    # Upload the file as blob objects and reference them from this one
-                    payload = None
-                    if stat_result.st_size <= params.chunk_threshold:
-                        chunk_iter = [(0, fobj.read())]
-                    else:
-                        chunk_iter = chunker.FixedChunker(fobj, params.chunk_size)
-                    for pos, chunk in chunk_iter:
-                        chunk_obj = await upload(
-                            ObjectRequest(
-                                header=ObjectHeader(
-                                    type=ObjectType.BLOB,
-                                    stats=None,
-                                    length=len(chunk),
-                                ),
-                                body=io.BytesIO(chunk),
-                            )
-                        )
-                        progress.bytes_backed_up += len(chunk)
-                        blob_objs.append((pos, chunk_obj))
-
-        except FileNotFoundError:
-            logger.info("%s: File disappeared", entry.printable_path)
-            return None
-        except OSError as e:
-            logger.warning("%s: Error when reading: %s", entry.printable_path, e)
-            return None
-
-        file_obj = await upload(
-            ObjectRequest(
-                header=ObjectHeader(
-                    type=ObjectType.FILE,
-                    length=len(payload.getbuffer()) if payload is not None else 0,
-                    stats=ObjectStats.from_stat_result(stat_result),
-                    blobs=(
-                        [BlobRef(objid=obj.objid, pos=pos) for pos, obj in blob_objs]
-                        if blob_objs
-                        else None
-                    ),
-                ),
-                body=payload,
-            )
-        )
-        progress.bytes_backed_up = progress.bytes_total
-        return _ProcessingResult(
-            obj=file_obj,
-            stat_result=stat_result,
-        )
+        return await _process_file_entry(entry, stat_result, upload, params, progress)
 
     elif stat.S_ISDIR(stat_result.st_mode):
         # Directory
@@ -514,6 +457,80 @@ async def _process_entry(
     else:
         logger.warning("%s: Unknown file type. Ignoring.", entry.printable_path)
         return None
+
+
+async def _process_file_entry(
+    entry: models.FSEntry,
+    stat_result: os.stat_result,
+    upload: Callable[[ObjectRequest], Coroutine[None, None, models.Object]],
+    params: _TuningParams,
+    progress: _EntryProgress,
+) -> _ProcessingResult | None:
+    """Process a single file entry"""
+    progress.bytes_total = stat_result.st_size
+    payload: io.BytesIO | None
+    blob_objs: list[tuple[int, models.Object]] = []
+
+    async def submit_blob_upload(p: int, c: bytes):
+        obj = await upload(
+            ObjectRequest(
+                header=ObjectHeader(
+                    type=ObjectType.BLOB,
+                    stats=None,
+                    length=len(c),
+                ),
+                body=io.BytesIO(c),
+            )
+        )
+        progress.bytes_backed_up += len(c)
+        blob_objs.append((p, obj))
+
+    try:
+        with _open_file(entry.path) as fobj:
+            if stat_result.st_size < params.inline_threshold:
+                # Upload the file as a payload in this object
+                # We read the entire file into memory here because it's not huge, and to
+                # make sure the ObjectHeader length field is correct.
+                payload = io.BytesIO(fobj.read())
+            else:
+                # Upload the file as blob objects and reference them from this one
+                payload = None
+                if stat_result.st_size <= params.chunk_threshold:
+                    await submit_blob_upload(0, fobj.read())
+                else:
+                    chunk_iter = chunker.FixedChunker(fobj, params.chunk_size)
+                    async with BoundedTaskGroup() as tg:
+                        for pos, chunk in chunk_iter:
+                            await tg.create_task(submit_blob_upload(pos, chunk))
+                    blob_objs.sort(key=itemgetter(0))
+
+    except FileNotFoundError:
+        logger.info("%s: File disappeared", entry.printable_path)
+        return None
+    except OSError as e:
+        logger.warning("%s: Error when reading: %s", entry.printable_path, e)
+        return None
+
+    file_obj = await upload(
+        ObjectRequest(
+            header=ObjectHeader(
+                type=ObjectType.FILE,
+                length=len(payload.getbuffer()) if payload is not None else 0,
+                stats=ObjectStats.from_stat_result(stat_result),
+                blobs=(
+                    [BlobRef(objid=obj.objid, pos=pos) for pos, obj in blob_objs]
+                    if blob_objs
+                    else None
+                ),
+            ),
+            body=payload,
+        )
+    )
+    progress.bytes_backed_up = progress.bytes_total
+    return _ProcessingResult(
+        obj=file_obj,
+        stat_result=stat_result,
+    )
 
 
 _has_noatime = True
