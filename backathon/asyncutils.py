@@ -9,7 +9,7 @@ _T = TypeVar("_T")
 
 
 def parallel_coroutines(
-    coros: Iterable[Coroutine[Any, Any, _T]], max_tasks: int | None
+    coros: Iterable[Coroutine[Any, Any, _T]], max_tasks: int | None = None
 ) -> Task[Sequence[_T]]:
     """Runs all given coroutines as tasks, limiting the number that can run at once
 
@@ -49,7 +49,7 @@ def parallel_coroutines(
 
 
 class BoundedTaskGroup:
-    def __init__(self, max_tasks: int | None):
+    def __init__(self, max_tasks: int | None = None):
         if not max_tasks:
             # A few more than the default thread pool workers. Common case is for the
             # parallel_coroutines() method to dispatch something to a thread pool,
