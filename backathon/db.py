@@ -76,8 +76,11 @@ MIGRATIONS: list[list[str]] = [
 
 def batch_fetch_from_cursor(cursor: sqlite3.Cursor):
     cursor.arraysize = 2048
-    while batch := cursor.fetchmany():
-        yield from batch
+    try:
+        while batch := cursor.fetchmany():
+            yield from batch
+    finally:
+        cursor.close()
 
 
 class Database:

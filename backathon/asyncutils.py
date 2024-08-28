@@ -49,6 +49,41 @@ def parallel_coroutines(
 
 
 class BoundedTaskGroup:
+    """A task group but there's a maximum number of tasks allowed any any one time
+
+    The create_task() method is now a coroutine, which may block if the task group
+    is full.
+
+    This is useful when a routine is dispatching a large number of tasks, but doesn't
+    want to submit them all at once. Reasons this is useful:
+    * Each task has memory requirements and realizing all tasks at once will take more
+      memory than desired.
+    * The work to create each task isn't insignificant and the calling routine wants
+      to yield to the event loop to let tasks process
+
+    Exception handling and task cancelling work the same way as asyncio.TaskGroup. For
+    reference:
+
+    * If any task in the group raises an exception (other than CancelledError), then
+      all other tasks are immediately cancelled, the task group context exits, tasks
+      are waited for, and all task exceptions are re-raised as an ExceptionGroup.
+      - Exception: SystemExit and KeyboardInterrupt are re-raised as-is instead of wrapped
+        in an ExceptionGroup
+
+    * If the task group context itself raises an unhandled exception, all remaining tasks
+      are cancelled and waited for. The original exception, along with any exceptions from
+      tasks, are all wrapped in an ExceptionGroup and re-raised.
+      - Same exception as above applies
+
+    * If a task is canceled, no special action is taken. The parent task will receive
+      the CancelledError when it awaits the sub-task, at which point the next bullet point
+      will apply.
+
+    * If the task group's parent task is canceled, then all remaining tasks are canceled
+      and waited for. If any task raises an exception, those are re-raised as an
+      ExceptionGroup. Otherwise, the CancelledError is propagated.
+    """
+
     def __init__(self, max_tasks: int | None = None):
         if not max_tasks:
             # A few more than the default thread pool workers. Common case is for the
