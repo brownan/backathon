@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import io
 from typing import IO, Any, cast
 
 from pydantic import BaseModel
-from typing_extensions import Self
+from typing_extensions import Buffer, Self
 
 from backathon.encryption.base import EncrypterBase, Payload, UnlockCallback
 from backathon.models import ObjIDType
-from backathon.repoobject import COPY_BUFSIZE
 
 
 class NullConfig(BaseModel):
@@ -34,13 +32,10 @@ class NullEncrypter(EncrypterBase[NullConfig]):
     def unlock(self, password: str):
         pass
 
-    def encrypt(self, buf: IO[bytes]) -> Payload:
+    def encrypt(self, buf: Buffer) -> Payload:
         hasher = hashlib.sha1()
-        size = 0
-        while chunk := buf.read(io.DEFAULT_BUFFER_SIZE):
-            size += len(chunk)
-            hasher.update(chunk)
-        buf.seek(0)
+        hasher.update(buf)
+        size = len(memoryview(buf))
         return Payload(buf=buf, size=size, sha1=hasher.digest())
 
     def decrypt(
@@ -48,11 +43,7 @@ class NullEncrypter(EncrypterBase[NullConfig]):
     ) -> IO[bytes]:
         return buf
 
-    def make_objid(self, buf: IO[bytes]) -> ObjIDType:
-        pos = buf.tell()
-        buf.seek(0)
+    def make_objid(self, buf: Buffer) -> ObjIDType:
         hasher = hashlib.blake2b(digest_size=32)
-        while chunk := buf.read(COPY_BUFSIZE):
-            hasher.update(chunk)
-        buf.seek(pos)
+        hasher.update(buf)
         return cast(ObjIDType, hasher.digest())

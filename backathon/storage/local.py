@@ -1,5 +1,4 @@
 import pathlib
-import shutil
 from os import PathLike
 from typing import IO
 
@@ -28,7 +27,7 @@ class LocalStorage(StorageBase[LocalStorageConfig]):
         full_path = self._make_full_path(path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
         with full_path.open("wb") as fobj:
-            shutil.copyfileobj(payload.buf, fobj)
+            fobj.write(payload.buf)
 
     def get_object(self, path: str | PathLike[str]) -> IO[bytes]:
         full_path = self._make_full_path(path)

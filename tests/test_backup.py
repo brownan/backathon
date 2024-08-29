@@ -107,7 +107,7 @@ class AssertObjHelperMixin(BackathonTest):
         # class's make_objid(), since any particular hash algo isn't part
         # of the specification
         contents = repoobject.decompress_payload(io.BytesIO(stream.read()))
-        digest = hashlib.blake2b(contents.read(), digest_size=32).digest()
+        digest = hashlib.blake2b(contents, digest_size=32).digest()
         self.assertEqual(objid, digest)
 
         stream.seek(pos)

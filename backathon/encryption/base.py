@@ -4,13 +4,13 @@ from abc import ABC, abstractmethod
 from typing import IO, Any, Callable, Generic, NamedTuple, Type, TypeVar
 
 from pydantic import BaseModel
-from typing_extensions import Self
+from typing_extensions import Buffer, Self
 
 from backathon.models import ObjIDType
 
 
 class Payload(NamedTuple):
-    buf: IO[bytes]
+    buf: Buffer
     size: int
     sha1: bytes
 
@@ -50,7 +50,7 @@ class EncrypterBase(ABC, Generic[C]):
         ...
 
     @abstractmethod
-    def encrypt(self, buf: IO[bytes]) -> Payload:
+    def encrypt(self, buf: Buffer) -> Payload:
         ...
 
     @abstractmethod
@@ -60,7 +60,7 @@ class EncrypterBase(ABC, Generic[C]):
         ...
 
     @abstractmethod
-    def make_objid(self, buf: IO[bytes]) -> ObjIDType:
+    def make_objid(self, buf: Buffer) -> ObjIDType:
         ...
 
 

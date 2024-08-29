@@ -8,7 +8,7 @@ import nacl.pwhash.argon2id
 import nacl.secret
 import nacl.utils
 from pydantic import BaseModel, EncodedBytes
-from typing_extensions import Self
+from typing_extensions import Buffer, Self
 
 from backathon.encryption.base import (
     EncrypterBase,
@@ -17,7 +17,6 @@ from backathon.encryption.base import (
     UnlockCallback,
 )
 from backathon.models import BytesHexEncoder, ObjIDType
-from backathon.repoobject import COPY_BUFSIZE
 
 logger = logging.getLogger("backathon.nacl")
 
@@ -142,13 +141,13 @@ class NaclEncrypter(EncrypterBase[NaclConfig]):
         privkey_bytes = nacl.secret.SecretBox(symmetric_key).decrypt(self.config.privkey)
         self.privkey = nacl.public.PrivateKey(privkey_bytes)
 
-    def encrypt(self, buf: IO[bytes]) -> Payload:
+    def encrypt(self, buf: Buffer) -> Payload:
         sealed_box = nacl.public.SealedBox(self.pubkey)
-        encrypted_bytes = sealed_box.encrypt(buf.read())
+        encrypted_bytes = sealed_box.encrypt(bytes(buf))
         hasher = hashlib.sha1()
         hasher.update(encrypted_bytes)
         return Payload(
-            buf=io.BytesIO(encrypted_bytes),
+            buf=encrypted_bytes,
             size=len(encrypted_bytes),
             sha1=hasher.digest(),
         )
@@ -165,11 +164,7 @@ class NaclEncrypter(EncrypterBase[NaclConfig]):
         decrypted_bytes = sealed_box.decrypt(buf.read())
         return io.BytesIO(decrypted_bytes)
 
-    def make_objid(self, buf: IO[bytes]) -> ObjIDType:
-        pos = buf.tell()
-        buf.seek(0)
+    def make_objid(self, buf: Buffer) -> ObjIDType:
         h = hashlib.blake2b(digest_size=32, key=bytes(self.pubkey))
-        while chunk := buf.read(COPY_BUFSIZE):
-            h.update(chunk)
-        buf.seek(pos)
+        h.update(buf)
         return cast(ObjIDType, h.digest())

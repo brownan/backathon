@@ -10,7 +10,7 @@ import secrets
 import sqlite3
 from typing import IO, Awaitable, Callable, Type
 
-from typing_extensions import Self
+from typing_extensions import Buffer, Self
 
 import backathon.backup
 import backathon.garbage
@@ -29,7 +29,7 @@ from backathon.storage.local import LocalStorage
 
 logger = logging.getLogger("backathon.repository")
 
-Compressor = Callable[[io.BytesIO], io.BytesIO]
+Compressor = Callable[[Buffer], Buffer]
 
 
 class Backathon:
@@ -53,9 +53,7 @@ class Backathon:
             "encryption": recovery_params,
         }
         json_data = json.dumps(marker_data, indent=4).encode("utf-8")
-        payload = Payload(
-            io.BytesIO(json_data), len(json_data), hashlib.sha1(json_data).digest()
-        )
+        payload = Payload(json_data, len(json_data), hashlib.sha1(json_data).digest())
         storage.put_object(pathlib.PurePath("backathon.json"), payload)
 
         # Set up the local database
@@ -234,6 +232,15 @@ def make_obj_putter(
 
     """
 
+    def upload_payload(buf: Buffer, path: pathlib.PurePosixPath) -> Payload:
+        if compressor is not None:
+            buf = compressor(buf)
+
+        payload = encrypter.encrypt(buf)
+
+        storage.put_object(path, payload)
+        return payload
+
     async def put_object(obj_req: ObjectRequest) -> models.Object:
         raw_payload = repoobject.make_obj_payload(obj_req)
 
@@ -249,20 +256,10 @@ def make_obj_putter(
                 obj.from_cache = True
                 return obj
 
-        # Compress
-        if compressor is not None:
-            compressed_payload = await asyncio.to_thread(compressor, raw_payload)
-        else:
-            compressed_payload = raw_payload
-        del raw_payload
-
-        # Encrypt
-        encrypted_payload = await asyncio.to_thread(encrypter.encrypt, compressed_payload)
-        del compressed_payload
-
-        await asyncio.to_thread(
-            storage.put_object, repoobject.make_object_path(objid), encrypted_payload
+        payload = await asyncio.to_thread(
+            upload_payload, raw_payload, repoobject.make_object_path(objid)
         )
+        del raw_payload
 
         with db.atomic(), db.cursor() as cursor:
             try:
@@ -275,10 +272,10 @@ def make_obj_putter(
                     (
                         objid,
                         obj_req.header.type,
-                        encrypted_payload.size,
+                        payload.size,
                         obj_req.header.file_size,
                         obj_req.header.last_modified_time,
-                        encrypted_payload.sha1,
+                        payload.sha1,
                     ),
                 )
             except sqlite3.IntegrityError:
@@ -308,10 +305,10 @@ def make_obj_putter(
             return models.Object(
                 objid=objid,
                 type=obj_req.header.type,
-                uploaded_size=encrypted_payload.size,
+                uploaded_size=payload.size,
                 file_size=obj_req.header.file_size,
                 last_modified_time=obj_req.header.last_modified_time,
-                sha1=encrypted_payload.sha1,
+                sha1=payload.sha1,
             )
 
     return put_object
@@ -335,9 +332,8 @@ def make_snapshot_putter(
         snapshot_path = pathlib.Path("snapshots", secrets.token_urlsafe())
         buf = io.BytesIO()
         buf.write(snapshot.model_dump_json(indent=4).encode("utf-8"))
-        buf.seek(0)
 
-        payload = encrypter.encrypt(buf)
+        payload = encrypter.encrypt(buf.getbuffer())
         storage.put_object(snapshot_path, payload)
 
         # Update database
@@ -376,26 +372,27 @@ def make_obj_getter(encrypter: EncrypterBase, storage: StorageBase) -> GetObject
             storage.get_object, repoobject.make_object_path(objid)
         )
         decrypted = encrypter.decrypt(raw_stream)
-        decompressed = repoobject.decompress_payload(decrypted)
-        if raw_stream is not decompressed:
+        if raw_stream is not decrypted:
             raw_stream.close()
+        decompressed = repoobject.decompress_payload(decrypted)
 
         # Check obj id
         actual_objid = encrypter.make_objid(decompressed)
         if not hmac.compare_digest(actual_objid, objid):
             raise CorruptedRepository(f"Corrupted Object: {objid.hex()}")
 
-        header = models.ObjectHeader.from_stream(decompressed)
+        decompressed_stream = io.BytesIO(decompressed)
+        header = models.ObjectHeader.from_stream(decompressed_stream)
 
         # Verify the body length matches the length in the header
-        pos = decompressed.tell()
-        decompressed.seek(0, io.SEEK_END)
-        length = decompressed.tell() - pos
-        decompressed.seek(pos)
+        body_start = decompressed_stream.tell()
+        decompressed_stream.seek(0, io.SEEK_END)
+        length = decompressed_stream.tell() - body_start
+        decompressed_stream.seek(body_start)
 
         if length != header.length:
             raise CorruptedRepository(f"Object length mismatch: {objid.hex()}")
 
-        return header, decompressed
+        return header, decompressed_stream
 
     return get_object

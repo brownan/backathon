@@ -3,9 +3,10 @@
 import io
 import pathlib
 import shutil
-import tempfile
 import zlib
 from typing import IO
+
+from typing_extensions import Buffer
 
 from backathon.backup import ObjectRequest
 from backathon.models import ObjIDType
@@ -14,7 +15,7 @@ from backathon.models import ObjIDType
 COPY_BUFSIZE = 1024 * 1024
 
 
-def make_obj_payload(obj_req: ObjectRequest) -> io.BytesIO:
+def make_obj_payload(obj_req: ObjectRequest) -> Buffer:
     """Given an ObjectRequest, construct a bytes buffer with the object
     contents.
 
@@ -36,25 +37,24 @@ def make_obj_payload(obj_req: ObjectRequest) -> io.BytesIO:
         else:
             shutil.copyfileobj(obj_req.body, raw_payload)
     raw_payload.seek(0)
-    return raw_payload
+    return raw_payload.getbuffer()
 
 
-def compress_payload(raw: io.BytesIO) -> io.BytesIO:
+def compress_payload(buf: Buffer) -> Buffer:
     """Compress the given bytes
 
     If the compressed size is not actually smaller, then the original
     buffer is returned
 
     """
-    buf = raw.getbuffer()
     compressed_bytes = zlib.compress(buf)
-    if len(compressed_bytes) < len(buf):
-        return io.BytesIO(compressed_bytes)
+    if len(compressed_bytes) < len(memoryview(buf)):
+        return compressed_bytes
     else:
-        return raw
+        return buf
 
 
-def decompress_payload(compressed: IO[bytes]) -> IO[bytes]:
+def decompress_payload(compressed: IO[bytes]) -> Buffer:
     """Decompress the given bytes
 
     If the given byte buffer does not start with the zlib magic byte,
@@ -72,24 +72,27 @@ def decompress_payload(compressed: IO[bytes]) -> IO[bytes]:
         buf = compressed.getbuffer()
         if buf[0] == 0x78:
             # zlib identification marker
-            return io.BytesIO(zlib.decompress(buf))
+            return zlib.decompress(buf)
         else:
-            return compressed
+            return compressed.getbuffer()
     else:
-        initial_byte = compressed.read(1)
-        compressed.seek(-1, io.SEEK_CUR)
-        if not initial_byte:
-            return io.BytesIO()
-        if initial_byte[0] == 0x78:
-            decomp_buf = tempfile.SpooledTemporaryFile(max_size=10 * 2**20)
-            decompressor = zlib.decompressobj()
-            while chunk := compressed.read(COPY_BUFSIZE):
-                decomp_buf.write(decompressor.decompress(chunk))
-            decomp_buf.write(decompressor.flush())
-            decomp_buf.seek(0)
-            return decomp_buf
-        else:
-            return compressed
+        try:
+            initial_byte = compressed.read(1)
+            compressed.seek(-1, io.SEEK_CUR)
+            if not initial_byte:
+                return b""
+            if initial_byte[0] == 0x78:
+                decomp_buf = io.BytesIO()
+                decompressor = zlib.decompressobj()
+                while chunk := compressed.read(COPY_BUFSIZE):
+                    decomp_buf.write(decompressor.decompress(chunk))
+                decomp_buf.write(decompressor.flush())
+                decomp_buf.seek(0)
+                return decomp_buf.getbuffer()
+            else:
+                return compressed.read()
+        finally:
+            compressed.close()
 
 
 def make_object_path(objid: ObjIDType) -> pathlib.PurePosixPath:

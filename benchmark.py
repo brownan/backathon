@@ -138,16 +138,15 @@ def perform_single_benchmark(
     repo.add_root(backup_dir)
 
     logger.info("Performing scan")
-    with Progress(*default_columns) as progress:
-        scan_task_id = progress.add_task(description="Scan")
-        backup_task_id = progress.add_task(description="Backup", start=False)
-
-        with yappi.run():
-            repo.scan(
-                progress=lambda count, total, _: progress.update(
-                    scan_task_id, total=total, completed=count
-                )
+    progress = Progress(*default_columns)
+    scan_task_id = progress.add_task(description="Scan")
+    backup_task_id = progress.add_task(description="Backup", start=False)
+    with progress:
+        repo.scan(
+            progress=lambda count, total, _: progress.update(
+                scan_task_id, total=total, completed=count
             )
+        )
         progress.stop_task(scan_task_id)
         progress.start_task(backup_task_id)
 
@@ -179,7 +178,7 @@ TestFileGenerator = Callable[[pathlib.Path, Callable[[int, int], None]], None]
 def test_dir_tree(testdir: pathlib.Path, update: Callable[[int, int], None]):
     # Create a tree of directories each with a 10MB file at the end
     rnd = random.Random(1)
-    dir_paths = list(itertools.product(["A", "B", "C", "D"], repeat=4))
+    dir_paths = list(itertools.product(["A", "B", "C", "D"], repeat=5))
     i = 0
     for d in dir_paths:
         path = testdir.joinpath(*d)
