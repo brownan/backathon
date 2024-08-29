@@ -47,8 +47,11 @@ def compress_payload(buf: Buffer) -> Buffer:
     buffer is returned
 
     """
+    length = len(memoryview(buf))
+    if length < 4096:
+        return buf
     compressed_bytes = zlib.compress(buf)
-    if len(compressed_bytes) < len(memoryview(buf)):
+    if len(compressed_bytes) < length:
         return compressed_bytes
     else:
         return buf
