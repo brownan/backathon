@@ -8,6 +8,7 @@ import os.path
 import pathlib
 import secrets
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from typing import IO, Awaitable, Callable, Type
 
 from typing_extensions import Buffer, Self
@@ -151,7 +152,10 @@ class Backathon:
             self.db, put_object, put_snapshot, progress=progress
         )
         logger.debug("Starting event loop")
-        asyncio.run(backup.backup())
+        with asyncio.Runner() as runner:
+            loop = runner.get_loop()
+            loop.set_default_executor(ThreadPoolExecutor(max_workers=os.cpu_count() or 4))
+            runner.run(backup.backup())
 
     def get_encrypter(self) -> EncrypterBase:
         encrypter_cls_name = self.db.config_get("encrypter")

@@ -174,7 +174,7 @@ class Backup:
                         cursor.execute("PRAGMA optimize")
 
                 # All entries to be backed up have been dispatched. Some tasks may still
-                # be running, so here we gather and finalize remaining entires as they finish.
+                # be running, so here we gather and finalize remaining entries as they finish.
 
                 # Start a new transaction. Once we yield to the event loop, processing
                 # tasks resume and may try to upload something, which may involve
