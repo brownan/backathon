@@ -17,6 +17,7 @@ from backathon.encryption.base import (
     UnlockCallback,
 )
 from backathon.models import BytesHexEncoder, ObjIDType
+from backathon.proftools import perf_block
 
 logger = logging.getLogger("backathon.nacl")
 
@@ -165,6 +166,7 @@ class NaclEncrypter(EncrypterBase[NaclConfig]):
         return io.BytesIO(decrypted_bytes)
 
     def make_objid(self, buf: Buffer) -> ObjIDType:
-        h = hashlib.blake2b(digest_size=32, key=bytes(self.pubkey))
-        h.update(buf)
-        return cast(ObjIDType, h.digest())
+        with perf_block("make_objid"):
+            h = hashlib.blake2b(digest_size=32, key=bytes(self.pubkey))
+            h.update(buf)
+            return cast(ObjIDType, h.digest())

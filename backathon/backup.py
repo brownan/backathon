@@ -33,6 +33,7 @@ from backathon.models import (
     ObjectType,
     ObjIDType,
 )
+from backathon.proftools import perf_block
 
 logger = getLogger("backathon.backup")
 
@@ -63,6 +64,8 @@ class BackupProgressReport:
     size_total: int = 0
     actual_uploaded: int = 0
     current_entries: list[_EntryProgress] = dataclasses.field(default_factory=list)
+    objects_processed: int = 0
+    objects_uploaded: int = 0
 
 
 class _ProcessingResult(NamedTuple):
@@ -323,9 +326,12 @@ class Backup:
 
         # This coroutine is called from _process_entry() to perform an upload
         async def upload(req: ObjectRequest) -> models.Object:
-            obj = await put_object(req)
+            with perf_block("put_object"):
+                obj = await put_object(req)
+            self.progress.objects_processed += 1
             if obj.uploaded_size and not obj.from_cache:
                 self.progress.actual_uploaded += obj.uploaded_size
+                self.progress.objects_uploaded += 1
             return obj
 
         progress = _EntryProgress(entry.printable_path)
@@ -333,7 +339,10 @@ class Backup:
 
         logger.log(5, "Dispatching process_entry call for %s", entry)
         try:
-            result = await _process_entry(entry, child_entries, upload, params, progress)
+            with perf_block("_process_entry"):
+                result = await _process_entry(
+                    entry, child_entries, upload, params, progress
+                )
         finally:
             self.progress.current_entries.remove(progress)
         self._finalize_entry(entry, result)

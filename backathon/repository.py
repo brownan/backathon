@@ -24,6 +24,7 @@ from backathon.encryption.nacl import NaclEncrypter
 from backathon.encryption.null import NullEncrypter
 from backathon.exceptions import CorruptedRepository
 from backathon.models import ObjectHeader, ObjIDType
+from backathon.proftools import perf_block
 from backathon.restore import GetObject
 from backathon.storage.base import StorageBase
 from backathon.storage.local import LocalStorage
@@ -133,7 +134,9 @@ class Backathon:
     ) -> GetObject:
         return make_obj_getter(encrypter, storage)
 
-    def backup(self, progress: None | Callable[[BackupProgressReport], None] = None):
+    def backup(
+        self, progress: None | Callable[[BackupProgressReport], None] = None
+    ) -> BackupProgressReport:
         """Perform a backup
 
         See documentation in the backathon.backup module
@@ -156,6 +159,7 @@ class Backathon:
             loop = runner.get_loop()
             loop.set_default_executor(ThreadPoolExecutor(max_workers=os.cpu_count() or 4))
             runner.run(backup.backup())
+        return backup.progress
 
     def get_encrypter(self) -> EncrypterBase:
         encrypter_cls_name = self.db.config_get("encrypter")
@@ -237,19 +241,29 @@ def make_obj_putter(
     """
 
     def upload_payload(buf: Buffer, path: pathlib.PurePosixPath) -> Payload:
-        if compressor is not None:
-            buf = compressor(buf)
+        with perf_block("upload_payload_inner"):
+            if compressor is not None:
+                with perf_block("upload_payload_inner.compressor"):
+                    buf = compressor(buf)
 
-        payload = encrypter.encrypt(buf)
+            with perf_block("upload_payload_inner.encrypter"):
+                payload = encrypter.encrypt(buf)
 
-        storage.put_object(path, payload)
-        return payload
+            with perf_block("upload_payload_inner.put_object"):
+                storage.put_object(path, payload)
+            return payload
 
     async def put_object(obj_req: ObjectRequest) -> models.Object:
         raw_payload = repoobject.make_obj_payload(obj_req)
 
         # Make the objid
-        objid = await asyncio.to_thread(encrypter.make_objid, raw_payload)
+        # While this is a CPU-bound routine, we perform it in the main thread with
+        # the event loop. From experimentation, I've found the blake2b hash algorithm is
+        # so fast that trying to parallelize it doesn't overcome the overhead of dispatching
+        # to a separate thread pool. Whether this is due to actual thread synchronization
+        # overhead or just contention in the default threadpool executor I'm not sure.
+        with perf_block("put_object.make_objid"):
+            objid = encrypter.make_objid(raw_payload)
 
         # Check if this object already exists
         with db.cursor(retdict=True) as cursor:
@@ -260,9 +274,10 @@ def make_obj_putter(
                 obj.from_cache = True
                 return obj
 
-        payload = await asyncio.to_thread(
-            upload_payload, raw_payload, repoobject.make_object_path(objid)
-        )
+        with perf_block("put_object.upload_payload to_thread"):
+            payload = await asyncio.to_thread(
+                upload_payload, raw_payload, repoobject.make_object_path(objid)
+            )
         del raw_payload
 
         with db.atomic(), db.cursor() as cursor:

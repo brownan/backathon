@@ -1,3 +1,6 @@
+from typing import IO
+
+
 class FixedChunker:
     """Chunker that iterates over a file object and yields fixed size
     chunks.
@@ -6,7 +9,7 @@ class FixedChunker:
 
     """
 
-    def __init__(self, fileobj, chunk_size: int):
+    def __init__(self, fileobj: IO[bytes], chunk_size: int):
         self.f = fileobj
         self.pos = 0
         self.chunk_size = chunk_size

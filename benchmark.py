@@ -12,11 +12,14 @@ from contextlib import ExitStack
 from typing import Callable
 
 import click
+import rich.filesize
 import yappi
 from rich.logging import RichHandler
 from rich.progress import Progress
 from typing_extensions import NamedTuple
 
+from backathon import proftools
+from backathon.backup import BackupProgressReport
 from backathon.cmdline.common import (
     default_columns,
 )
@@ -32,6 +35,7 @@ class BackupResults(NamedTuple):
     scan_speed: float
     backup_time: float
     backup_speed: float
+    uploaded_objects: int
 
 
 @click.command()
@@ -44,6 +48,7 @@ def main(test_pattern: str):
         handlers=[RichHandler(rich_tracebacks=True)],
     )
     logger.setLevel(logging.INFO)
+    logging.getLogger("backathon").setLevel(logging.INFO)
 
     yappi.set_clock_type("wall")
 
@@ -82,6 +87,11 @@ def main(test_pattern: str):
             logger.info("Running test %s", testname)
             results = perform_single_benchmark(context, testdir)
             benchmarks[testname] = results
+            logger.info(
+                "Test %s finished. uploaded %s objects",
+                testname,
+                results.uploaded_objects,
+            )
 
         git_hash = subprocess.check_output(
             "git log --pretty=format:%h -1".split(), encoding="utf-8"
@@ -114,6 +124,8 @@ def main(test_pattern: str):
         logger.info("Results written to %s", benchmark_file)
         yappi.get_func_stats().save("benchmark.pstat", type="pstat")
         logger.info("Function profile information written to benchmark.pstat")
+
+        proftools.print_perf_data()
 
 
 def perform_single_benchmark(
@@ -150,13 +162,14 @@ def perform_single_benchmark(
         progress.stop_task(scan_task_id)
         progress.start_task(backup_task_id)
 
+        def on_progress(info: BackupProgressReport):
+            progress.update(
+                backup_task_id, total=info.count_total, completed=info.count_progress
+            )
+
         logger.info("Performing backup")
         with yappi.run():
-            repo.backup(
-                lambda info: progress.update(
-                    backup_task_id, total=info.count_total, completed=info.count_progress
-                )
-            )
+            final_progress = repo.backup(on_progress)
         progress.stop_task(backup_task_id)
 
     tasks = {task.id: task for task in progress.tasks}
@@ -169,6 +182,7 @@ def perform_single_benchmark(
         scan_task.completed / scan_task.elapsed,
         backup_task.elapsed,
         backup_task.completed / backup_task.elapsed,
+        final_progress.objects_uploaded,
     )
 
 
@@ -178,7 +192,7 @@ TestFileGenerator = Callable[[pathlib.Path, Callable[[int, int], None]], None]
 def test_dir_tree(testdir: pathlib.Path, update: Callable[[int, int], None]):
     # Create a tree of directories each with a 10MB file at the end
     rnd = random.Random(1)
-    dir_paths = list(itertools.product(["A", "B", "C", "D"], repeat=5))
+    dir_paths = list(itertools.product(["A", "B", "C", "D"], repeat=4))
     i = 0
     for d in dir_paths:
         path = testdir.joinpath(*d)
@@ -201,10 +215,11 @@ def test_huge_file(testdir: pathlib.Path, update: Callable[[int, int], None]):
     # Create a really huge file
     rnd = random.Random(1)
     with testdir.joinpath("hugefile").open("wb") as fobj:
-        count = 1_000
+        count = 1000
         for i in range(count):
             fobj.write(rnd.randbytes(2**20))
             update(int(count + 1 // count * 100), 100)
+    logger.info("Huge file created: size %s", rich.filesize.decimal(count * 2**20))
 
 
 TEST_DEFS: dict[str, TestFileGenerator] = {
