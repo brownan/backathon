@@ -1,18 +1,27 @@
 import collections
 import contextlib
 import time
+from contextlib import ContextDecorator, nullcontext
 
 perf_data: list[tuple[str, float]] = []
 
 
 @contextlib.contextmanager
-def perf_block(name: str):
+def _perf_block_impl(name: str):
     t1 = time.perf_counter()
     try:
         yield
     finally:
         t2 = time.perf_counter()
         perf_data.append((name, t2 - t1))
+
+
+perf_block = type("NullContext", (nullcontext, ContextDecorator), {})
+
+
+def enable_perf():
+    global perf_block
+    perf_block = _perf_block_impl
 
 
 def print_perf_data():
