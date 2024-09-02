@@ -1,5 +1,4 @@
 import datetime
-import io
 import unittest.mock
 from typing import Iterable, Iterator, cast
 
@@ -188,7 +187,7 @@ class TestGarbage(BackathonTest):
         storage = self.back.get_storage()
         for obj in self.db.query(models.Object, "SELECT * FROM objects"):
             path = repoobject.make_object_path(obj.objid)
-            storage.put_object(path, Payload(io.BytesIO(), 0, b""))
+            storage.put_object(path, Payload(b"", 0, b""))
 
         return n
 

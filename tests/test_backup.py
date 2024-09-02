@@ -571,7 +571,9 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
     def test_compression(self):
         """Tests that uploaded objects are compressed if compression is enabled"""
         self.back.db.config_set("enable-compression", True)
-        file = self.create_file("file1", "Hello, world!")
+        # Make the file big. below a certain threshold, compression will be skipped
+        expected_str = "Hello, world!" * 2048
+        file = self.create_file("file1", expected_str)
         self.back.scan()
         self.back.backup()
         entry = self.back.db.get_fsentry(file)
@@ -586,7 +588,7 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         buf = io.BytesIO(decompressed)
         header = models.ObjectHeader.from_stream(buf)
         self.assertEqual(ObjectType.FILE, header.type)
-        self.assertEqual(b"Hello, world!", buf.read())
+        self.assertEqual(expected_str.encode("utf-8"), buf.read())
 
         # The database should store the compressed size and sha1, not that of the
         # decompressed data
