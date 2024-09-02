@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import datetime
 import enum
-import logging
 import os
 import os.path
 import pathlib
 import sys
 from collections.abc import Collection
 from functools import cached_property
-from typing import IO, TYPE_CHECKING, Annotated, Any, NamedTuple, NewType, cast
+from typing import IO, Annotated, Any, NamedTuple, NewType, cast
 
 import msgpack
 from pydantic import (
@@ -27,11 +26,6 @@ from pydantic_core.core_schema import (
 from typing_extensions import Self
 
 import backathon.db
-
-if TYPE_CHECKING:
-    pass
-
-scanlogger = logging.getLogger("backathon.scan")
 
 
 def bytes_validator(

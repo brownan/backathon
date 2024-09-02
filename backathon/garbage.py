@@ -140,6 +140,9 @@ def collect_garbage(db: Database, storage: StorageBase) -> tuple[int, int]:
             logger.log(5, "Found garbage: %r", obj)
 
         logger.debug("Committing transaction")
+
+        # explicit commit instead of closing the atomic context so we ensure it's
+        # not accidentally a savepoint instead of a true transaction.
         cursor.execute("COMMIT")
         cursor.execute("BEGIN IMMEDIATE")
 
