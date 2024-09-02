@@ -280,7 +280,7 @@ def make_obj_putter(
             )
         del raw_payload
 
-        with db.atomic(), db.cursor() as cursor:
+        with db.atomic_or_savepoint(), db.cursor() as cursor:
             try:
                 cursor.execute(
                     """

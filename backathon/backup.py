@@ -235,7 +235,7 @@ class Backup:
             self.progress.count_total,
         )
 
-        with self.db.atomic(immediate=True):
+        with self.db.savepoint():
             entry_iterator = self.db.query(
                 models.FSEntry,
                 """SELECT * FROM fsentry WHERE
@@ -353,7 +353,7 @@ class Backup:
         if e.st_mode and e.st_size and stat.S_ISREG(e.st_mode):
             self.progress.size_progress += e.st_size
 
-        with self.db.atomic(), self.db.cursor() as cursor:
+        with self.db.savepoint(), self.db.cursor() as cursor:
             if result is None:
                 # Item was not backed up. We need to delete its entry
                 cursor.execute("DELETE FROM fsentry WHERE id=?", (e.id,))

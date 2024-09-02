@@ -174,7 +174,7 @@ def scan_entry(
         return
 
     times = [time.monotonic_ns()]
-    with db.atomic(immediate=True):
+    with db.savepoint():
         try:
             stat_result = os.lstat(entry.path)
         except (FileNotFoundError, NotADirectoryError):
@@ -235,7 +235,7 @@ def scan_entry(
 
                 encoded_path = models.FSEntry.encode_path(newpath)
                 try:
-                    with db.atomic(), db.cursor() as cursor:
+                    with db.cursor() as cursor:
                         cursor.execute(
                             "INSERT INTO fsentry (path, parent, new) VALUES (?,?,?)",
                             (encoded_path, entry.id, True),

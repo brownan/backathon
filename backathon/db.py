@@ -195,25 +195,54 @@ class Database:
 
     @contextmanager
     def atomic(self, *, immediate: bool = False):
-        if not self.conn.in_transaction:
-            if immediate:
-                self.conn.execute("BEGIN IMMEDIATE")
-            else:
-                self.conn.execute("BEGIN")
-            with self.conn:
-                yield
-
+        """Opens a database transaction and commits / rolls back when the context exits"""
+        if self.conn.in_transaction:
+            raise RuntimeError(
+                "Cannot open an atomic block when already in a transaction"
+            )
+        if immediate:
+            self.conn.execute("BEGIN IMMEDIATE")
         else:
-            savepoint_name = f"savepoint{self._savepoint_num}"
-            self._savepoint_num += 1
-            self.conn.execute(f"SAVEPOINT {savepoint_name}")
-            try:
+            self.conn.execute("BEGIN")
+
+        # Using a sqlite3 connection as a context manager will close the transaction or
+        # roll it back like we want
+        with self.conn:
+            yield
+
+    @contextmanager
+    def savepoint(self):
+        """Creates a database savepoint and releases it when the context exits"""
+        if not self.conn.in_transaction:
+            raise RuntimeError("Cannot create a savepoint outside of a transaction block")
+
+        savepoint_name = f"savepoint{self._savepoint_num}"
+        self._savepoint_num += 1
+        self.conn.execute(f"SAVEPOINT {savepoint_name}")
+        try:
+            yield
+        except BaseException:
+            self.conn.execute(f"ROLLBACK TO {savepoint_name}")
+            raise
+        finally:
+            self.conn.execute(f"RELEASE {savepoint_name}")
+
+    @contextmanager
+    def atomic_or_savepoint(self):
+        """Opens a transaction or creates a savepoint depending on whether a transaction
+        is already open
+
+        This function should only be used in special situations where a function is
+        design to be used in different contexts. Most places should prefer to use
+        atomic() or savepoint() as appropriate in order to tightly control when
+        transactions and savepoints are committed and rolled back.
+        """
+        if not self.conn.in_transaction:
+            with self.atomic():
                 yield
-            except BaseException:
-                self.conn.execute(f"ROLLBACK TO {savepoint_name}")
-                raise
-            finally:
-                self.conn.execute(f"RELEASE {savepoint_name}")
+        else:
+            with self.savepoint():
+                yield
 
     def get_fsentry(self, path: str | bytes | os.PathLike) -> models.FSEntry:
         """Shortcut to get an fsentry by its path, or raise a FileNotFound exception"""
