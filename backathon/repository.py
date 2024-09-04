@@ -280,55 +280,34 @@ def make_obj_putter(
             )
         del raw_payload
 
-        with db.atomic_or_savepoint(), db.cursor() as cursor:
-            try:
-                cursor.execute(
-                    """
-                INSERT INTO objects
-                (objid, type, uploaded_size, file_size, last_modified_time, sha1)
-                VALUES (?,?,?,?,?,?)
-                """,
-                    (
-                        objid,
-                        obj_req.header.type,
-                        payload.size,
-                        obj_req.header.file_size,
-                        obj_req.header.last_modified_time,
-                        payload.sha1,
-                    ),
-                )
-            except sqlite3.IntegrityError:
-                # This can happen if two backup threads try to upload an identical
-                # object, which isn't too unlikely in practice. Since they are
-                # cryptographically guaranteed to be identical (including relations),
-                # we can just query that one back out and return it.
-                # The fact that the object was uploaded twice is an unfortunate
-                # inefficiency but I believe it won't be too bad overall.
-                return next(
-                    db.query(
-                        models.Object, "SELECT * FROM objects WHERE objid=?", (objid,)
-                    )
-                )
+        # Form the Object instance
+        obj = models.Object(
+            objid=objid,
+            type=obj_req.header.type,
+            uploaded_size=payload.size,
+            file_size=obj_req.header.file_size,
+            last_modified_time=obj_req.header.last_modified_time,
+            sha1=payload.sha1,
+        )
 
-            # Add object relations
-            children: list[tuple[ObjIDType, ObjIDType, bytes | None]] = []
-            if obj_req.header.blobs:
-                children.extend((objid, b.objid, None) for b in obj_req.header.blobs)
-            if obj_req.header.entries:
-                children.extend((objid, e.objid, e.name) for e in obj_req.header.entries)
-            cursor.executemany(
-                "INSERT INTO object_relations (parent, child, name) VALUES (?,?,?)",
-                children,
-            )
+        # The child relations
+        children: list[tuple[ObjIDType, ObjIDType, bytes | None]] = []
+        if obj_req.header.blobs:
+            children.extend((objid, b.objid, None) for b in obj_req.header.blobs)
+        if obj_req.header.entries:
+            children.extend((objid, e.objid, e.name) for e in obj_req.header.entries)
 
-            return models.Object(
-                objid=objid,
-                type=obj_req.header.type,
-                uploaded_size=payload.size,
-                file_size=obj_req.header.file_size,
-                last_modified_time=obj_req.header.last_modified_time,
-                sha1=payload.sha1,
-            )
+        try:
+            obj.add_to_database(db, children)
+        except sqlite3.IntegrityError:
+            # This can happen if two backup threads try to upload an identical
+            # object, which isn't too unlikely in practice. Since they are
+            # cryptographically guaranteed to be identical (including relations),
+            # we know it and the child relations have already been added.
+            # The fact that the payload was uploaded twice is an unfortunate
+            # inefficiency but I believe it won't be too bad overall.
+            pass
+        return obj
 
     return put_object
 

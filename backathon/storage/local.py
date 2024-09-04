@@ -1,6 +1,6 @@
 import pathlib
 from os import PathLike
-from typing import IO
+from typing import IO, Iterator
 
 from pydantic import BaseModel
 
@@ -36,3 +36,6 @@ class LocalStorage(StorageBase[LocalStorageConfig]):
     def delete_object(self, path: str | PathLike[str]):
         full_path = self._make_full_path(path)
         full_path.unlink(missing_ok=True)
+
+    def list_dir(self, path: str | PathLike[str]) -> Iterator[str]:
+        return (str(p.name) for p in self.config.base_path.joinpath(path).iterdir())

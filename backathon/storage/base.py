@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from os import PathLike
-from typing import IO, Generic, Type, TypeVar
+from typing import IO, Generic, Iterator, Type, TypeVar
 
 from pydantic import BaseModel
 
@@ -30,4 +30,8 @@ class StorageBase(ABC, Generic[C]):
 
     @abstractmethod
     def delete_object(self, path: str | PathLike[str]):
+        ...
+
+    @abstractmethod
+    def list_dir(self, path: str | PathLike[str]) -> Iterator[str]:
         ...

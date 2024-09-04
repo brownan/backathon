@@ -233,7 +233,7 @@ class Database:
         is already open
 
         This function should only be used in special situations where a function is
-        design to be used in different contexts. Most places should prefer to use
+        designed to be used in different contexts. Most places should prefer to use
         atomic() or savepoint() as appropriate in order to tightly control when
         transactions and savepoints are committed and rolled back.
         """

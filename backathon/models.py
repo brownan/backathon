@@ -5,10 +5,11 @@ import enum
 import os
 import os.path
 import pathlib
+import sqlite3
 import sys
 from collections.abc import Collection
 from functools import cached_property
-from typing import IO, Annotated, Any, NamedTuple, NewType, cast
+from typing import IO, Annotated, Any, NamedTuple, NewType, Sequence, cast
 
 import msgpack
 from pydantic import (
@@ -26,6 +27,7 @@ from pydantic_core.core_schema import (
 from typing_extensions import Self
 
 import backathon.db
+from backathon.db import Database
 
 
 def bytes_validator(
@@ -107,11 +109,62 @@ class Object(BaseModel):
     def objid_int(self):
         return int.from_bytes(self.objid, "little")
 
+    def __eq__(self, other: Any) -> bool:
+        return (
+            isinstance(other, Object)
+            and self.objid == other.objid
+            and self.type == other.type
+            and self.uploaded_size == other.uploaded_size
+            and self.file_size == other.file_size
+            and self.last_modified_time == other.last_modified_time
+            and self.sha1 == other.sha1
+        )
+
     def __str__(self):
         return self.objid_hex[:7]
 
     def __repr__(self):
         return f"<Object {self.type and self.type.name} {self.objid.hex()}>"
+
+    def add_to_database(
+        self, db: Database, children: Sequence[tuple[ObjIDType, ObjIDType, bytes | None]]
+    ):
+        """Adds this object and its relations to the database"""
+        with db.atomic_or_savepoint(), db.cursor() as cursor:
+            try:
+                cursor.execute(
+                    """
+                INSERT INTO objects
+                (objid, type, uploaded_size, file_size, last_modified_time, sha1)
+                VALUES (?,?,?,?,?,?)
+                """,
+                    (
+                        self.objid,
+                        self.type,
+                        self.uploaded_size,
+                        self.file_size,
+                        self.last_modified_time,
+                        self.sha1,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                # This can happen if two backup threads try to upload an identical
+                # object, which isn't too unlikely in practice. Since they are
+                # cryptographically guaranteed to be identical (including relations),
+                # we can just query that one back out and return it.
+                # The fact that the object was uploaded twice is an unfortunate
+                # inefficiency but I believe it won't be too bad overall.
+                return next(
+                    db.query(
+                        type(self), "SELECT * FROM objects WHERE objid=?", (self.objid,)
+                    )
+                )
+
+            # Add object relations
+            cursor.executemany(
+                "INSERT INTO object_relations (parent, child, name) VALUES (?,?,?)",
+                children,
+            )
 
 
 class ObjectRelation(BaseModel):
