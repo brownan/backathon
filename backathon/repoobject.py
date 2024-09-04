@@ -4,40 +4,98 @@ import io
 import pathlib
 import shutil
 import zlib
-from typing import IO
+from typing import IO, Self, Sequence
 
 from typing_extensions import Buffer
 
 from backathon.backup import ObjectRequest
-from backathon.models import ObjIDType
+from backathon.encryption.base import EncrypterBase
+from backathon.models import Object, ObjectHeader, ObjIDType
+from backathon.proftools import perf_block
+from backathon.storage.base import StorageBase
 
 # Same value as shutil.COPY_BUFSIZE but that attribute isn't public
 COPY_BUFSIZE = 1024 * 1024
 
 
-def make_obj_payload(obj_req: ObjectRequest) -> Buffer:
-    """Given an ObjectRequest, construct a bytes buffer with the object
-    contents.
+class RawPayload:
+    """A "raw" payload is a byte string representing a serialized Object before
+    it has been compressed or encrypted
 
-    These bytes will be optionally compressed and/or encrypted before actually
-    being uploaded.
+    This class is bound to a particular encrypter which defines the object's ID.
+
     """
 
-    if (
-        isinstance(obj_req.body, io.BytesIO)
-        and len(obj_req.body.getbuffer()) != obj_req.header.length
-    ):
-        raise RuntimeError("Size mismatch between header and body")
+    header: ObjectHeader
+    encrypter: EncrypterBase
+    raw_payload_buf: Buffer
+    objid: ObjIDType
 
-    raw_payload = io.BytesIO()
-    raw_payload.write(obj_req.header.model_dump_msgpack())
-    if obj_req.body is not None:
-        if isinstance(obj_req.body, io.BytesIO):
-            raw_payload.write(obj_req.body.getbuffer())
-        else:
-            shutil.copyfileobj(obj_req.body, raw_payload)
-    raw_payload.seek(0)
-    return raw_payload.getbuffer()
+    @classmethod
+    def from_obj_req(cls, obj_req: ObjectRequest, encrypter: EncrypterBase) -> Self:
+        self = cls()
+        self.header = obj_req.header
+        self.encrypter = encrypter
+
+        self.raw_payload_buf = self.make_obj_payload(obj_req)
+
+        with perf_block("make_objid"):
+            self.objid = encrypter.make_objid(self.raw_payload_buf)
+        return self
+
+    def get_children(self) -> Sequence[tuple[ObjIDType, ObjIDType, bytes | None]]:
+        """Returns the child relations for this object, used to add rows to the
+        object_relations table
+
+        """
+        children = []
+        if self.header.blobs:
+            children.extend((self.objid, b.objid, None) for b in self.header.blobs)
+        if self.header.entries:
+            children.extend((self.objid, e.objid, e.name) for e in self.header.entries)
+        return children
+
+    def upload(self, storage: StorageBase) -> Object:
+        """Perform final compression and encryption, upload the payload, and return a new
+        Object instance representing what was uploaded
+
+        """
+        buf = compress_payload(self.raw_payload_buf)
+        final_payload = self.encrypter.encrypt(buf)
+        path = make_object_path(self.objid)
+        storage.put_object(path, final_payload)
+
+        return Object(
+            objid=self.objid,
+            type=self.header.type,
+            uploaded_size=final_payload.size,
+            file_size=self.header.file_size,
+            last_modified_time=self.header.last_modified_time,
+            sha1=final_payload.sha1,
+        )
+
+    @staticmethod
+    def make_obj_payload(obj_req: ObjectRequest) -> Buffer:
+        """Construct a serialized object buffer from an ObjectRequest
+
+        The result is the uncompressed, unencrypted byte string for the object
+        """
+
+        if (
+            isinstance(obj_req.body, io.BytesIO)
+            and len(obj_req.body.getbuffer()) != obj_req.header.length
+        ):
+            raise RuntimeError("Size mismatch between header and body")
+
+        raw_payload = io.BytesIO()
+        raw_payload.write(obj_req.header.model_dump_msgpack())
+        if obj_req.body is not None:
+            if isinstance(obj_req.body, io.BytesIO):
+                raw_payload.write(obj_req.body.getbuffer())
+            else:
+                shutil.copyfileobj(obj_req.body, raw_payload)
+        raw_payload.seek(0)
+        return raw_payload.getbuffer()
 
 
 def compress_payload(buf: Buffer) -> Buffer:
@@ -50,7 +108,8 @@ def compress_payload(buf: Buffer) -> Buffer:
     length = len(memoryview(buf))
     if length < 4096:
         return buf
-    compressed_bytes = zlib.compress(buf)
+    with perf_block("zlib"):
+        compressed_bytes = zlib.compress(buf)
     if len(compressed_bytes) < length:
         return compressed_bytes
     else:

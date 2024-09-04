@@ -254,16 +254,14 @@ def make_obj_putter(
             return payload
 
     async def put_object(obj_req: ObjectRequest) -> models.Object:
-        raw_payload = repoobject.make_obj_payload(obj_req)
-
-        # Make the objid
+        # Create the raw payload, including calculation of the objid
         # While this is a CPU-bound routine, we perform it in the main thread with
         # the event loop. From experimentation, I've found the blake2b hash algorithm is
         # so fast that trying to parallelize it doesn't overcome the overhead of dispatching
         # to a separate thread pool. Whether this is due to actual thread synchronization
         # overhead or just contention in the default threadpool executor I'm not sure.
-        with perf_block("put_object.make_objid"):
-            objid = encrypter.make_objid(raw_payload)
+        raw_payload = repoobject.RawPayload.from_obj_req(obj_req, encrypter)
+        objid = raw_payload.objid
 
         # Check if this object already exists
         with db.cursor(retdict=True) as cursor:
@@ -275,27 +273,10 @@ def make_obj_putter(
                 return obj
 
         with perf_block("put_object.upload_payload to_thread"):
-            payload = await asyncio.to_thread(
-                upload_payload, raw_payload, repoobject.make_object_path(objid)
-            )
-        del raw_payload
-
-        # Form the Object instance
-        obj = models.Object(
-            objid=objid,
-            type=obj_req.header.type,
-            uploaded_size=payload.size,
-            file_size=obj_req.header.file_size,
-            last_modified_time=obj_req.header.last_modified_time,
-            sha1=payload.sha1,
-        )
+            obj = await asyncio.to_thread(raw_payload.upload, storage)
 
         # The child relations
-        children: list[tuple[ObjIDType, ObjIDType, bytes | None]] = []
-        if obj_req.header.blobs:
-            children.extend((objid, b.objid, None) for b in obj_req.header.blobs)
-        if obj_req.header.entries:
-            children.extend((objid, e.objid, e.name) for e in obj_req.header.entries)
+        children = raw_payload.get_children()
 
         try:
             obj.add_to_database(db, children)
