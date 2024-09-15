@@ -1,5 +1,4 @@
 import hashlib
-import io
 import logging
 from typing import IO, Annotated, Any, cast
 
@@ -14,7 +13,6 @@ from backathon.encryption.base import (
     EncrypterBase,
     KeyNotDecrypted,
     Payload,
-    UnlockCallback,
 )
 from backathon.models import BytesHexEncoder, ObjIDType
 from backathon.proftools import perf_block
@@ -153,17 +151,13 @@ class NaclEncrypter(EncrypterBase[NaclConfig]):
             sha1=hasher.digest(),
         )
 
-    def decrypt(
-        self, buf: IO[bytes], unlock_callback: UnlockCallback | None = None
-    ) -> IO[bytes]:
-        if self.privkey is None and unlock_callback is not None:
-            unlock_callback(self.unlock)
+    def decrypt(self, buf: IO[bytes]) -> Buffer:
         if self.privkey is None:
             raise KeyNotDecrypted
 
         sealed_box = nacl.public.SealedBox(self.privkey)
         decrypted_bytes = sealed_box.decrypt(buf.read())
-        return io.BytesIO(decrypted_bytes)
+        return decrypted_bytes
 
     def make_objid(self, buf: Buffer) -> ObjIDType:
         with perf_block("make_objid"):

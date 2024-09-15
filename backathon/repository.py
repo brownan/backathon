@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import hmac
 import io
 import json
 import logging
@@ -9,7 +8,7 @@ import pathlib
 import secrets
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from typing import IO, Awaitable, Callable, Type
+from typing import Awaitable, Callable, Type
 
 from typing_extensions import Buffer, Self
 
@@ -22,10 +21,9 @@ from backathon.db import Database
 from backathon.encryption.base import EncrypterBase, Payload
 from backathon.encryption.nacl import NaclEncrypter
 from backathon.encryption.null import NullEncrypter
-from backathon.exceptions import CorruptedRepository
-from backathon.models import ObjectHeader, ObjIDType
+from backathon.models import ObjIDType
 from backathon.proftools import perf_block
-from backathon.restore import GetObject
+from backathon.repoobject import RawPayload
 from backathon.storage.base import StorageBase
 from backathon.storage.local import LocalStorage
 
@@ -131,7 +129,7 @@ class Backathon:
 
     def _make_obj_getter(
         self, encrypter: EncrypterBase, storage: StorageBase
-    ) -> GetObject:
+    ) -> "ObjGetter":
         return make_obj_getter(encrypter, storage)
 
     def backup(
@@ -325,7 +323,10 @@ def make_snapshot_putter(
     return put_snapshot
 
 
-def make_obj_getter(encrypter: EncrypterBase, storage: StorageBase) -> GetObject:
+ObjGetter = Callable[[ObjIDType], Awaitable[RawPayload]]
+
+
+def make_obj_getter(encrypter: EncrypterBase, storage: StorageBase) -> ObjGetter:
     """Returns an object getter function
 
     The object getter's job is to retrieve, decrypt, decompress, verify, and deserialize
@@ -346,32 +347,15 @@ def make_obj_getter(encrypter: EncrypterBase, storage: StorageBase) -> GetObject
 
     """
 
-    async def get_object(objid: ObjIDType) -> tuple[ObjectHeader, IO[bytes]]:
-        raw_stream = await asyncio.to_thread(
-            storage.get_object, repoobject.make_object_path(objid)
+    def get_and_decrypt(objid: ObjIDType) -> RawPayload:
+        downloaded_file = storage.get_object(repoobject.make_object_path(objid))
+        return RawPayload.from_encrypted_payload(
+            objid,
+            downloaded_file.stream,
+            encrypter,
         )
-        decrypted = encrypter.decrypt(raw_stream)
-        if raw_stream is not decrypted:
-            raw_stream.close()
-        decompressed = repoobject.decompress_payload(decrypted)
 
-        # Check obj id
-        actual_objid = encrypter.make_objid(decompressed)
-        if not hmac.compare_digest(actual_objid, objid):
-            raise CorruptedRepository(f"Corrupted Object: {objid.hex()}")
-
-        decompressed_stream = io.BytesIO(decompressed)
-        header = models.ObjectHeader.from_stream(decompressed_stream)
-
-        # Verify the body length matches the length in the header
-        body_start = decompressed_stream.tell()
-        decompressed_stream.seek(0, io.SEEK_END)
-        length = decompressed_stream.tell() - body_start
-        decompressed_stream.seek(body_start)
-
-        if length != header.length:
-            raise CorruptedRepository(f"Object length mismatch: {objid.hex()}")
-
-        return header, decompressed_stream
+    async def get_object(objid: ObjIDType) -> RawPayload:
+        return await asyncio.to_thread(get_and_decrypt, objid)
 
     return get_object

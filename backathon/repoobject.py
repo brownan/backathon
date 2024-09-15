@@ -1,15 +1,19 @@
 """Utility functions for working with repository objects"""
 
+import hmac
 import io
+import os
 import pathlib
 import shutil
 import zlib
+from dataclasses import dataclass
 from typing import IO, Self, Sequence
 
 from typing_extensions import Buffer
 
 from backathon.backup import ObjectRequest
 from backathon.encryption.base import EncrypterBase
+from backathon.exceptions import CorruptedRepository
 from backathon.models import Object, ObjectHeader, ObjIDType
 from backathon.proftools import perf_block
 from backathon.storage.base import StorageBase
@@ -18,6 +22,7 @@ from backathon.storage.base import StorageBase
 COPY_BUFSIZE = 1024 * 1024
 
 
+@dataclass
 class RawPayload:
     """A "raw" payload is a byte string representing a serialized Object before
     it has been compressed or encrypted
@@ -29,19 +34,73 @@ class RawPayload:
     header: ObjectHeader
     encrypter: EncrypterBase
     raw_payload_buf: Buffer
+    body_start: int
     objid: ObjIDType
 
     @classmethod
     def from_obj_req(cls, obj_req: ObjectRequest, encrypter: EncrypterBase) -> Self:
-        self = cls()
-        self.header = obj_req.header
-        self.encrypter = encrypter
+        """Makes a new RawPayload from an object request and an encrypter
 
-        self.raw_payload_buf = self.make_obj_payload(obj_req)
+        This is used when preparing newly constructed objects for upload
+        """
+        header = obj_req.header
+
+        body_start, raw_payload_buf = cls.make_obj_payload(obj_req)
 
         with perf_block("make_objid"):
-            self.objid = encrypter.make_objid(self.raw_payload_buf)
-        return self
+            objid = encrypter.make_objid(raw_payload_buf)
+        return cls(
+            header=header,
+            encrypter=encrypter,
+            raw_payload_buf=raw_payload_buf,
+            body_start=body_start,
+            objid=objid,
+        )
+
+    @classmethod
+    def from_encrypted_payload(
+        cls, objid: ObjIDType, enc_payload: IO[bytes], encrypter: EncrypterBase
+    ) -> Self:
+        """Reconstructs the raw payload from an encrypted payload, decrypting it using
+        the given encrypter
+
+        This is used when downloading an object from the remote repository.
+
+        This method checks the integrity of the payload, both via the encrypter's own
+        message authentication, and by verifying the objid. Will raise a CorruptedRepository
+        if the object's integrity checks do not pass.
+        """
+        decrypted = encrypter.decrypt(enc_payload)
+        enc_payload.close()
+        decompressed = decompress_payload(io.BytesIO(decrypted))
+
+        # Check obj id
+        computed_objid = encrypter.make_objid(decompressed)
+        if not hmac.compare_digest(computed_objid, objid):
+            raise CorruptedRepository(f"Corrupted Object: {objid.hex()}")
+
+        decompressed_stream = io.BytesIO(decompressed)
+        header = ObjectHeader.from_stream(decompressed_stream)
+
+        # Verify the body length matches the header's reported length
+        body_start = decompressed_stream.tell()
+        decompressed_stream.seek(0, os.SEEK_END)
+        body_end = decompressed_stream.tell()
+        if body_end - body_start != header.length:
+            raise CorruptedRepository(f"Object length mismatch: {objid.hex()}")
+
+        return cls(
+            objid=objid,
+            header=header,
+            raw_payload_buf=decompressed,
+            body_start=body_start,
+            encrypter=encrypter,
+        )
+
+    @property
+    def body(self) -> Buffer:
+        """Returns just the body of this object as a buffer"""
+        return memoryview(self.raw_payload_buf)[self.body_start :]
 
     def get_children(self) -> Sequence[tuple[ObjIDType, ObjIDType, bytes | None]]:
         """Returns the child relations for this object, used to add rows to the
@@ -59,6 +118,8 @@ class RawPayload:
         """Perform final compression and encryption, upload the payload, and return a new
         Object instance representing what was uploaded
 
+        Calling code will typically need to save the returned Object instance to the database
+
         """
         buf = compress_payload(self.raw_payload_buf)
         final_payload = self.encrypter.encrypt(buf)
@@ -75,10 +136,12 @@ class RawPayload:
         )
 
     @staticmethod
-    def make_obj_payload(obj_req: ObjectRequest) -> Buffer:
+    def make_obj_payload(obj_req: ObjectRequest) -> tuple[int, Buffer]:
         """Construct a serialized object buffer from an ObjectRequest
 
-        The result is the uncompressed, unencrypted byte string for the object
+        The resulting buffer is the uncompressed, unencrypted byte string for the object
+
+        returns (body start position, raw payload buffer)
         """
 
         if (
@@ -89,13 +152,14 @@ class RawPayload:
 
         raw_payload = io.BytesIO()
         raw_payload.write(obj_req.header.model_dump_msgpack())
+        body_start = raw_payload.tell()
         if obj_req.body is not None:
             if isinstance(obj_req.body, io.BytesIO):
                 raw_payload.write(obj_req.body.getbuffer())
             else:
                 shutil.copyfileobj(obj_req.body, raw_payload)
         raw_payload.seek(0)
-        return raw_payload.getbuffer()
+        return body_start, raw_payload.getbuffer()
 
 
 def compress_payload(buf: Buffer) -> Buffer:

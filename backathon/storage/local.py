@@ -1,11 +1,12 @@
+import os
 import pathlib
 from os import PathLike
-from typing import IO, Iterator
+from typing import Iterator
 
 from pydantic import BaseModel
 
 from backathon.encryption.base import Payload
-from backathon.storage.base import StorageBase
+from backathon.storage.base import DownloadedFile, StorageBase
 
 
 class LocalStorageConfig(BaseModel):
@@ -29,9 +30,16 @@ class LocalStorage(StorageBase[LocalStorageConfig]):
         with full_path.open("wb") as fobj:
             fobj.write(payload.buf)
 
-    def get_object(self, path: str | PathLike[str]) -> IO[bytes]:
+    def get_object(self, path: str | PathLike[str]) -> DownloadedFile:
         full_path = self._make_full_path(path)
-        return full_path.open("rb")
+        stat_info = os.stat(full_path)
+        fobj = full_path.open("rb")
+        return DownloadedFile(
+            path=os.fspath(path),
+            size=stat_info.st_size,
+            stream=fobj,
+            sha1=None,
+        )
 
     def delete_object(self, path: str | PathLike[str]):
         full_path = self._make_full_path(path)

@@ -6,7 +6,7 @@ from typing import IO, Any, cast
 from pydantic import BaseModel
 from typing_extensions import Buffer, Self
 
-from backathon.encryption.base import EncrypterBase, Payload, UnlockCallback
+from backathon.encryption.base import EncrypterBase, Payload
 from backathon.models import ObjIDType
 
 
@@ -38,10 +38,8 @@ class NullEncrypter(EncrypterBase[NullConfig]):
         size = len(memoryview(buf))
         return Payload(buf=buf, size=size, sha1=hasher.digest())
 
-    def decrypt(
-        self, buf: IO[bytes], unlock_callback: UnlockCallback | None = None
-    ) -> IO[bytes]:
-        return buf
+    def decrypt(self, buf: IO[bytes]) -> Buffer:
+        return buf.read()
 
     def make_objid(self, buf: Buffer) -> ObjIDType:
         hasher = hashlib.blake2b(digest_size=32)

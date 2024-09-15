@@ -54,9 +54,7 @@ class EncrypterBase(ABC, Generic[C]):
         ...
 
     @abstractmethod
-    def decrypt(
-        self, buf: IO[bytes], unlock_callback: UnlockCallback | None = None
-    ) -> IO[bytes]:
+    def decrypt(self, buf: IO[bytes]) -> Buffer:
         ...
 
     @abstractmethod

@@ -150,15 +150,10 @@ class Object(BaseModel):
             except sqlite3.IntegrityError:
                 # This can happen if two backup threads try to upload an identical
                 # object, which isn't too unlikely in practice. Since they are
-                # cryptographically guaranteed to be identical (including relations),
-                # we can just query that one back out and return it.
+                # cryptographically guaranteed to be identical (including relations).
                 # The fact that the object was uploaded twice is an unfortunate
                 # inefficiency but I believe it won't be too bad overall.
-                return next(
-                    db.query(
-                        type(self), "SELECT * FROM objects WHERE objid=?", (self.objid,)
-                    )
-                )
+                return
 
             # Add object relations
             cursor.executemany(

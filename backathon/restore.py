@@ -1,50 +1,50 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 import pathlib
-import shutil
-from typing import IO, Awaitable, Callable
+from typing import IO, TYPE_CHECKING
+
+from typing_extensions import Buffer
 
 from backathon.models import ObjectHeader, ObjectStats, ObjectType, ObjIDType
 
-logger = logging.getLogger("backathon.restore")
+if TYPE_CHECKING:
+    from backathon.repository import ObjGetter
 
-GetObject = Callable[[ObjIDType], Awaitable[tuple[ObjectHeader, IO[bytes]]]]
+logger = logging.getLogger("backathon.restore")
 
 
 async def restore_obj(
     objid: ObjIDType,
     path: pathlib.Path,
-    get_object: GetObject,
+    get_object: ObjGetter,
 ):
     """Restore the given object to the given path
 
     If the object is a directory, recursively restores all directory entries within
 
-    The given get_object() should return the decrypted, decompressed byte stream
-    from the remote repository. get_object() is also responsible for verifying the
-    integrity, including checking the object ID.
     """
-    header, body = await get_object(objid)
+    raw_payload = await get_object(objid)
+    header = raw_payload.header
+    body = raw_payload.body
 
-    try:
-        if header.type == ObjectType.FILE:
-            return await _restore_file(path, header, body, get_object)
-        elif header.type == ObjectType.TREE:
-            return await _restore_dir(path, header, get_object)
-        elif header.type == ObjectType.SYMLINK:
-            return await _restore_symlink(path, header, body)
-        else:
-            raise ValueError(f"Cannot restore objects of type {header.type}")
-    finally:
-        body.close()
+    if header.type == ObjectType.FILE:
+        return await _restore_file(path, header, body, get_object)
+    elif header.type == ObjectType.TREE:
+        return await _restore_dir(path, header, get_object)
+    elif header.type == ObjectType.SYMLINK:
+        return await _restore_symlink(path, header, body)
+    else:
+        raise ValueError(f"Cannot restore objects of type {header.type}")
 
 
 async def _restore_file(
     path: pathlib.Path,
     header: ObjectHeader,
-    body: IO[bytes],
-    get_object: GetObject,
+    body: Buffer,
+    get_object: ObjGetter,
 ):
     if path.exists():
         logger.error("%s: Already exists, refusing to overwrite", pathstr(path))
@@ -55,7 +55,7 @@ async def _restore_file(
     try:
         if header.blobs is None:
             with path.open("wb") as fout:
-                shutil.copyfileobj(body, fout)
+                fout.write(body)
         else:
             with path.open("wb") as fobj:
                 coros = [
@@ -74,28 +74,26 @@ async def _restore_file(
 
 
 async def _write_blob(
-    path: pathlib.Path, fobj: IO[bytes], pos: int, objid: ObjIDType, get_object: GetObject
+    path: pathlib.Path, fobj: IO[bytes], pos: int, objid: ObjIDType, get_object: ObjGetter
 ):
-    header, body = await get_object(objid)
+    raw_payload = await get_object(objid)
+    header = raw_payload.header
+
+    if header.type != ObjectType.BLOB:
+        logger.error("Expected blob object: %s", objid.hex())
+        return
 
     try:
-        if header.type != ObjectType.BLOB:
-            logger.error("Expected blob object: %s", objid.hex())
-            return
-
-        try:
-            fobj.seek(pos)
-            shutil.copyfileobj(body, fobj)
-        except OSError as e:
-            logger.error("%s: Error writing to file", pathstr(path))
-    finally:
-        body.close()
+        fobj.seek(pos)
+        fobj.write(raw_payload.body)
+    except OSError as e:
+        logger.error("%s: Error writing to file: %s", pathstr(path), e)
 
 
 async def _restore_dir(
     path: pathlib.Path,
     header: ObjectHeader,
-    get_object: GetObject,
+    get_object: ObjGetter,
 ):
     if path.exists() and not path.is_dir():
         logger.error(
@@ -134,8 +132,8 @@ async def _restore_dir(
     )
 
 
-async def _restore_symlink(path: pathlib.Path, header: ObjectHeader, body: IO[bytes]):
-    target: bytes = body.read()
+async def _restore_symlink(path: pathlib.Path, header: ObjectHeader, body: Buffer):
+    target = bytes(body)
     if path.exists():
         logger.warning("%s: Path already exists. Not overriding", pathstr(path))
         return

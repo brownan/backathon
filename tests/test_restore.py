@@ -1,4 +1,5 @@
 import hashlib
+import io
 import logging
 import os
 import pathlib
@@ -164,7 +165,7 @@ class TestRestore(BackathonTest):
             if self.password:
                 encrypter.unlock(self.password)
             fobj = encrypter.decrypt(fobj)
-            header = models.ObjectHeader.from_stream(fobj)
+            header = models.ObjectHeader.from_stream(io.BytesIO(fobj))
         assert header.stats is not None
         atime = header.stats.atime
 

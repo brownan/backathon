@@ -1,12 +1,23 @@
 from abc import ABC, abstractmethod
 from os import PathLike
-from typing import IO, Generic, Iterator, Type, TypeVar
+from typing import IO, Generic, Iterator, NamedTuple, Type, TypeVar
 
 from pydantic import BaseModel
 
 from backathon.encryption.base import Payload
 
 C = TypeVar("C", bound=BaseModel)
+
+
+class DownloadedFile(NamedTuple):
+    # Remote repo path that was downloaded
+    path: str
+    # Number of bytes that were downloaded
+    size: int
+    # Stream open for reading
+    stream: IO[bytes]
+    # sha1 of the downloaded bytes
+    sha1: bytes | None
 
 
 class StorageBase(ABC, Generic[C]):
@@ -25,7 +36,7 @@ class StorageBase(ABC, Generic[C]):
         ...
 
     @abstractmethod
-    def get_object(self, path: str | PathLike[str]) -> IO[bytes]:
+    def get_object(self, path: str | PathLike[str]) -> DownloadedFile:
         ...
 
     @abstractmethod
