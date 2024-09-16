@@ -1,13 +1,17 @@
 import collections
 import contextlib
 import time
-from contextlib import ContextDecorator, nullcontext
 
 perf_data: list[tuple[str, float]] = []
 
+_enabled = False
+
 
 @contextlib.contextmanager
-def _perf_block_impl(name: str):
+def perf_block(name: str):
+    if not _enabled:
+        yield
+        return
     t1 = time.perf_counter()
     try:
         yield
@@ -16,12 +20,9 @@ def _perf_block_impl(name: str):
         perf_data.append((name, t2 - t1))
 
 
-perf_block = type("NullContext", (nullcontext, ContextDecorator), {})
-
-
 def enable_perf():
-    global perf_block
-    perf_block = _perf_block_impl
+    global _enabled
+    _enabled = True
 
 
 def print_perf_data():
@@ -31,10 +32,15 @@ def print_perf_data():
         agg_times[name] += t
         agg_count[name] += 1
 
-    max_name = max(len(n) for n in agg_times)
+    if agg_times:
+        max_name = max(len(n) for n in agg_times)
+    else:
+        max_name = 5
     print(
         "{:{}} {:5} {:10} {:10}".format("Category", max_name, "Count", "Time (s)", "C/s")
     )
+    if not agg_times:
+        print("No performance data captured")
     for name, t in sorted(agg_times.items()):
         count = agg_count[name]
         parts = name.split(".")

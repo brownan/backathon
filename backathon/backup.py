@@ -141,6 +141,7 @@ class Backup:
 
     async def backup(self):
         with ExitStack() as exitstack:
+            exitstack.enter_context(perf_block("backup"))
             cursor = exitstack.enter_context(self.db.cursor())
 
             def on_cancel(exc_type, exc_val, tb):

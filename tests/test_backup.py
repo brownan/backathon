@@ -9,9 +9,10 @@ import logging
 import os
 import stat
 import sys
-import zlib
 from typing import IO
 from unittest import mock
+
+import lz4.frame
 
 import backathon
 from backathon import models, repoobject
@@ -582,9 +583,9 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         obj_path = self.repopath(repoobject.make_object_path(entry.objid))
         contents = obj_path.read_bytes()
 
-        # Should start with the zlib magic byte
-        self.assertEqual(0x78, contents[0])
-        decompressed = zlib.decompress(contents)
+        # Should start with the lz4 magic byte
+        self.assertEqual(b"\x04\x22\x4d\x18", contents[:4])
+        decompressed = lz4.frame.decompress(contents)
         buf = io.BytesIO(decompressed)
         header = models.ObjectHeader.from_stream(buf)
         self.assertEqual(ObjectType.FILE, header.type)

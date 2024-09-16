@@ -22,6 +22,8 @@ repos:
           - msgpack
           - PyNaCl
           - b2sdk
+          - lz4
+          - yappi
 
 
 -   repo: https://github.com/pre-commit/mirrors-prettier

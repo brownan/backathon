@@ -110,7 +110,7 @@ async def rebuild_object_index(
                 progress.corrupt_objects += 1
                 continue
 
-            # See if this object is in our local repo
+            # See if this object is in our local database
             db_object = next(
                 db.query(Object, "SELECT * FROM objects WHERE objid=?", (objid,)), None
             )
@@ -126,8 +126,8 @@ async def rebuild_object_index(
             )
 
             if db_object is None:
-                # No object in the repository matching this objid was found
-                # Add it to the local database
+                # No object in the local database was found
+                # Add it
                 progress.new_objects += 1
                 remote_obj.add_to_database(
                     db,

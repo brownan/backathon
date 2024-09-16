@@ -52,6 +52,8 @@ def main(test_pattern: str):
 
     yappi.set_clock_type("wall")
 
+    proftools.enable_perf()
+
     with ExitStack() as context:
         backup_dir = pathlib.Path(context.enter_context(tempfile.TemporaryDirectory()))
         context.callback(lambda: logger.info("Removing backup dir..."))
@@ -78,7 +80,7 @@ def main(test_pattern: str):
                 testgen(
                     testdir,
                     lambda count, total: progress.update(
-                        task_id, completed=count, total=total
+                        task_id, completed=count, total=total  # noqa: B023
                     ),
                 )
                 test_definitions[testname] = testdir

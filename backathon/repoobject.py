@@ -9,6 +9,7 @@ import zlib
 from dataclasses import dataclass
 from typing import IO, Self, Sequence
 
+import lz4.frame
 from typing_extensions import Buffer
 
 from backathon.backup import ObjectRequest
@@ -172,8 +173,8 @@ def compress_payload(buf: Buffer) -> Buffer:
     length = len(memoryview(buf))
     if length < 4096:
         return buf
-    with perf_block("zlib"):
-        compressed_bytes = zlib.compress(buf)
+    with perf_block("lz4"):
+        compressed_bytes = lz4.frame.compress(buf)
     if len(compressed_bytes) < length:
         return compressed_bytes
     else:
@@ -187,15 +188,17 @@ def decompress_payload(compressed: IO[bytes]) -> Buffer:
     the original buffer is returned
 
     """
-    # We can guarantee positive identification of compression with the first byte because
-    # the only messages we compress are msgpack "map" types, which always begin with
+    # We can guarantee positive identification of compression because the compression
+    # signature bytes don't overlap with our msgpack messages.
+    # The only messages we compress are msgpack "map" types, which always begin with
     # 0x80 - 0x8f, 0xde, or 0xdf.
-    # Note: only the msgpack serialization of the positive 7-bit integer 120 serializes
-    # to the byte 0x78
 
     if isinstance(compressed, io.BytesIO):
         # Optimized path if we get an in-memory buffer
         buf = compressed.getbuffer()
+        if buf[:4] == b"\x04\x22\x4d\x18":
+            # lz4 frame format
+            return lz4.frame.decompress(buf)
         if buf[0] == 0x78:
             # zlib identification marker
             return zlib.decompress(buf)
