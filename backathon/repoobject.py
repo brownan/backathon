@@ -26,9 +26,13 @@ COPY_BUFSIZE = 1024 * 1024
 @dataclass
 class RawPayload:
     """A "raw" payload is a byte string representing a serialized Object before
-    it has been compressed or encrypted
+    it has been compressed or encrypted.
 
-    This class is bound to a particular encrypter which defines the object's ID.
+    Instances of this class hold the raw object bytestring, as well as
+    decoded information about the object such as the header.
+
+    This class is bound to a particular encrypter which defines the object's ID. This class
+    has the functionality for creating the encrypted payload using the bound encrypter.
 
     """
 
@@ -50,6 +54,7 @@ class RawPayload:
 
         with perf_block("make_objid"):
             objid = encrypter.make_objid(raw_payload_buf)
+
         return cls(
             header=header,
             encrypter=encrypter,
