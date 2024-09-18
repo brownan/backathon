@@ -66,6 +66,9 @@ class Backathon:
 
         return cls(db)
 
+    def close(self):
+        self.db.close()
+
     def scan(
         self,
         skip_existing=False,

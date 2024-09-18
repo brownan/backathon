@@ -27,7 +27,6 @@ from pydantic_core.core_schema import (
 from typing_extensions import Self
 
 import backathon.db
-from backathon.db import Database
 
 
 def bytes_validator(
@@ -127,7 +126,9 @@ class Object(BaseModel):
         return f"<Object {self.type and self.type.name} {self.objid.hex()}>"
 
     def add_to_database(
-        self, db: Database, children: Sequence[tuple[ObjIDType, ObjIDType, bytes | None]]
+        self,
+        db: backathon.db.Database,
+        children: Sequence[tuple[ObjIDType, ObjIDType, bytes | None]],
     ):
         """Adds this object and its relations to the database"""
         with db.atomic_or_savepoint(), db.cursor() as cursor:

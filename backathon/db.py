@@ -137,6 +137,9 @@ class Database:
 
         cursor.close()
 
+    def close(self):
+        self.conn.close()
+
     @contextmanager
     def cursor(self, *, retdict: bool = False) -> Iterator[sqlite3.Cursor]:
         c = self.conn.cursor()

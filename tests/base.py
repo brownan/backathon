@@ -54,10 +54,12 @@ class BackathonTest(TestCase):
         return path
 
     def init_basic_repo(self, encrypter: EncrypterBase | None = None) -> Backathon:
+        self.encrypter = encrypter or NullEncrypter(NullConfig())
+        self.storage = LocalStorage(LocalStorageConfig(base_path=self.repodir))
         back = Backathon.initialize(
             self.db_path,
-            LocalStorage(LocalStorageConfig(base_path=self.repodir)),
-            encrypter or NullEncrypter(NullConfig()),
+            self.storage,
+            self.encrypter,
         )
         back.db.config_set("enable-compression", False)
         # For these tests, always inline files unless the test specifies otherwise.

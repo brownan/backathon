@@ -9,7 +9,6 @@ from backathon.encryption.base import EncrypterBase
 from backathon.exceptions import CorruptedRepository
 from backathon.models import Object, ObjectRelation, ObjIDType, Snapshot
 from backathon.repoobject import RawPayload, make_object_path
-from backathon.repository import make_snapshot_putter
 from backathon.storage.base import StorageBase
 
 logger = logging.getLogger("backathon.recover")
@@ -36,6 +35,12 @@ class RebuildProgress:
     extra_relations: int = 0
 
 
+async def init_local_from_remote(
+    storage: StorageBase, password_callback: Callable[[], str]
+) -> Database:
+    raise NotImplementedError
+
+
 async def recover_encryption(storage: StorageBase) -> dict:
     """Downloads the encryption recovery data"""
     data = await asyncio.to_thread(storage.get_object, "backathon.json")
@@ -49,48 +54,54 @@ async def recover_encryption(storage: StorageBase) -> dict:
     return marker_data["encryption"]
 
 
-async def rebuild_object_index(
+async def repair_object_index(
     db: Database,
-    encrypter: EncrypterBase,
     storage: StorageBase,
-    progress_callback: Callable[[RebuildProgress], None],
+    encrypter: EncrypterBase,
+    progress_callback: Callable[[RebuildProgress], None] | None = None,
 ):
     progress = RebuildProgress()
-    put_snapshot = make_snapshot_putter(db, encrypter, storage)
 
-    # First, get all the snapshot objects
-    snapshots: list[Snapshot] = []
+    # Get all the snapshot objects in the remote repo
+    remote_snapshots: list[Snapshot] = []
     for fname in storage.list_dir("snapshots"):
         path = "snapshots/" + fname
-        data = storage.get_object(path)
-        decrypted = encrypter.decrypt(data.stream)
+        with storage.get_object(path) as data:
+            decrypted = encrypter.decrypt(data.stream)
         snapshot = Snapshot.model_validate_json(bytes(decrypted))
-        snapshots.append(snapshot)
+        remote_snapshots.append(snapshot)
         progress.seen_snapshots += 1
 
-    progress_callback(progress)
+    if progress_callback:
+        progress_callback(progress)
 
-    # Check if each one is already in the database. If not, add it.
-    existing_snapshots = list(db.query(Snapshot, "SELECT * FROM snapshots"))
-    for snapshot in snapshots:
-        found = any(snapshot == s for s in existing_snapshots)
-        if not found:
-            logger.info("Found new snapshot: %s - %s", snapshot.timestamp, snapshot.path)
-            put_snapshot(snapshot)
-            progress.new_snapshots += 1
-
-    progress_callback(progress)
-
-    # Start the process of traversing all the objects starting at each snapshot root
+    # Note: we take advantage of sqlite's deferred foreign keys within this atomic block.
     with db.atomic(), CheckedObjects(db) as checked_objects, db.cursor() as cursor:
+        # Check if each one is already in the database. If not, add it.
+        local_snapshots = list(db.query(Snapshot, "SELECT * FROM snapshots"))
+        for snapshot in remote_snapshots:
+            found = any(snapshot == s for s in local_snapshots)
+            if not found:
+                logger.info(
+                    "Found new snapshot: %s - %s", snapshot.timestamp, snapshot.path
+                )
+                progress.new_snapshots += 1
+                cursor.execute(
+                    "INSERT INTO snapshots (path, root, timestamp) VALUES (?,?,?)",
+                    (snapshot.path, snapshot.root, snapshot.timestamp),
+                )
+
+        # Start the process of traversing all the objects starting at each snapshot root
         # We do a depth first search, to save on memory
         # Items we've checked go into this temporary table, since it can grow very large
         # and we don't want to take too much memory. Sqlite will spill temporary tables to
         # disk if they exceed its page cache.
-
-        to_check: list[ObjIDType] = [snapshot.root for snapshot in snapshots]
+        to_check: list[ObjIDType] = [snapshot.root for snapshot in remote_snapshots]
         while to_check:
             objid = to_check.pop()
+
+            if progress_callback:
+                progress_callback(progress)
 
             try:
                 downloaded_obj = await asyncio.to_thread(
@@ -99,6 +110,7 @@ async def rebuild_object_index(
             except FileNotFoundError:
                 logger.warning("Missing object: %s", objid.hex())
                 progress.missing_objects += 1
+                cursor.execute("DELETE FROM objects WHERE objid=?", (objid,))
                 continue
 
             try:
@@ -108,10 +120,11 @@ async def rebuild_object_index(
             except CorruptedRepository:
                 logger.warning("Object corrupted: %s", objid.hex())
                 progress.corrupt_objects += 1
+                cursor.execute("DELETE FROM objects WHERE objid=?", (objid,))
                 continue
 
             # See if this object is in our local database
-            db_object = next(
+            local_object = next(
                 db.query(Object, "SELECT * FROM objects WHERE objid=?", (objid,)), None
             )
 
@@ -125,7 +138,7 @@ async def rebuild_object_index(
                 sha1=downloaded_obj.sha1,
             )
 
-            if db_object is None:
+            if local_object is None:
                 # No object in the local database was found
                 # Add it
                 progress.new_objects += 1
@@ -133,7 +146,7 @@ async def rebuild_object_index(
                     db,
                     raw_payload.get_children(),
                 )
-            elif db_object != remote_obj:
+            elif local_object != remote_obj:
                 # An object was in the local database, but it doesn't match what we read from
                 # the remote repository
                 logger.warning(
@@ -147,7 +160,7 @@ async def rebuild_object_index(
                 )
 
             # Next phase: check this object's relations
-            db_relations = {
+            local_relations = {
                 (r.child, r.name)
                 for r in db.query(
                     ObjectRelation,
@@ -156,8 +169,20 @@ async def rebuild_object_index(
                 )
             }
 
+            # Parse the object's header to see what other objects it references
             remote_relations = set()
             for _, child_objid, name in raw_payload.get_children():
+                # Check that each expected relation is in our local db and that the
+                # name is correct
+                key = (child_objid, name)
+                remote_relations.add(key)
+                if key not in local_relations:
+                    progress.missing_relations += 1
+                    cursor.execute(
+                        "INSERT INTO object_relations (parent, child, name) VALUES (?,?,?)",
+                        (objid, child_objid, name),
+                    )
+
                 # Add this child to the queue of objects to check
                 # We only need to check each object once, even if it's referenced multiple
                 # times. If we add a reference to an object and later we discover it
@@ -167,20 +192,9 @@ async def rebuild_object_index(
                 checked_objects.add(child_objid)
                 to_check.append(child_objid)
 
-                # Check that each expected relation is in our local db and that the
-                # name is correct
-                key = (child_objid, name)
-                remote_relations.add(key)
-                if key not in db_relations:
-                    progress.missing_relations += 1
-                    cursor.execute(
-                        "INSERT INTO object_relations (parent, child, name) VALUES (?,?,?)",
-                        (objid, child_objid, name),
-                    )
-
             # Check if any relations in our local database aren't supposed to be
             # there
-            for child_objid, name in db_relations - remote_relations:
+            for child_objid, name in local_relations - remote_relations:
                 progress.extra_relations += 1
                 cursor.execute(
                     """DELETE FROM object_relations WHERE parent=? AND child=? AND name=?""",
@@ -198,6 +212,18 @@ async def rebuild_object_index(
             (SELECT objid FROM objects)
             """
         )
+
+        # Same with snapshots missing their root
+        # TODO: log the snapshots that were removed due to missing roots
+        cursor.execute(
+            """
+            DELETE FROM snapshots WHERE root NOT IN
+            (SELECT objid FROM objects)
+            """
+        )
+
+        if progress_callback:
+            progress_callback(progress)
 
 
 class CheckedObjects:

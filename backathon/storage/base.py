@@ -19,6 +19,15 @@ class DownloadedFile(NamedTuple):
     # sha1 of the downloaded bytes
     sha1: bytes | None
 
+    def close(self):
+        self.stream.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
 
 class StorageBase(ABC, Generic[C]):
     config: C
