@@ -36,6 +36,40 @@ class NaclConfig(BaseModel):
 
 
 class NaclEncrypter(EncrypterBase[NaclConfig]):
+    """An encrypter using the Nacl library
+
+    This encrypter uses the NaCl SealedBox abstraction to encrypt files at rest.
+    This construction uses:
+    * X25519 for the key exchange
+    * XSalsa20 for the encryption
+    * Poly1305 for the authentication
+
+    The keys used for the sealed box are a public-private keypair generated at the time
+    of the repository creation. The public key is stored in plaintext locally, allowing
+    encryption of files without a password from the local machine. The private key is
+    stored encrypted both locally and in the remote repository, requiring the password to
+    decrypt files.
+
+    Note: the "public" key is not stored in plain text other than on the local machine. It
+    should still be kept secret (not stored in plain text anywhere else) to ensure other
+    actors cannot upload valid objects to the repository. See the threat model documentation
+    for more information.
+
+    The private key is encrypted using the NaCl SecretBox abstraction.
+    This construction uses:
+    * XSalsa20 stream cipher for encryption
+    * Poly1305 MAC for authentication
+
+    The key used for the SecretBox is derived from the user's password using the
+    argon2id key derivation function. The iterations and memory parameters use the
+    recommended values for "sensitive" configurations. At the time of writing, this
+    is 4 iterations and 1024MiB of memory, and takes around 3.5 seconds on a typical machine.
+
+    Additionally, objects are identified and addressed using a hash of their unencrypted
+    contents. The hash algorithm used is blake2b with a 32 byte hash size.
+    The key used is the sealed box's public key.
+    """
+
     DEFAULT_OPSLIMIT = nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE
     DEFAULT_MEMLIMIT = nacl.pwhash.argon2id.MEMLIMIT_SENSITIVE
 
@@ -87,7 +121,12 @@ class NaclEncrypter(EncrypterBase[NaclConfig]):
 
     @staticmethod
     def _derive_symmetric_key(password: str, salt: bytes, ops: int, mem: int) -> bytes:
-        """Derives the key used to encrypt the private part of the public/private key"""
+        """Derives the key used to encrypt the private part of the public/private key
+
+        Note, this is a CPU intensive operation. By design, it will take a couple seconds
+        or so.
+
+        """
         logger.debug("Deriving key from password. This may take a moment...")
         return nacl.pwhash.argon2id.kdf(
             nacl.secret.SecretBox.KEY_SIZE,
