@@ -9,6 +9,17 @@ from backathon.encryption.base import Payload
 C = TypeVar("C", bound=BaseModel)
 
 
+class DownloadedFileContext:
+    def __init__(self, f: "DownloadedFile"):
+        self._f = f
+
+    def __enter__(self):
+        return self._f
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._f.stream.close()
+
+
 class DownloadedFile(NamedTuple):
     # Remote repo path that was downloaded
     path: str
@@ -18,15 +29,6 @@ class DownloadedFile(NamedTuple):
     stream: IO[bytes]
     # sha1 of the downloaded bytes
     sha1: bytes | None
-
-    def close(self):
-        self.stream.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
 
 
 class StorageBase(ABC, Generic[C]):
@@ -45,7 +47,7 @@ class StorageBase(ABC, Generic[C]):
         ...
 
     @abstractmethod
-    def get_object(self, path: str | PathLike[str]) -> DownloadedFile:
+    def get_object(self, path: str | PathLike[str]) -> DownloadedFileContext:
         ...
 
     @abstractmethod

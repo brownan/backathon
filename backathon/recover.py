@@ -42,9 +42,12 @@ async def init_local_from_remote(
 
 
 async def recover_encryption(storage: StorageBase) -> dict:
-    """Downloads the encryption recovery data"""
-    data = await asyncio.to_thread(storage.get_object, "backathon.json")
-    marker_data = json.load(data.stream)
+    """Downloads the encryption recovery data
+
+    This is called as one of the first steps in recovering data from a remote repository.
+    """
+    with await asyncio.to_thread(storage.get_object, "backathon.json") as data:
+        marker_data = json.load(data.stream)
     if not marker_data.get("name") == "Backathon Repository":
         raise CorruptedRepository("This does not look like a Backathon repository")
 
@@ -54,12 +57,37 @@ async def recover_encryption(storage: StorageBase) -> dict:
     return marker_data["encryption"]
 
 
+async def quick_check(db: Database, storage: StorageBase):
+    """Performs a quick check to make sure the expected objects are in the
+    remote database
+
+    If the remote database supports sha1 hashing, the sha1 hash is also checked.
+    Objects in the remote repo are not downloaded.
+
+    This could be run periodically for assurance of the remote repository's integrity,
+    but shouldn't be necessary unless corruption is expected or errors are reported
+    elsewhere.
+    """
+    raise NotImplementedError
+
+
 async def repair_object_index(
     db: Database,
     storage: StorageBase,
     encrypter: EncrypterBase,
     progress_callback: Callable[[RebuildProgress], None] | None = None,
-):
+) -> RebuildProgress:
+    """Synchronizes the local database from the remote repository
+
+    Remote snapshots are downloaded and added to the local database if not present.
+
+    Then starting at each snapshot's root, the tree of objects in the remote repository
+    is traversed. Every object is downloaded, checked for integrity, and its header parsed.
+    Local database state is updated if there are any mismatches.
+
+    This operation is generally not necessary to run outside of a recovery scenario where
+    the local database is partially or completely lost.
+    """
     progress = RebuildProgress()
 
     # Get all the snapshot objects in the remote repo
@@ -104,7 +132,7 @@ async def repair_object_index(
                 progress_callback(progress)
 
             try:
-                downloaded_obj = await asyncio.to_thread(
+                downloaded_obj_ctx = await asyncio.to_thread(
                     storage.get_object, make_object_path(objid)
                 )
             except FileNotFoundError:
@@ -114,9 +142,10 @@ async def repair_object_index(
                 continue
 
             try:
-                raw_payload = RawPayload.from_encrypted_payload(
-                    objid, downloaded_obj.stream, encrypter
-                )
+                with downloaded_obj_ctx as downloaded_obj:
+                    raw_payload = RawPayload.from_encrypted_payload(
+                        objid, downloaded_obj.stream, encrypter
+                    )
             except CorruptedRepository:
                 logger.warning("Object corrupted: %s", objid.hex())
                 progress.corrupt_objects += 1
@@ -224,6 +253,7 @@ async def repair_object_index(
 
         if progress_callback:
             progress_callback(progress)
+    return progress
 
 
 class CheckedObjects:

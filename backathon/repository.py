@@ -8,12 +8,13 @@ import pathlib
 import secrets
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from typing import Awaitable, Callable, Type
+from typing import Awaitable, Callable, Type, cast
 
 from typing_extensions import Buffer, Self
 
 import backathon.backup
 import backathon.garbage
+import backathon.recover
 import backathon.restore
 from backathon import models, repoobject
 from backathon.backup import BackupProgressReport, ObjectRequest
@@ -21,6 +22,7 @@ from backathon.db import Database
 from backathon.encryption.base import EncrypterBase, Payload
 from backathon.encryption.nacl import NaclEncrypter
 from backathon.encryption.null import NullEncrypter
+from backathon.exceptions import CorruptedRepository
 from backathon.models import ObjIDType
 from backathon.proftools import perf_block
 from backathon.repoobject import RawPayload
@@ -50,7 +52,8 @@ class Backathon:
         marker_data = {
             "name": "Backathon Repository",
             "version": backathon.__version__,
-            "encryption": recovery_params,
+            "encrypter": encrypter.__class__.__name__,
+            "encrypter-params": recovery_params,
         }
         json_data = json.dumps(marker_data, indent=4).encode("utf-8")
         payload = Payload(json_data, len(json_data), hashlib.sha1(json_data).digest())
@@ -66,6 +69,58 @@ class Backathon:
 
         return cls(db)
 
+    @classmethod
+    async def recover(
+        cls,
+        db_path: str | os.PathLike[str],
+        storage: StorageBase,
+        password: str | None = None,
+    ) -> Self:
+        """Initializes a new local database from an existing remote repository
+
+        If the remote repository requires encryption, the appropriate encrypter will be
+        initialized with the given password
+
+        """
+        db_path = pathlib.Path(db_path)
+        if db_path.exists():
+            raise FileExistsError(f"Local config database already exists: {db_path}")
+
+        with await asyncio.to_thread(storage.get_object, "backathon.json") as data:
+            marker_data = json.load(data.stream)
+
+        if (
+            not isinstance(marker_data, dict)
+            or marker_data.get("name") != "Backathon Repository"
+        ):
+            raise CorruptedRepository("This does not look like a Backathon repository")
+
+        encrypter_name = cast(str, marker_data.get("encrypter"))
+        encryption_recovery_params = cast(dict, marker_data.get("encrypter-params"))
+
+        if encrypter_name == "NullEncrypter":
+            enc_cls = NullEncrypter
+        elif encrypter_name == "NaclEncrypter":
+            enc_cls = NaclEncrypter
+            logger.info(
+                "Repository found. Encryption parameters: %s", encryption_recovery_params
+            )
+            logger.info("Decrypting keys using the given password...")
+        else:
+            raise CorruptedRepository(f"Unknown encrypter: {encrypter_name}")
+
+        encrypter = enc_cls.from_recovery_state(
+            encryption_recovery_params,
+            password or "",
+        )
+
+        logger.info("Creating local database")
+        return cls.initialize(
+            db_path,
+            storage,
+            encrypter,
+        )
+
     def close(self):
         self.db.close()
 
@@ -77,8 +132,14 @@ class Backathon:
     ):
         """Scans the backup set
 
-        The backup set is the set of files and directories starting at the
+        The backup set is the set of all local files and directories starting at the
         root paths.
+
+        This method scans all local files that are to be backed up, and marks in the
+        local database all files and directories that have changed since last backup.
+        This informs the backup routines of what files need backing up.
+
+        This should be run before every backup.
 
         See more info in the backathon.scan module
         """
@@ -351,12 +412,12 @@ def make_obj_getter(encrypter: EncrypterBase, storage: StorageBase) -> ObjGetter
     """
 
     def get_and_decrypt(objid: ObjIDType) -> RawPayload:
-        downloaded_file = storage.get_object(repoobject.make_object_path(objid))
-        return RawPayload.from_encrypted_payload(
-            objid,
-            downloaded_file.stream,
-            encrypter,
-        )
+        with storage.get_object(repoobject.make_object_path(objid)) as downloaded_file:
+            return RawPayload.from_encrypted_payload(
+                objid,
+                downloaded_file.stream,
+                encrypter,
+            )
 
     async def get_object(objid: ObjIDType) -> RawPayload:
         return await asyncio.to_thread(get_and_decrypt, objid)

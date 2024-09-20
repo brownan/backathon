@@ -622,4 +622,5 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         )
 
         # No encryption is used here, but the key should exist
-        self.assertIsNone(data["encryption"])
+        self.assertEqual(data["encrypter"], "NullEncrypter")
+        self.assertIsNone(data["encrypter-params"])
