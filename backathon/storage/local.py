@@ -1,3 +1,5 @@
+import hashlib
+import mmap
 import os
 import pathlib
 from os import PathLike
@@ -34,12 +36,14 @@ class LocalStorage(StorageBase[LocalStorageConfig]):
         full_path = self._make_full_path(path)
         stat_info = os.stat(full_path)
         fobj = full_path.open("rb")
+        with mmap.mmap(fobj.fileno(), 0, access=mmap.ACCESS_READ) as file_buf:
+            sha1 = hashlib.sha1(file_buf).digest()
         return DownloadedFileContext(
             DownloadedFile(
                 path=os.fspath(path),
                 size=stat_info.st_size,
                 stream=fobj,
-                sha1=None,
+                sha1=sha1,
             )
         )
 

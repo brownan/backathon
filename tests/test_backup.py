@@ -34,6 +34,10 @@ class ExpectedDir(dict[str, "ExpectedDir|ExpectedSymlink|ExpectedFile"]):
 
 
 def stream_len_and_sha1(stream: IO[bytes]) -> tuple[int, bytes]:
+    """Helper function to read the stream and get the length and sha1 hash
+    of the entire contents. Then rewinds the stream back to the original position
+
+    """
     hasher = hashlib.sha1()
     pos = stream.tell()
     stream.seek(0)
@@ -46,10 +50,16 @@ def stream_len_and_sha1(stream: IO[bytes]) -> tuple[int, bytes]:
 
 
 class AssertObjHelperMixin(BackathonTest):
+    """These helper methods are used to validate the contents of objects saved to a
+    remote repository, and that those objects have properly matching entries in the
+    local database
+
+    """
+
     back: Backathon
 
     def assert_relation_exists(self, parent: bytes, child: bytes, name: bytes | None):
-        """Asserts that a relation exists in the object_relations table"""
+        """Asserts that the given relation exists in the object_relations table"""
         with self.back.db.cursor() as cursor:
             if name is not None:
                 cursor.execute(
@@ -68,7 +78,10 @@ class AssertObjHelperMixin(BackathonTest):
         self, objid: ObjIDType, header: ObjectHeader, uploaded_size: int, sha1: bytes
     ):
         """Asserts that the given object exists in the database and is consistent
-        with the given object header
+        with the given object header, uploaded size, and sha1 hash
+
+        This also checks that relations named by the object header exist in the database
+        by calling into assert_relation_exists() for each object referenced in the header
 
         """
         db_obj = next(
@@ -99,6 +112,10 @@ class AssertObjHelperMixin(BackathonTest):
                 self.assert_relation_exists(objid, blobref.objid, None)
 
     def assert_correct_objid(self, objid: ObjIDType, stream: IO[bytes]):
+        """Reads the compressed, encrypted object from the given io stream and verifies
+        it matches the given objid
+
+        """
         pos = stream.tell()
         stream.seek(0)
 
@@ -114,7 +131,13 @@ class AssertObjHelperMixin(BackathonTest):
         stream.seek(pos)
 
     def get_blob_body(self, objid: ObjIDType) -> bytes:
-        """Returns the body of the given blob object"""
+        """Returns the body of the given blob object
+
+        Given an objid, reads that object from the repository. Verifies the read object
+        is of BLOB type, and verifies the header using assert_object_header(). Then returns
+        the body portion of the blob object.
+
+        """
         full_obj_path = self.repopath(repoobject.make_object_path(objid))
         with full_obj_path.open("rb") as stream:
             self.assert_correct_objid(objid, stream)
@@ -130,7 +153,18 @@ class AssertObjHelperMixin(BackathonTest):
             return body
 
     def assert_file_obj(self, objid: ObjIDType, expected_file: ExpectedFile):
-        """Asserts that the given object is a file object"""
+        """Reads the object from the repository with the given objid, and
+        verifies it matches the description given by expected_file
+
+        Given an objid, reads that object from the repository. Verifies the read object
+        is of FILE type, and verifies the header using assert_object_header().
+
+        Then it assembles the file contents by reading the FILE object body or any referenced
+        BLOB objects, and verifies the file contents match the given ExpectedFile.
+
+        Any referenced blob objects are validated and read using get_blob_body()
+
+        """
         full_obj_path = self.repopath(repoobject.make_object_path(objid))
         expected_file_bytes = expected_file.encode("utf-8")
         with full_obj_path.open("rb") as stream:
@@ -159,7 +193,14 @@ class AssertObjHelperMixin(BackathonTest):
                 self.assertEqual(expected_file_bytes, actual_file)
 
     def assert_symlink_obj(self, objid: ObjIDType, expected_symlink: ExpectedSymlink):
-        """Asserts that the given object is a symlink object"""
+        """Reads the object from the repository and verifies it has the expected symlink target
+
+        Given an objid, reads that object from the repository. Verifies the read object
+        is of SYMLINK type, and verifies the header using assert_object_header()
+
+        Then it reads the symlink target from the object body and verifies it matches the
+        given ExpectedSymlink.
+        """
         full_obj_path = self.repopath(repoobject.make_object_path(objid))
         with full_obj_path.open("rb") as stream:
             self.assert_correct_objid(objid, stream)
@@ -176,9 +217,15 @@ class AssertObjHelperMixin(BackathonTest):
             )
 
     def assert_dir_object(self, objid: ObjIDType, expected: ExpectedDir):
-        """Asserts that the given object is a dir object with the given
-        entries
+        """Reads the object from the repository and verifies it has the expected directory
+        contents.
 
+        Given an objid, reads thet object from the repository. Verifies the read object
+        is of TREE type, and verifies the header using assert_object_header()
+
+        Then it verifies the directory entries in the object header match the expected
+        entries described by the ExpectedDir parameter. Referenced directory entry
+        objects are then recursively validated using the assert_*_object() methods.
         """
         full_obj_path = self.repopath(repoobject.make_object_path(objid))
         with full_obj_path.open("rb") as stream:
@@ -224,6 +271,9 @@ class AssertObjHelperMixin(BackathonTest):
 
         Each snapshot dict usually has one entry: the root that was backed up. For tests
         involving multiple roots, the snapshot dict will have an entry for each one.
+
+        Given snapshots must be oredered in the order the snapshots were taken. Corresponding
+        snapshots in the paramaters and the database are correlated by timestamp ordering
         """
         with self.back.db.cursor() as cursor:
             cursor.execute("SELECT distinct timestamp FROM snapshots ORDER BY timestamp")

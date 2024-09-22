@@ -1,10 +1,14 @@
 import os
 import pathlib
 import tempfile
+import unittest.mock
 from contextlib import ExitStack
 from unittest import TestCase
 
+import nacl.pwhash.argon2id
+
 from backathon.encryption.base import EncrypterBase
+from backathon.encryption.nacl import NaclEncrypter
 from backathon.encryption.null import NullConfig, NullEncrypter
 from backathon.repository import Backathon
 from backathon.storage.local import LocalStorage, LocalStorageConfig
@@ -14,6 +18,18 @@ class BackathonTest(TestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
+
+        # Set encryption params to something quicker for testing
+        self.stack.enter_context(
+            unittest.mock.patch.object(
+                NaclEncrypter, "DEFAULT_OPSLIMIT", nacl.pwhash.argon2id.OPSLIMIT_MIN
+            )
+        )
+        self.stack.enter_context(
+            unittest.mock.patch.object(
+                NaclEncrypter, "DEFAULT_MEMLIMIT", nacl.pwhash.argon2id.MEMLIMIT_MIN
+            )
+        )
 
         # Directory to be backed up
         self.backupdir = pathlib.Path(

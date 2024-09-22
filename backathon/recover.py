@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 from dataclasses import dataclass
 from typing import Callable
@@ -33,28 +32,6 @@ class RebuildProgress:
 
     missing_relations: int = 0
     extra_relations: int = 0
-
-
-async def init_local_from_remote(
-    storage: StorageBase, password_callback: Callable[[], str]
-) -> Database:
-    raise NotImplementedError
-
-
-async def recover_encryption(storage: StorageBase) -> dict:
-    """Downloads the encryption recovery data
-
-    This is called as one of the first steps in recovering data from a remote repository.
-    """
-    with await asyncio.to_thread(storage.get_object, "backathon.json") as data:
-        marker_data = json.load(data.stream)
-    if not marker_data.get("name") == "Backathon Repository":
-        raise CorruptedRepository("This does not look like a Backathon repository")
-
-    if marker_data.get("encryption") is None:
-        raise CorruptedRepository("Missing encryption recovery data")
-
-    return marker_data["encryption"]
 
 
 async def quick_check(db: Database, storage: StorageBase):

@@ -2,6 +2,7 @@ import hashlib
 import logging
 from typing import IO, Annotated, Any, cast
 
+import nacl.exceptions
 import nacl.public
 import nacl.pwhash.argon2id
 import nacl.secret
@@ -14,6 +15,7 @@ from backathon.encryption.base import (
     KeyNotDecrypted,
     Payload,
 )
+from backathon.exceptions import CorruptedRepository
 from backathon.models import BytesHexEncoder, ObjIDType
 from backathon.proftools import perf_block
 
@@ -100,7 +102,13 @@ class NaclEncrypter(EncrypterBase[NaclConfig]):
             ops=ops,
             mem=mem,
         )
-        privkey_bytes = nacl.secret.SecretBox(pwkey).decrypt(rstate["key"])
+        encrypted_privkey_bytes = bytes.fromhex(rstate["key"])
+        try:
+            privkey_bytes = nacl.secret.SecretBox(pwkey).decrypt(encrypted_privkey_bytes)
+        except nacl.exceptions.CryptoError as e:
+            raise CorruptedRepository(
+                "Could not decrypt repository key. Bad password or corrupted repository"
+            ) from e
         privkey = nacl.public.PrivateKey(privkey_bytes)
         pubkey = privkey.public_key
         self = cls(
@@ -109,7 +117,7 @@ class NaclEncrypter(EncrypterBase[NaclConfig]):
                 ops=ops,
                 mem=mem,
                 pubkey=bytes(pubkey),
-                privkey=privkey_bytes,
+                privkey=encrypted_privkey_bytes,
             )
         )
         self.privkey = privkey
@@ -176,7 +184,15 @@ class NaclEncrypter(EncrypterBase[NaclConfig]):
             self.config.ops,
             self.config.mem,
         )
-        privkey_bytes = nacl.secret.SecretBox(symmetric_key).decrypt(self.config.privkey)
+        try:
+            privkey_bytes = nacl.secret.SecretBox(symmetric_key).decrypt(
+                self.config.privkey
+            )
+        except nacl.exceptions.CryptoError as e:
+            raise CorruptedRepository(
+                "Could not decrypt repository key. Bad password or corrupted repository"
+            ) from e
+
         self.privkey = nacl.public.PrivateKey(privkey_bytes)
 
     def encrypt(self, buf: Buffer) -> Payload:
