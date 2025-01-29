@@ -10,6 +10,7 @@ colorlog = "*"
 rich = "*"
 b2sdk = "*"
 pydantic = "*"
+fastapi = {extras = ["standard"], version = "*"}
 
 [dev-packages]
 mcon = "*"
