@@ -1,0 +1,19 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+msgpack = "*"
+pynacl = "*"
+colorlog = "*"
+rich = "*"
+b2sdk = "*"
+pydantic = "*"
+
+[dev-packages]
+mcon = "*"
+pre-commit = "*"
+
+[requires]
+python_version = "3.12"
