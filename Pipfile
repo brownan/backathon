@@ -11,6 +11,8 @@ rich = "*"
 b2sdk = "*"
 pydantic = "*"
 fastapi = {extras = ["standard"], version = "*"}
+click = "*"
+lz4 = "*"
 
 [dev-packages]
 mcon = "*"
