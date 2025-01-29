@@ -152,8 +152,8 @@ class Object(BaseModel):
                 # This can happen if two backup threads try to upload an identical
                 # object, which isn't too unlikely in practice. Since they are
                 # cryptographically guaranteed to be identical (including relations).
-                # The fact that the object was uploaded twice is an unfortunate
-                # inefficiency but I believe it won't be too bad overall.
+                # The fact that the object was uploaded twice is just inefficient
+                # but still results in a consistent database.
                 return
 
             # Add object relations

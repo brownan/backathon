@@ -141,11 +141,7 @@ def collect_garbage(db: Database, storage: StorageBase) -> tuple[int, int]:
 
         logger.debug("Committing transaction")
 
-        # explicit commit instead of closing the atomic context so we ensure it's
-        # not accidentally a savepoint instead of a true transaction.
-        cursor.execute("COMMIT")
-        cursor.execute("BEGIN IMMEDIATE")
-
+    with db.atomic(immediate=True), db.cursor() as cursor:
         logger.info("Found %s objects to delete, totaling %s", n, filesize.decimal(s))
         cursor.execute("SELECT objid FROM garbage")
         for row in batch_fetch_from_cursor(cursor):

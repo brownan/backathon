@@ -72,7 +72,7 @@ class BoundedTaskGroup:
     def __init__(self, max_tasks: int | None = None):
         if not max_tasks:
             # A few more than the default thread pool workers. Common case is for the
-            # bounded_coroutine_gather() method to dispatch something to a thread pool,
+            # bounded_as_completed() method to dispatch something to a thread pool,
             # and we'd want to be able to fill it up, plus have a few tasks in the queue
             # ready to go.
             max_tasks = min(36, (os.cpu_count() or 1) + 8)
