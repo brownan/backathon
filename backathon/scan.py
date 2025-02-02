@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import os
 import sqlite3
@@ -13,9 +14,16 @@ from backathon.db import Database
 logger = logging.getLogger("backathon.scan")
 
 
+@dataclasses.dataclass
+class ScanProgress:
+    scanned: int
+    total: int | None
+    last_path: str | None
+
+
 def scan(
     db: Database,
-    progress: None | Callable[[int, int | None, str], None] = None,
+    progress_callback: None | Callable[[ScanProgress], None] = None,
     skip_existing: bool = False,
     rescan_dirs: bool = False,
 ):
@@ -45,8 +53,11 @@ def scan(
     scan new entries.
 
     """
-
-    scanned = 0
+    progress = ScanProgress(
+        scanned=0,
+        total=None,
+        last_path=None,
+    )
 
     exclude_patterns = db.config_get_json("excludes", [])
 
@@ -54,13 +65,14 @@ def scan(
         # First pass, scan all existing entries
         logger.info("Scanning known files for changes")
         with db.cursor() as cursor:
-            total: int = cursor.execute("SELECT COUNT(*) FROM fsentry").fetchone()[0]
+            progress.total = cursor.execute("SELECT COUNT(*) FROM fsentry").fetchone()[0]
         with db.atomic(immediate=True):
             for entry in db.query(models.FSEntry, "SELECT * FROM fsentry"):
                 scan_entry(db, entry, rescan_dirs=rescan_dirs, excludes=exclude_patterns)
-                if progress is not None:
-                    scanned += 1
-                    progress(scanned, total, entry.printable_path)
+                if progress_callback is not None:
+                    progress.scanned += 1
+                    progress.last_path = entry.printable_path
+                    progress_callback(progress)
 
     # Now keep scanning for new objects until there are no more new objects
     logger.info("Scanning newly found files")
@@ -75,9 +87,10 @@ def scan(
             obj_iterator = db.query(models.FSEntry, "SELECT * FROM fsentry WHERE new")
             for entry in obj_iterator:
                 scan_entry(db, entry, excludes=exclude_patterns)
-                if progress is not None:
-                    scanned += 1
-                    progress(scanned, None, entry.printable_path)
+                if progress_callback is not None:
+                    progress.scanned += 1
+                    progress.last_path = entry.printable_path
+                    progress_callback(progress)
 
                 # Detect infinite loops. Make sure entries are always marked as
                 # not new

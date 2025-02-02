@@ -16,6 +16,7 @@ import backathon.backup
 import backathon.garbage
 import backathon.recover
 import backathon.restore
+import backathon.scan
 from backathon import models, repoobject
 from backathon.backup import BackupProgressReport, ObjectRequest
 from backathon.db import Database
@@ -39,6 +40,9 @@ class Backathon:
 
     def __init__(self, db: Database):
         self.db = db
+
+        self.scan_task: asyncio.Task | None = None
+        self.scan_progress: backathon.scan.ScanProgress | None = None
 
     @classmethod
     def initialize(
@@ -124,6 +128,47 @@ class Backathon:
     def close(self):
         self.db.close()
 
+    def scan_async(
+        self,
+        skip_existing: bool = False,
+        rescan_dirs: bool = False,
+        progress_callback: Callable[[backathon.scan.ScanProgress], None] | None = None,
+    ) -> asyncio.Future:
+        """Launches a scan in a separate thread. Returns a Future
+        which completes when the scan is finished.
+
+        """
+        if self.scan_task is not None:
+            raise RuntimeError("Scan already running")
+
+        loop = asyncio.get_running_loop()
+
+        def report_progress(progress):
+            self.scan_progress = progress
+            if progress_callback is not None:
+                loop.call_soon_threadsafe(progress_callback, progress)
+
+        def scan_thread():
+            db_clone = self.db.clone()
+            from backathon import scan
+
+            scan.scan(
+                db_clone,
+                progress_callback=report_progress,
+                skip_existing=skip_existing,
+                rescan_dirs=rescan_dirs,
+            )
+
+        task = asyncio.ensure_future(asyncio.to_thread(scan_thread))
+        self.scan_task = task
+
+        def on_done(_):
+            self.scan_task = None
+            self.scan_progress = None
+
+        task.add_done_callback(on_done)
+        return task
+
     def scan(
         self,
         skip_existing=False,
@@ -143,11 +188,14 @@ class Backathon:
 
         See more info in the backathon.scan module
         """
-        from backathon import scan
 
-        scan.scan(
+        def progress_shim(p: backathon.scan.ScanProgress):
+            assert progress is not None
+            progress(p.scanned, p.total, p.last_path or "")
+
+        backathon.scan.scan(
             self.db,
-            progress=progress,
+            progress_callback=progress_shim if progress else None,
             skip_existing=skip_existing,
             rescan_dirs=rescan_dirs,
         )

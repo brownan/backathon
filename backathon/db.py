@@ -91,6 +91,13 @@ class Database:
         self._setup_db()
         self._savepoint_num: int = 1
 
+    def clone(self) -> Database:
+        """Returns a new database instance with a separate, isolated
+        connection
+
+        """
+        return Database(self.path, create=False)
+
     def _open_db(self) -> sqlite3.Connection:
         logger.debug("Opening database %s", self.path)
         conn = sqlite3.connect(self.path, isolation_level=None)
