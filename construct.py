@@ -1,5 +1,6 @@
 import mcon.builders.python
-from mcon import Environment, register_alias
+from mcon.environment import Environment
+from mcon.execution import register_alias
 
 env = Environment()
 

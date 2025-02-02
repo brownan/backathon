@@ -1,4 +1,3 @@
-import io
 import logging
 import os
 import pathlib
@@ -6,17 +5,16 @@ import sqlite3
 import sys
 
 import click
+import uvicorn
 from rich.logging import RichHandler
 
 import backathon.cmdline.backup
 import backathon.cmdline.scan
 import backathon.db
 import backathon.repository
-from backathon import repoobject
 from backathon.cmdline.common import BackathonContext
 from backathon.encryption.nacl import NaclEncrypter
 from backathon.encryption.null import NullConfig, NullEncrypter
-from backathon.models import ObjectHeader
 from backathon.storage.local import LocalStorage, LocalStorageConfig
 
 logger = logging.getLogger("backathon.cmdline")
@@ -63,6 +61,19 @@ def main(
 
 main.add_command(backathon.cmdline.scan.scan)
 main.add_command(backathon.cmdline.backup.backup)
+
+
+@main.command()
+@click.pass_context
+def dev(ctx: click.Context):
+    db_path = ctx.obj["db_path"]
+    os.environ.setdefault("BACKATHON_DB_PATH", str(db_path))
+    uvicorn.run(
+        "backathon.api:app",
+        port=8000,
+        log_level="info",
+        reload=True,
+    )
 
 
 @main.command()
@@ -193,31 +204,6 @@ def set_local_target(ctx: click.Context, path: pathlib.Path):
     b = BackathonContext.from_click_context(ctx)
     repo = b.repo
     repo.db.config_set_json("local_storage_config", {"base_path": str(path.absolute())})
-
-
-@main.command()
-@click.argument("path", type=click.Path(path_type=pathlib.Path))
-@click.pass_context
-def obj_dump_header(ctx: click.Context, path: pathlib.Path):
-    b = BackathonContext.from_click_context(ctx)
-    repo = b.repo
-    encrypter = repo.get_encrypter()
-
-    with open(path, "rb") as fobj:
-        fobj = encrypter.decrypt(
-            fobj,
-            lambda unlock: unlock(click.prompt("Enter Decryption Key", hide_input=True)),
-        )
-
-        # Decompress
-        if not isinstance(fobj, io.BytesIO):
-            fobj = io.BytesIO(fobj.read())
-        fobj = repoobject.decompress_payload(fobj)
-
-        header = ObjectHeader.from_stream(fobj)
-    import rich.pretty
-
-    rich.pretty.pprint(header)
 
 
 if __name__ == "__main__":

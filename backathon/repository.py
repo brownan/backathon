@@ -23,7 +23,7 @@ from backathon.encryption.base import EncrypterBase, Payload
 from backathon.encryption.nacl import NaclEncrypter
 from backathon.encryption.null import NullEncrypter
 from backathon.exceptions import CorruptedRepository
-from backathon.models import ObjIDType
+from backathon.models import FSEntry, ObjIDType
 from backathon.proftools import perf_block
 from backathon.repoobject import RawPayload
 from backathon.storage.base import StorageBase
@@ -152,7 +152,7 @@ class Backathon:
             rescan_dirs=rescan_dirs,
         )
 
-    def add_root(self, root_path: pathlib.Path):
+    def add_root(self, root_path: pathlib.Path) -> FSEntry:
         """Adds a new root path to the backup set
 
         This just adds the root. The caller may want to call
@@ -164,8 +164,14 @@ class Backathon:
         """
         with self.db.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO fsentry (path) VALUES (?)",
+                "INSERT INTO fsentry (path) VALUES (?) RETURNING id",
                 (models.FSEntry.encode_path(root_path),),
+            )
+            new_id = cursor.fetchone()[0]
+            return next(
+                self.db.query(
+                    models.FSEntry, "SELECT * FROM fsentry WHERE id = ?", (new_id,)
+                )
             )
 
     def del_root(self, root_path: pathlib.Path):

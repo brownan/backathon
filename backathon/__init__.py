@@ -2,6 +2,11 @@ import asyncio
 import importlib.metadata
 import pathlib
 
+from backathon.db import Database
+from backathon.repository import Backathon
+
+__all__ = ["Database", "Backathon"]
+
 
 class BackathonEventLoopPolicy(asyncio.DefaultEventLoopPolicy):
     """Our usage of asyncio is a bit different than typical

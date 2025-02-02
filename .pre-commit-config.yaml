@@ -11,7 +11,7 @@ repos:
       - id: black
 
 -   repo: https://github.com/RobertCraigie/pyright-python
-    rev: v1.1.375
+    rev: v1.1.393
     hooks:
       - id: pyright
         additional_dependencies:
@@ -24,6 +24,9 @@ repos:
           - b2sdk
           - lz4
           - yappi
+          - toml
+          - fastapi
+          - uvicorn
 
 
 -   repo: https://github.com/pre-commit/mirrors-prettier

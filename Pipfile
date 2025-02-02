@@ -17,6 +17,7 @@ lz4 = "*"
 [dev-packages]
 mcon = "*"
 pre-commit = "*"
+toml = "*"
 
 [requires]
 python_version = "3.12"
