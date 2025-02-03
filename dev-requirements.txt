@@ -1,5 +1,0 @@
-pip-tools
-ruff
-black
-pre-commit
-types-requests
