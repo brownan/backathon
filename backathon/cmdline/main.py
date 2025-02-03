@@ -5,11 +5,11 @@ import sqlite3
 import sys
 
 import click
-import uvicorn
 from rich.logging import RichHandler
 
 import backathon.cmdline.backup
 import backathon.cmdline.scan
+import backathon.cmdline.server
 import backathon.db
 import backathon.repository
 from backathon.cmdline.common import BackathonContext
@@ -59,21 +59,9 @@ def main(
         p.enable()
 
 
+main.add_command(backathon.cmdline.server.dev)
 main.add_command(backathon.cmdline.scan.scan)
 main.add_command(backathon.cmdline.backup.backup)
-
-
-@main.command()
-@click.pass_context
-def dev(ctx: click.Context):
-    db_path = ctx.obj["db_path"]
-    os.environ.setdefault("BACKATHON_DB_PATH", str(db_path))
-    uvicorn.run(
-        "backathon.api:app",
-        port=8000,
-        log_level="info",
-        reload=True,
-    )
 
 
 @main.command()

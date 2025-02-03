@@ -12,6 +12,7 @@ from fastapi import (
     Path,
     Request,
 )
+from starlette.routing import Mount
 
 from backathon import Backathon, Database
 from backathon.models import FSEntry, Object
@@ -39,20 +40,28 @@ async def repo(req: Request) -> Backathon:
 
 RepoDependency = Annotated[Backathon, Depends(repo)]
 
-app = FastAPI(lifespan=lifespan)
+
+api = FastAPI()
+
+dev_app = FastAPI(
+    lifespan=lifespan,
+    routes=[
+        Mount("/api", api),
+    ],
+)
 
 
-@app.get("/")
+@api.get("/")
 async def top(db: DatabaseDependency, repo: RepoDependency):
     return {"message": "Hello, world!", "db": repr(db), "repo": repr(repo)}
 
 
-@app.get("/roots/")
+@api.get("/roots/")
 async def list_roots(repo: RepoDependency) -> list[FSEntry]:
     return repo.get_roots()
 
 
-@app.post("/roots/")
+@api.post("/roots/")
 async def add_root(
     repo: RepoDependency, path: Annotated[str, Body(embed=True)]
 ) -> FSEntry:
@@ -60,7 +69,7 @@ async def add_root(
     return entry
 
 
-@app.get("/roots/{id}")
+@api.get("/roots/{id}")
 async def get_root(repo: RepoDependency, id: int) -> FSEntry:
     entry = next(
         repo.db.query(FSEntry, "SELECT * FROM fsentry WHERE id = ?", (id,)), None
@@ -74,14 +83,14 @@ async def get_root(repo: RepoDependency, id: int) -> FSEntry:
     return entry
 
 
-@app.delete("/roots/{id}")
+@api.delete("/roots/{id}")
 async def del_root(repo: RepoDependency, id: int):
     entry = await get_root(repo, id)
     with repo.db.cursor() as cursor:
         cursor.execute("DELETE FROM fsentry WHERE id = ?", (entry.id,))
 
 
-@app.get("/objects/{objid}")
+@api.get("/objects/{objid}")
 async def get_object(
     repo: RepoDependency, objid: Annotated[str, Path(pattern=r"[0-9a-fA-F]+")]
 ) -> Object:
@@ -96,14 +105,14 @@ async def get_object(
     return obj
 
 
-@app.get("/excludes/")
+@api.get("/excludes/")
 async def get_excludes(
     repo: RepoDependency,
 ) -> list[str]:
     return repo.db.config_get_json("excludes", [])
 
 
-@app.post("/excludes/")
+@api.post("/excludes/")
 async def set_excludes(
     repo: RepoDependency, new_excludes: Annotated[list[str], Body()]
 ) -> list[str]:
