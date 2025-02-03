@@ -44,6 +44,9 @@ class Backathon:
         self.scan_task: asyncio.Task | None = None
         self.scan_progress: backathon.scan.ScanProgress | None = None
 
+        self.backup_task: asyncio.Task | None = None
+        self.backup_progress: BackupProgressReport | None = None
+
     @classmethod
     def initialize(
         cls,
@@ -140,6 +143,8 @@ class Backathon:
         """
         if self.scan_task is not None:
             raise RuntimeError("Scan already running")
+        if self.backup_task is not None:
+            raise RuntimeError("Backup is running")
 
         loop = asyncio.get_running_loop()
 
@@ -150,9 +155,8 @@ class Backathon:
 
         def scan_thread():
             db_clone = self.db.clone()
-            from backathon import scan
 
-            scan.scan(
+            backathon.scan.scan(
                 db_clone,
                 progress_callback=report_progress,
                 skip_existing=skip_existing,
@@ -249,6 +253,49 @@ class Backathon:
         self, encrypter: EncrypterBase, storage: StorageBase
     ) -> "ObjGetter":
         return make_obj_getter(encrypter, storage)
+
+    def backup_async(
+        self,
+        progress_callback: Callable[[BackupProgressReport], None] | None = None,
+    ) -> asyncio.Future:
+        """Launches a backup task in the current event loop and returns the
+        Task object
+
+        """
+        if self.scan_task is not None:
+            raise RuntimeError("Scan is running")
+        if self.backup_task is not None:
+            raise RuntimeError("Backup already running")
+
+        loop = asyncio.get_running_loop()
+
+        def report_progress(progress):
+            self.backup_progress = progress
+            if progress_callback is not None:
+                loop.call_soon(progress_callback, progress)
+
+        compressor: Compressor | None = None
+        if self.db.config_get("enable-compression", True):
+            compressor = repoobject.compress_payload
+        encrypter: EncrypterBase = self.get_encrypter()
+        storage: StorageBase = self.get_storage()
+
+        db_clone = self.db.clone()
+        backup = backathon.backup.Backup(
+            db_clone,
+            self._make_obj_putter(compressor, encrypter, storage),
+            self._make_snapshot_putter(encrypter, storage),
+            progress=report_progress,
+        )
+        task = asyncio.create_task(backup.backup())
+        self.backup_task = task
+
+        def on_done(_):
+            self.backup_task = None
+            self.backup_progress = None
+
+        task.add_done_callback(on_done)
+        return task
 
     def backup(
         self, progress: None | Callable[[BackupProgressReport], None] = None
