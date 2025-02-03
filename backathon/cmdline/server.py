@@ -1,5 +1,6 @@
 import logging
 import os
+import pathlib
 import subprocess
 import sys
 import time
@@ -15,12 +16,19 @@ logger = logging.getLogger("backathon.server")
 def dev(ctx: click.Context):
     db_path = ctx.obj["db_path"]
     os.environ.setdefault("BACKATHON_DB_PATH", str(db_path))
+    nvm_bin = os.environ.get("NVM_BIN", "")
+    npx_path = pathlib.Path(nvm_bin, "npx")
+
+    newenv = dict(os.environ)
+    if nvm_bin:
+        newenv["PATH"] = newenv["PATH"] + ":" + nvm_bin
 
     logger.info("Starting vite server")
     vite = subprocess.Popen(
-        ["npx", "vite", "--clearScreen", "false"],
+        [str(npx_path), "vite", "--clearScreen", "false"],
         cwd="backathon-web",
         stdin=subprocess.DEVNULL,
+        env=newenv,
     )
     time.sleep(1)
     if vite.poll() is not None:
