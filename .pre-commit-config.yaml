@@ -27,6 +27,7 @@ repos:
           - toml
           - fastapi
           - uvicorn
+          - typer
 
 
 -   repo: https://github.com/pre-commit/mirrors-prettier

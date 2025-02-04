@@ -3,8 +3,10 @@ import os
 import pathlib
 import sqlite3
 import sys
+from typing import Annotated
 
 import click
+import typer
 from rich.logging import RichHandler
 
 import backathon.cmdline.backup
@@ -18,6 +20,53 @@ from backathon.encryption.null import NullConfig, NullEncrypter
 from backathon.storage.local import LocalStorage, LocalStorageConfig
 
 logger = logging.getLogger("backathon.cmdline")
+
+app = typer.Typer(no_args_is_help=True)
+
+PathType = click.Path(dir_okay=False, readable=True, path_type=pathlib.Path)
+
+
+@app.callback()
+def app_callback(verbose: bool = False, profile: bool = False):
+    loglevel = logging.INFO if not verbose else logging.DEBUG
+
+    logging.basicConfig(
+        format="%(message)s", level=logging.WARNING, handlers=[RichHandler()]
+    )
+    logging.getLogger("backathon").setLevel(loglevel)
+
+    if profile:
+        import atexit
+        import cProfile
+
+        logger.info("Profiling enabled")
+
+        p = cProfile.Profile()
+
+        def onexit():
+            p.disable()
+            p.dump_stats("backathon.pstats")
+            print("Profile data dumped to backathon.pstats")
+
+        atexit.register(onexit)
+        p.enable()
+
+
+@app.command()
+def dev(configfile: Annotated[pathlib.Path, typer.Argument(click_type=PathType)]):
+    """Runs the dev server"""
+    print(f"Given path: {configfile}")
+
+
+@app.command()
+def openapi():
+    """Dump the openapi json object"""
+    import json
+
+    import backathon.api
+
+    schema = backathon.api.api.openapi()
+    print(json.dumps(schema, indent=2))
 
 
 @click.group()
@@ -194,5 +243,5 @@ def set_local_target(ctx: click.Context, path: pathlib.Path):
     repo.db.config_set_json("local_storage_config", {"base_path": str(path.absolute())})
 
 
-if __name__ == "__main__":
-    main()
+def main():
+    app()

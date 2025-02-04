@@ -13,6 +13,7 @@ pydantic = "*"
 fastapi = {extras = ["standard"], version = "*"}
 click = "*"
 lz4 = "*"
+typer = "*"
 
 [dev-packages]
 mcon = "*"
