@@ -1,9 +1,9 @@
 <template>
     <nav class="navbar" role="navigation" aria-label="main navigation">
         <div class="navbar-brand">
-            <a class="navbar-item">
+            <RouterLink to="home" class="navbar-item">
                 <h1 class="title">Backathon</h1>
-            </a>
+            </RouterLink>
             <a
                 role="button"
                 class="navbar-burger"
@@ -22,10 +22,18 @@
 
         <div id="navbar-content" class="navbar-menu" :class="navbarActive ? 'is-active' : ''">
             <div class="navbar-start">
-                <a class="navbar-item"> Status </a>
-                <a class="navbar-item"> Configure </a>
-                <a class="navbar-item"> Backup </a>
-                <a class="navbar-item"> Restore </a>
+                <RouterLink to="status" class="navbar-item" active-class="is-active">
+                    Status
+                </RouterLink>
+                <RouterLink to="configure" class="navbar-item" active-class="is-active">
+                    Configure
+                </RouterLink>
+                <RouterLink to="backup" class="navbar-item" active-class="is-active">
+                    Backup
+                </RouterLink>
+                <RouterLink to="restore" class="navbar-item" active-class="is-active">
+                    Restore
+                </RouterLink>
             </div>
         </div>
     </nav>
