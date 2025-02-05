@@ -29,12 +29,27 @@ repos:
           - uvicorn
           - typer
 
+-   repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v9.19.0
+    hooks:
+      - id: eslint
+        files: ^backathon-web
+        args: [--fix --max-warnings 1]
+        additional_dependencies:
+          - "eslint@9.19.0"
+          - "@vue/eslint-config-prettier@10.1.0"
+          - "@vue/eslint-config-typescript@14.3.0"
+          - "eslint-plugin-vue@9.32.0"
+          - "jiti@2.4.2"
+          - "typescript@5.7.3"
+        types: [file]
+        types_or: [javascript, ts, vue]
 
 -   repo: https://github.com/pre-commit/mirrors-prettier
     rev: 'v3.0.0'  # Use the sha / tag you want to point at
     hooks:
     -   id: prettier
-        files: ^src
+        files: ^backathon-web
         types_or: [css, javascript, vue, ts, json]
         additional_dependencies:
           - prettier@3.0.0

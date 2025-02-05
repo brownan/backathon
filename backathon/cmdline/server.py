@@ -28,7 +28,7 @@ def dev(db_path: PathOption):
     logger.info("Starting vite server")
     vite = subprocess.Popen(
         [str(npx_path), "vite", "--clearScreen", "false"],
-        cwd="backathon-web",
+        cwd=pathlib.Path(__file__).parent.parent.parent / "backathon-web",
         stdin=subprocess.DEVNULL,
         env=newenv,
     )
