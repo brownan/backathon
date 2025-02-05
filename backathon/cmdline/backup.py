@@ -1,18 +1,20 @@
-import click
 import rich.live
 import rich.progress
+import typer
 
 from backathon.backup import BackupProgressReport
 from backathon.cmdline.common import (
     BackathonContext,
     default_columns,
 )
+from backathon.cmdline.types import PathOption
+
+app = typer.Typer()
 
 
-@click.command()
-@click.pass_context
-def backup(ctx: click.Context):
-    b = BackathonContext.from_click_context(ctx)
+@app.command()
+def backup(db_path: PathOption):
+    b = BackathonContext.from_db_path(db_path)
     repo = b.repo
 
     progress = rich.progress.Progress(

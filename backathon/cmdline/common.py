@@ -1,4 +1,5 @@
 import dataclasses
+import pathlib
 from datetime import timedelta
 from typing import Sequence
 
@@ -26,6 +27,12 @@ class BackathonContext:
     @classmethod
     def from_click_context(cls, ctx: click.Context):
         db = backathon.db.Database(ctx.obj["db_path"])
+        repo = backathon.repository.Backathon(db)
+        return cls(repo=repo, db=db)
+
+    @classmethod
+    def from_db_path(cls, path: pathlib.Path):
+        db = backathon.db.Database(path)
         repo = backathon.repository.Backathon(db)
         return cls(repo=repo, db=db)
 

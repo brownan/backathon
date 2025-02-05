@@ -1,7 +1,7 @@
 from collections import deque
 
-import click
 import rich
+import typer
 from rich.console import Group
 from rich.live import Live
 from rich.progress import (
@@ -13,14 +13,14 @@ from backathon.cmdline.common import (
     FileListRenderable,
     default_columns,
 )
+from backathon.cmdline.types import PathOption
+
+app = typer.Typer()
 
 
-@click.command()
-@click.option("--rescan-dirs", is_flag=True)
-@click.option("--no-rich", is_flag=True)
-@click.pass_context
-def scan(ctx: click.Context, rescan_dirs: bool, no_rich: bool = False):
-    b = BackathonContext.from_click_context(ctx)
+@app.command()
+def scan(db_path: PathOption, rescan_dirs: bool = False, no_rich: bool = False):
+    b = BackathonContext.from_db_path(db_path)
     repo = b.repo
     if no_rich:
         repo.scan(rescan_dirs=rescan_dirs)

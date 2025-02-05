@@ -5,16 +5,18 @@ import subprocess
 import sys
 import time
 
-import click
+import typer
 import uvicorn
+
+from backathon.cmdline.types import PathOption
 
 logger = logging.getLogger("backathon.server")
 
+app = typer.Typer()
 
-@click.command()
-@click.pass_context
-def dev(ctx: click.Context):
-    db_path = ctx.obj["db_path"]
+
+@app.command()
+def dev(db_path: PathOption):
     os.environ.setdefault("BACKATHON_DB_PATH", str(db_path))
     nvm_bin = os.environ.get("NVM_BIN", "")
     npx_path = pathlib.Path(nvm_bin, "npx")

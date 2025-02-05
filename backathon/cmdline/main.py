@@ -3,7 +3,6 @@ import os
 import pathlib
 import sqlite3
 import sys
-from typing import Annotated
 
 import click
 import typer
@@ -15,6 +14,7 @@ import backathon.cmdline.server
 import backathon.db
 import backathon.repository
 from backathon.cmdline.common import BackathonContext
+from backathon.cmdline.types import PathOption
 from backathon.encryption.nacl import NaclEncrypter
 from backathon.encryption.null import NullConfig, NullEncrypter
 from backathon.storage.local import LocalStorage, LocalStorageConfig
@@ -22,8 +22,6 @@ from backathon.storage.local import LocalStorage, LocalStorageConfig
 logger = logging.getLogger("backathon.cmdline")
 
 app = typer.Typer(no_args_is_help=True)
-
-PathType = click.Path(dir_okay=False, readable=True, path_type=pathlib.Path)
 
 
 @app.callback()
@@ -53,12 +51,6 @@ def app_callback(verbose: bool = False, profile: bool = False):
 
 
 @app.command()
-def dev(configfile: Annotated[pathlib.Path, typer.Argument(click_type=PathType)]):
-    """Runs the dev server"""
-    print(f"Given path: {configfile}")
-
-
-@app.command()
 def openapi():
     """Dump the openapi json object"""
     import json
@@ -69,56 +61,15 @@ def openapi():
     print(json.dumps(schema, indent=2))
 
 
-@click.group()
-@click.argument(
-    "configfile", type=click.Path(dir_okay=False, readable=True, path_type=pathlib.Path)
-)
-@click.option("--verbose", "-v", is_flag=True)
-@click.option("--profile", is_flag=True)
-@click.pass_context
-def main(
-    ctx: click.Context,
-    configfile: pathlib.Path,
-    verbose: bool,
-    profile: bool,
+app.add_typer(backathon.cmdline.server.app)
+app.add_typer(backathon.cmdline.scan.app)
+app.add_typer(backathon.cmdline.backup.app)
+
+
+@app.command()
+def initialize(
+    db_path: PathOption, destination: pathlib.Path, enable_encryption: bool = True
 ):
-    loglevel = logging.INFO if not verbose else logging.DEBUG
-    logging.basicConfig(
-        format="%(message)s", level=logging.WARNING, handlers=[RichHandler()]
-    )
-    logging.getLogger("backathon").setLevel(loglevel)
-
-    ctx.ensure_object(dict)
-    ctx.obj["db_path"] = configfile
-
-    if profile:
-        import atexit
-        import cProfile
-
-        logger.info("Profiling enabled")
-
-        p = cProfile.Profile()
-
-        def onexit():
-            p.disable()
-            p.dump_stats("backathon.pstats")
-            print("Profile data dumped to backathon.pstats")
-
-        atexit.register(onexit)
-        p.enable()
-
-
-main.add_command(backathon.cmdline.server.dev)
-main.add_command(backathon.cmdline.scan.scan)
-main.add_command(backathon.cmdline.backup.backup)
-
-
-@main.command()
-@click.option("--enable-encryption/--disable-encryption", default=True)
-@click.argument("destination")
-@click.pass_context
-def initialize(ctx: click.Context, enable_encryption: bool, destination: str):
-    db_path = ctx.obj["db_path"]
     enc_password = os.environ.get("BACKATHON_PASSWORD")
     if enc_password is None and enable_encryption:
         click.echo("Create a password used to encrypt your backup repository")
@@ -145,11 +96,9 @@ def initialize(ctx: click.Context, enable_encryption: bool, destination: str):
     click.echo("> {} backup".format(cmdline_prefix))
 
 
-@main.command()
-@click.argument("path", type=click.Path(path_type=pathlib.Path))
-@click.pass_context
-def add_root(ctx: click.Context, path: pathlib.Path):
-    b = BackathonContext.from_click_context(ctx)
+@app.command()
+def add_root(db_path: PathOption, path: pathlib.Path):
+    b = BackathonContext.from_db_path(db_path)
     click.echo("Adding root {}".format(path))
     try:
         b.repo.add_root(path)
@@ -157,10 +106,9 @@ def add_root(ctx: click.Context, path: pathlib.Path):
         raise click.BadParameter(f"Root {path} already exists", param_hint="path")
 
 
-@main.command()
-@click.pass_context
-def list_roots(ctx: click.Context):
-    b = BackathonContext.from_click_context(ctx)
+@app.command()
+def list_roots(db_path: PathOption):
+    b = BackathonContext.from_db_path(db_path)
     repo = b.repo
     roots = repo.get_roots()
     if roots:
@@ -170,10 +118,9 @@ def list_roots(ctx: click.Context):
         click.echo("no roots", err=True)
 
 
-@main.command()
-@click.pass_context
-def edit_roots(ctx: click.Context):
-    b = BackathonContext.from_click_context(ctx)
+@app.command()
+def edit_roots(db_path: PathOption):
+    b = BackathonContext.from_db_path(db_path)
     repo = b.repo
     roots = repo.get_roots()
     text = "\n".join(str(r.decoded_path) for r in roots)
@@ -212,10 +159,9 @@ def edit_roots(ctx: click.Context):
         click.echo("Roots unmodified")
 
 
-@main.command()
-@click.pass_context
-def edit_excludes(ctx: click.Context):
-    b = BackathonContext.from_click_context(ctx)
+@app.command()
+def edit_excludes(db_path: PathOption):
+    b = BackathonContext.from_db_path(db_path)
     db = b.db
     current = db.config_get_json("excludes", [])
     text = """# Add excludes, one per line. Globs are supported.\n\n"""
@@ -234,11 +180,9 @@ def edit_excludes(ctx: click.Context):
         click.echo("Exclude list unchanged")
 
 
-@main.command()
-@click.argument("path", type=click.Path(path_type=pathlib.Path))
-@click.pass_context
-def set_local_target(ctx: click.Context, path: pathlib.Path):
-    b = BackathonContext.from_click_context(ctx)
+@app.command()
+def set_local_target(db_path: PathOption, path: pathlib.Path):
+    b = BackathonContext.from_db_path(db_path)
     repo = b.repo
     repo.db.config_set_json("local_storage_config", {"base_path": str(path.absolute())})
 
