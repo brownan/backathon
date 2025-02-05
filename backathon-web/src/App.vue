@@ -1,7 +1,14 @@
 <template>
-    <nav class="navbar" role="navigation" aria-label="main navigation">
+    <nav
+        class="navbar"
+        role="navigation"
+        aria-label="main navigation"
+    >
         <div class="navbar-brand">
-            <RouterLink to="home" class="navbar-item">
+            <RouterLink
+                to="home"
+                class="navbar-item"
+            >
                 <h1 class="title">Backathon</h1>
             </RouterLink>
             <a
@@ -20,18 +27,38 @@
             </a>
         </div>
 
-        <div id="navbar-content" class="navbar-menu" :class="navbarActive ? 'is-active' : ''">
+        <div
+            id="navbar-content"
+            class="navbar-menu"
+            :class="navbarActive ? 'is-active' : ''"
+        >
             <div class="navbar-start">
-                <RouterLink to="status" class="navbar-item" active-class="is-active">
+                <RouterLink
+                    to="status"
+                    class="navbar-item"
+                    active-class="is-active"
+                >
                     Status
                 </RouterLink>
-                <RouterLink to="configure" class="navbar-item" active-class="is-active">
+                <RouterLink
+                    to="configure"
+                    class="navbar-item"
+                    active-class="is-active"
+                >
                     Configure
                 </RouterLink>
-                <RouterLink to="backup" class="navbar-item" active-class="is-active">
+                <RouterLink
+                    to="backup"
+                    class="navbar-item"
+                    active-class="is-active"
+                >
                     Backup
                 </RouterLink>
-                <RouterLink to="restore" class="navbar-item" active-class="is-active">
+                <RouterLink
+                    to="restore"
+                    class="navbar-item"
+                    active-class="is-active"
+                >
                     Restore
                 </RouterLink>
             </div>
@@ -43,8 +70,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { RouterView } from 'vue-router'
+import { ref } from "vue";
+import { RouterView } from "vue-router";
 
-const navbarActive = ref(false)
+const navbarActive = ref(false);
 </script>
