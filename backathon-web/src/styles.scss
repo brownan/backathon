@@ -1,0 +1,9 @@
+@use "bulma/sass/utilities" with (
+  $cssvars-prefix: "",
+);
+
+@use "bulma/sass/base";
+@use "bulma/sass/components/navbar";
+@use "bulma/sass/elements/title";
+@use "bulma/sass/layout/section";
+@use "bulma/sass/themes";
