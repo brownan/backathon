@@ -1,6 +1,12 @@
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 from os import PathLike
-from typing import IO, Generic, Iterator, NamedTuple, Type, TypeVar
+from typing import IO
+from typing import Generic
+from typing import Iterator
+from typing import NamedTuple
+from typing import Type
+from typing import TypeVar
 
 from pydantic import BaseModel
 

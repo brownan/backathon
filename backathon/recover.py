@@ -6,8 +6,12 @@ from typing import Callable
 from backathon.db import Database
 from backathon.encryption.base import EncrypterBase
 from backathon.exceptions import CorruptedRepository
-from backathon.models import Object, ObjectRelation, ObjIDType, Snapshot
-from backathon.repoobject import RawPayload, make_object_path
+from backathon.models import Object
+from backathon.models import ObjectRelation
+from backathon.models import ObjIDType
+from backathon.models import Snapshot
+from backathon.repoobject import RawPayload
+from backathon.repoobject import make_object_path
 from backathon.storage.base import StorageBase
 
 logger = logging.getLogger("backathon.recover")

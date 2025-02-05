@@ -16,8 +16,10 @@ import backathon.repository
 from backathon.cmdline.common import BackathonContext
 from backathon.cmdline.types import PathOption
 from backathon.encryption.nacl import NaclEncrypter
-from backathon.encryption.null import NullConfig, NullEncrypter
-from backathon.storage.local import LocalStorage, LocalStorageConfig
+from backathon.encryption.null import NullConfig
+from backathon.encryption.null import NullEncrypter
+from backathon.storage.local import LocalStorage
+from backathon.storage.local import LocalStorageConfig
 
 logger = logging.getLogger("backathon.cmdline")
 

@@ -5,14 +5,15 @@ from typing import Sequence
 
 import click
 import rich.filesize
-from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
-from rich.progress import (
-    BarColumn,
-    ProgressColumn,
-    Task,
-    TaskProgressColumn,
-    TextColumn,
-)
+from rich.console import Console
+from rich.console import ConsoleOptions
+from rich.console import RenderableType
+from rich.console import RenderResult
+from rich.progress import BarColumn
+from rich.progress import ProgressColumn
+from rich.progress import Task
+from rich.progress import TaskProgressColumn
+from rich.progress import TextColumn
 from rich.text import Text
 
 import backathon.db

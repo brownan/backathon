@@ -1,9 +1,11 @@
 import stat
 
 from backathon import models
-from backathon.encryption.null import NullConfig, NullEncrypter
+from backathon.encryption.null import NullConfig
+from backathon.encryption.null import NullEncrypter
 from backathon.repository import Backathon
-from backathon.storage.local import LocalStorage, LocalStorageConfig
+from backathon.storage.local import LocalStorage
+from backathon.storage.local import LocalStorageConfig
 from tests.base import BackathonTest
 
 

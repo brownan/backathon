@@ -1,9 +1,12 @@
 import datetime
 import unittest.mock
-from typing import Iterable, Iterator, cast
+from typing import Iterable
+from typing import Iterator
+from typing import cast
 
 import backathon.garbage
-from backathon import models, repoobject
+from backathon import models
+from backathon import repoobject
 from backathon.encryption.base import Payload
 from backathon.models import ObjIDType
 from tests.base import BackathonTest

@@ -10,13 +10,11 @@ import sqlite3
 from contextlib import contextmanager
 from operator import itemgetter
 from os import PathLike
-from typing import (
-    Any,
-    Generator,
-    Iterator,
-    Type,
-    TypeVar,
-)
+from typing import Any
+from typing import Generator
+from typing import Iterator
+from typing import Type
+from typing import TypeVar
 
 from pydantic import BaseModel
 

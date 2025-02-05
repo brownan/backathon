@@ -15,12 +15,15 @@ This approach was chosen for two main reasons:
 import logging
 import math
 import random
-from typing import Iterator, NamedTuple
+from typing import Iterator
+from typing import NamedTuple
 
 from rich import filesize
 
-from backathon import models, repoobject
-from backathon.db import Database, batch_fetch_from_cursor
+from backathon import models
+from backathon import repoobject
+from backathon.db import Database
+from backathon.db import batch_fetch_from_cursor
 from backathon.storage.base import StorageBase
 
 logger = logging.getLogger("backathon.garbage")

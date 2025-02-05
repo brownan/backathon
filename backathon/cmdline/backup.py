@@ -3,10 +3,8 @@ import rich.progress
 import typer
 
 from backathon.backup import BackupProgressReport
-from backathon.cmdline.common import (
-    BackathonContext,
-    default_columns,
-)
+from backathon.cmdline.common import BackathonContext
+from backathon.cmdline.common import default_columns
 from backathon.cmdline.types import PathOption
 
 app = typer.Typer()

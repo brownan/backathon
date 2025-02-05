@@ -6,7 +6,9 @@ from backathon.encryption.nacl import NaclEncrypter
 from backathon.recover import repair_object_index
 from backathon.repository import Backathon
 from tests.base import BackathonTest
-from tests.test_backup import AssertObjHelperMixin, ExpectedDir, ExpectedFile
+from tests.test_backup import AssertObjHelperMixin
+from tests.test_backup import ExpectedDir
+from tests.test_backup import ExpectedFile
 
 
 class TestRepair(AssertObjHelperMixin, BackathonTest):

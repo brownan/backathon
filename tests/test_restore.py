@@ -9,7 +9,8 @@ import unittest.mock
 import warnings
 
 import backathon.encryption.nacl
-from backathon import models, repoobject
+from backathon import models
+from backathon import repoobject
 from backathon.encryption.base import EncrypterBase
 from tests.base import BackathonTest
 

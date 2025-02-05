@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import IO, Any, Callable, Generic, NamedTuple, Type, TypeVar
+from abc import ABC
+from abc import abstractmethod
+from typing import IO
+from typing import Any
+from typing import Callable
+from typing import Generic
+from typing import NamedTuple
+from typing import Type
+from typing import TypeVar
 
 from pydantic import BaseModel
-from typing_extensions import Buffer, Self
+from typing_extensions import Buffer
+from typing_extensions import Self
 
 from backathon.models import ObjIDType
 

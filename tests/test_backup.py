@@ -15,8 +15,11 @@ from unittest import mock
 import lz4.frame
 
 import backathon
-from backathon import models, repoobject
-from backathon.models import ObjectHeader, ObjectType, ObjIDType
+from backathon import models
+from backathon import repoobject
+from backathon.models import ObjectHeader
+from backathon.models import ObjectType
+from backathon.models import ObjIDType
 from backathon.repository import Backathon
 from tests.base import BackathonTest
 

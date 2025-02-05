@@ -9,21 +9,23 @@ import sqlite3
 import sys
 from collections.abc import Collection
 from functools import cached_property
-from typing import IO, Annotated, Any, NamedTuple, NewType, Sequence, cast
+from typing import IO
+from typing import Annotated
+from typing import Any
+from typing import NamedTuple
+from typing import NewType
+from typing import Sequence
+from typing import cast
 
 import msgpack
-from pydantic import (
-    BaseModel,
-    EncoderProtocol,
-    Field,
-    PlainSerializer,
-    WrapSerializer,
-    WrapValidator,
-)
-from pydantic_core.core_schema import (
-    ValidationInfo,
-    ValidatorFunctionWrapHandler,
-)
+from pydantic import BaseModel
+from pydantic import EncoderProtocol
+from pydantic import Field
+from pydantic import PlainSerializer
+from pydantic import WrapSerializer
+from pydantic import WrapValidator
+from pydantic_core.core_schema import ValidationInfo
+from pydantic_core.core_schema import ValidatorFunctionWrapHandler
 from typing_extensions import Self
 
 import backathon.db

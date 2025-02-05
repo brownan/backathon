@@ -20,12 +20,11 @@ from typing_extensions import NamedTuple
 
 from backathon import proftools
 from backathon.backup import BackupProgressReport
-from backathon.cmdline.common import (
-    default_columns,
-)
+from backathon.cmdline.common import default_columns
 from backathon.encryption.nacl import NaclEncrypter
 from backathon.repository import Backathon
-from backathon.storage.local import LocalStorage, LocalStorageConfig
+from backathon.storage.local import LocalStorage
+from backathon.storage.local import LocalStorageConfig
 
 logger = logging.getLogger("backathon.benchmark")
 

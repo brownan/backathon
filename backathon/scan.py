@@ -4,7 +4,8 @@ import os
 import sqlite3
 import stat
 import time
-from typing import Callable, Collection
+from typing import Callable
+from typing import Collection
 
 from rich import filesize
 

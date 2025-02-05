@@ -1,22 +1,26 @@
 import hashlib
 import logging
-from typing import IO, Annotated, Any, cast
+from typing import IO
+from typing import Annotated
+from typing import Any
+from typing import cast
 
 import nacl.exceptions
 import nacl.public
 import nacl.pwhash.argon2id
 import nacl.secret
 import nacl.utils
-from pydantic import BaseModel, EncodedBytes
-from typing_extensions import Buffer, Self
+from pydantic import BaseModel
+from pydantic import EncodedBytes
+from typing_extensions import Buffer
+from typing_extensions import Self
 
-from backathon.encryption.base import (
-    EncrypterBase,
-    KeyNotDecrypted,
-    Payload,
-)
+from backathon.encryption.base import EncrypterBase
+from backathon.encryption.base import KeyNotDecrypted
+from backathon.encryption.base import Payload
 from backathon.exceptions import CorruptedRepository
-from backathon.models import BytesHexEncoder, ObjIDType
+from backathon.models import BytesHexEncoder
+from backathon.models import ObjIDType
 from backathon.proftools import perf_block
 
 logger = logging.getLogger("backathon.nacl")

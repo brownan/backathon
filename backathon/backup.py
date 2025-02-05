@@ -7,32 +7,31 @@ import signal
 import stat
 import threading
 import time
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
+from contextlib import contextmanager
 from logging import getLogger
-from operator import attrgetter, itemgetter
-from typing import (
-    IO,
-    Awaitable,
-    Callable,
-    Coroutine,
-    NamedTuple,
-    cast,
-)
+from operator import attrgetter
+from operator import itemgetter
+from typing import IO
+from typing import Awaitable
+from typing import Callable
+from typing import Coroutine
+from typing import NamedTuple
+from typing import cast
 
 import rich.filesize
 
-from backathon import chunker, models
+from backathon import chunker
+from backathon import models
 from backathon.asyncutils import BoundedTaskGroup
 from backathon.db import Database
 from backathon.exceptions import DependencyError
-from backathon.models import (
-    BlobRef,
-    EntryRef,
-    ObjectHeader,
-    ObjectStats,
-    ObjectType,
-    ObjIDType,
-)
+from backathon.models import BlobRef
+from backathon.models import EntryRef
+from backathon.models import ObjectHeader
+from backathon.models import ObjectStats
+from backathon.models import ObjectType
+from backathon.models import ObjIDType
 from backathon.proftools import perf_block
 
 logger = getLogger("backathon.backup")

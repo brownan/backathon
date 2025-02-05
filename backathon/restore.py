@@ -4,11 +4,15 @@ import asyncio
 import logging
 import os
 import pathlib
-from typing import IO, TYPE_CHECKING
+from typing import IO
+from typing import TYPE_CHECKING
 
 from typing_extensions import Buffer
 
-from backathon.models import ObjectHeader, ObjectStats, ObjectType, ObjIDType
+from backathon.models import ObjectHeader
+from backathon.models import ObjectStats
+from backathon.models import ObjectType
+from backathon.models import ObjIDType
 
 if TYPE_CHECKING:
     from backathon.repository import ObjGetter

@@ -4,18 +4,18 @@ import os
 import pathlib
 from typing import Annotated
 
-from fastapi import (
-    Body,
-    Depends,
-    FastAPI,
-    HTTPException,
-    Path,
-    Request,
-)
+from fastapi import Body
+from fastapi import Depends
+from fastapi import FastAPI
+from fastapi import HTTPException
+from fastapi import Path
+from fastapi import Request
 from starlette.routing import Mount
 
-from backathon import Backathon, Database
-from backathon.models import FSEntry, Object
+from backathon import Backathon
+from backathon import Database
+from backathon.models import FSEntry
+from backathon.models import Object
 
 
 @contextlib.asynccontextmanager

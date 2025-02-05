@@ -7,7 +7,9 @@ import pathlib
 import shutil
 import zlib
 from dataclasses import dataclass
-from typing import IO, Self, Sequence
+from typing import IO
+from typing import Self
+from typing import Sequence
 
 import lz4.frame
 from typing_extensions import Buffer
@@ -15,7 +17,9 @@ from typing_extensions import Buffer
 from backathon.backup import ObjectRequest
 from backathon.encryption.base import EncrypterBase
 from backathon.exceptions import CorruptedRepository
-from backathon.models import Object, ObjectHeader, ObjIDType
+from backathon.models import Object
+from backathon.models import ObjectHeader
+from backathon.models import ObjIDType
 from backathon.proftools import perf_block
 from backathon.storage.base import StorageBase
 

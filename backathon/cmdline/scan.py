@@ -4,15 +4,11 @@ import rich
 import typer
 from rich.console import Group
 from rich.live import Live
-from rich.progress import (
-    Progress,
-)
+from rich.progress import Progress
 
-from backathon.cmdline.common import (
-    BackathonContext,
-    FileListRenderable,
-    default_columns,
-)
+from backathon.cmdline.common import BackathonContext
+from backathon.cmdline.common import FileListRenderable
+from backathon.cmdline.common import default_columns
 from backathon.cmdline.types import PathOption
 
 app = typer.Typer()

@@ -5,7 +5,7 @@ build-backend = "mcon.pybuild"
 [project]
 name = "backathon"
 version = "0.2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "msgpack",
     "PyNaCl",
@@ -21,15 +21,16 @@ dependencies = [
 backathon = "backathon.cmdline.main:main"
 
 [tool.black]
-target-version = ["py39"]
+target-version = ["py311"]
 line-length = 90
 
 [tool.ruff]
-select = ["E", "F", "W", "B", "TID25", "I"]
-
+select = ["E", "F", "W", "B", "TID25", "I", "DTZ"]
 ignore = ["E501", "B007", "B024", "B027", "B904", "B905"]
 unfixable = ["F841"]
 
-
 [tool.ruff.flake8-tidy-imports]
 ban-relative-imports = "all"
+
+[tool.ruff.isort]
+force-single-line = true

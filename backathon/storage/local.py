@@ -8,7 +8,9 @@ from typing import Iterator
 from pydantic import BaseModel
 
 from backathon.encryption.base import Payload
-from backathon.storage.base import DownloadedFile, DownloadedFileContext, StorageBase
+from backathon.storage.base import DownloadedFile
+from backathon.storage.base import DownloadedFileContext
+from backathon.storage.base import StorageBase
 
 
 class LocalStorageConfig(BaseModel):
