@@ -16,6 +16,7 @@ from backathon import Backathon
 from backathon import Database
 from backathon.models import FSEntry
 from backathon.models import Object
+from backathon.models import Snapshot
 
 
 @contextlib.asynccontextmanager
@@ -118,3 +119,8 @@ async def set_excludes(
 ) -> list[str]:
     repo.db.config_set_json("excludes", new_excludes)
     return new_excludes
+
+
+@api.get("/snapshots")
+async def get_snapshots(repo: RepoDependency) -> list[Snapshot]:
+    return list(repo.db.query(Snapshot, "SELECT * FROM snapshots ORDER BY timestamp"))

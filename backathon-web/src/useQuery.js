@@ -33,5 +33,3 @@ export function makeUseQuery(client) {
     }
     return _useQuery;
 }
-
-export const useQuery = _useQuery;

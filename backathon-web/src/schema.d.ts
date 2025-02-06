@@ -92,6 +92,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Snapshots */
+        get: operations["get_snapshots_snapshots_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -176,6 +193,23 @@ export interface components {
          * @enum {string}
          */
         ObjectType: "file" | "blob" | "tree" | "symlink";
+        /**
+         * Snapshot
+         * @description A snapshot of a filesystem at a particular time
+         */
+        Snapshot: {
+            /** Id */
+            id: number;
+            /** Path */
+            path: string;
+            /** Root */
+            root: string;
+            /**
+             * Timestamp
+             * Format: date-time
+             */
+            timestamp: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -409,6 +443,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_snapshots_snapshots_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Snapshot"][];
                 };
             };
         };

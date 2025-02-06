@@ -302,6 +302,7 @@ class FSEntry(BaseModel):
 class Snapshot(BaseModel):
     """A snapshot of a filesystem at a particular time"""
 
+    id: int
     path: str
     root: ObjIDType
     timestamp: datetime.datetime
