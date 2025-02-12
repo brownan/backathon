@@ -5,9 +5,10 @@ import type {
     ResponseObjectMap,
     SuccessResponse,
 } from "openapi-typescript-helpers";
-import type { InitParam, MaybeOptionalInit } from "openapi-fetch";
+import type { MaybeOptionalInit } from "openapi-fetch";
 
 import type { QueryState } from "./api.ts";
+import type { MaybeRefOrGetter } from "vue";
 
 export type useQueryType<
     Paths extends Record<string, Record<HttpMethod, object>>,
@@ -19,7 +20,9 @@ export type useQueryType<
 >(
     method: Method,
     url: Path,
-    ...init: InitParam<Init>
+    ...init: RequiredKeysOf<Init> extends never
+        ? [MaybeRefOrGetter<Init, unknown>?]
+        : [MaybeRefOrGetter<Init, unknown>]
 ) => QueryState<SuccessResponse<ResponseObjectMap<Paths[Path][Method]>, Media>>;
 
 export function makeUseQuery<Paths, Media>(

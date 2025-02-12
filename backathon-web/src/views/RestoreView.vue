@@ -3,17 +3,20 @@
     <div class="columns">
         <div class="column">
             <h2 class="subtitle is-2">Snapshots</h2>
-            <table class="table is-striped">
+            <b>(Select one)</b>
+            <table class="table">
                 <tbody>
                     <tr>
                         <th>ID</th>
                         <th>Path</th>
                         <th>Timestamp</th>
-                        <th>Root</th>
                     </tr>
                     <tr
                         v-for="snapshot in snapshots"
                         :key="snapshot.id"
+                        class="is-selectable"
+                        :class="{ 'is-selected': snapshot.id === activeSnapshot?.id }"
+                        @click="activeSnapshot = snapshot"
                     >
                         <td>{{ snapshot.id }}</td>
                         <td>
@@ -22,21 +25,42 @@
                         <td>
                             {{ new Date(snapshot.timestamp).toString() }}
                         </td>
-                        <td>{{ snapshot.root }}</td>
                     </tr>
                 </tbody>
             </table>
         </div>
         <div class="column">
             <h2 class="subtitle is-2">Files</h2>
+            <FileList
+                v-if="activeSnapshot"
+                :snapshot="activeSnapshot"
+            />
+            <div v-else>Choose a snapshot</div>
         </div>
     </div>
 </template>
 
-<style scoped></style>
+<!--suppress CssUnresolvedCustomProperty -->
+<style scoped>
+.table tbody tr.is-selectable {
+    cursor: pointer;
+}
+.table tbody tr.is-selectable:not(.is-selected):hover {
+    background-color: var(--table-row-hover-background-color);
+}
+.table tbody tr.is-selected {
+    background-color: var(--table-row-active-background-color);
+    color: var(--table-row-active-color);
+}
+</style>
 
 <script setup lang="ts">
+import { type components } from "@/schema";
 import { useQuery } from "@/api.ts";
+import { type Ref, ref } from "vue";
+import FileList from "@/components/FileList.vue";
 
 const { state: snapshots } = useQuery("get", "/snapshots");
+
+const activeSnapshot: Ref<components["schemas"]["Snapshot"] | null> = ref(null);
 </script>
