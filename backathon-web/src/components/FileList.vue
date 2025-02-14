@@ -42,7 +42,7 @@
 <script setup lang="ts">
 import { type components } from "@/schema";
 import { computed, reactive } from "vue";
-import { useQuery } from "@/api.ts";
+import { useQuery } from "@/api";
 
 const props = defineProps<{
     snapshot: components["schemas"]["Snapshot"];
