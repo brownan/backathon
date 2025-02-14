@@ -42,20 +42,16 @@
 <script setup lang="ts">
 import { type components } from "@/schema";
 import { computed, reactive } from "vue";
-import { useQuery } from "@/api";
+import { conditionalUseQuery, useQuery } from "@/api";
 
 const props = defineProps<{
     snapshot: components["schemas"]["Snapshot"];
 }>();
 
-const { data: rootObj } = useQuery("get", "/objects/{objid}", () => {
-    return {
-        params: {
-            path: {
-                objid: props.snapshot.root,
-            },
-        },
-    };
+const { data: rootObj } = useQuery("get", "/objects/{objid}", {
+    params: {
+        path: () => ({ objid: props.snapshot.root }),
+    },
 });
 
 type ObjectWithName = components["schemas"]["Object"] & { name: string };
@@ -72,14 +68,17 @@ const currentObj = computed(() =>
 
 const selectedObjects = reactive(new Set() as Set<string>);
 
-const { data: currentDirList } = useQuery("get", "/objects/{objid}/ls", () => {
-    return {
-        params: {
-            path: {
-                objid: currentObj.value?.objid,
+const { data: currentDirList } = conditionalUseQuery(() => {
+    if (currentObj.value) {
+        return useQuery("get", "/objects/{objid}/ls", {
+            params: {
+                path: {
+                    objid: currentObj.value.objid,
+                },
             },
-        },
-    };
+        });
+    }
+    return undefined;
 });
 
 const files = computed(() => {

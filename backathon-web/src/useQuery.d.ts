@@ -19,7 +19,7 @@ import type { paths } from "./schema.d.ts";
 
 import { type MaybeRefOrGetter, type Ref } from "vue";
 
-type ReactiveKeyedObject<Obj> = { [K in keyof Obj]: Obj[K] | MaybeRefOrGetter<Obj[K]> };
+type ReactiveKeyedObject<Obj> = { [K in keyof Obj]: MaybeRefOrGetter<Obj[K]> };
 
 type ReactiveParamsOption<T> = T extends {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -31,7 +31,7 @@ type ReactiveParamsOption<T> = T extends {
     : DefaultParamsOption;
 
 export type ReactiveFetchOptions<Operation> = {
-    enable?: Ref<boolean>;
+    enable?: MaybeRefOrGetter<boolean>;
 } & ReactiveParamsOption<Operation> &
     RequestBodyOption<Operation> & {
         baseUrl?: string;
@@ -47,6 +47,7 @@ export interface QueryState<T, E> {
     isReady: Ref<boolean>;
     isFetching: Ref<boolean>;
     error: Ref<E | null>;
+    stop: () => void;
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type GetResponses<O> = O extends { responses: Record<string | number, any> }

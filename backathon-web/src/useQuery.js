@@ -1,4 +1,4 @@
-import { ref, toValue, watch } from "vue";
+import { ref, toValue, watch, watchEffect } from "vue";
 import { client } from "@/api.js";
 
 function unwrapParams(params) {
@@ -16,8 +16,9 @@ export function useQuery(method, url, options) {
     // Build the fetch options object with everything but the params, which
     // may be reactive and therefore we resolve below.
     // Also pull out any options that won't be passed thru
-    // eslint-disable-next-line no-unused-vars,@typescript-eslint/no-unused-vars
-    const { enable, params, ...otherOptions } = options;
+    let { enable, params, ...otherOptions } = options;
+
+    enable = enable ? enable : true;
 
     async function execute(unwrappedParams, onCleanup) {
         error.value = undefined;
@@ -45,18 +46,26 @@ export function useQuery(method, url, options) {
         isFetching.value = false;
     }
 
-    watch(
+    const watchHandle = watch(
         () => unwrapParams(params),
         (unwrappedParams, _, onCleanup) => execute(unwrappedParams, onCleanup),
         {
-            immediate: true,
+            immediate: toValue(enable),
         },
     );
+    watchEffect(() => {
+        if (toValue(enable)) {
+            watchHandle.resume();
+        } else {
+            watchHandle.pause();
+        }
+    });
 
     return {
         data,
         isReady,
         isFetching,
         error,
+        stop: () => watchHandle.stop(),
     };
 }
