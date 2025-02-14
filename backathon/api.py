@@ -17,6 +17,7 @@ from backathon import Database
 from backathon.models import FSEntry
 from backathon.models import Object
 from backathon.models import Snapshot
+from backathon.models import make_path_printable
 
 
 @contextlib.asynccontextmanager
@@ -41,6 +42,7 @@ async def repo(req: Request) -> Backathon:
 
 RepoDependency = Annotated[Backathon, Depends(repo)]
 
+ObjIdParam = Annotated[str, Path(pattern=r"[0-9a-fA-F]{2}+")]
 
 api = FastAPI()
 
@@ -49,6 +51,7 @@ dev_app = FastAPI(
     routes=[
         Mount("/api", api),
     ],
+    openapi_url=None,
 )
 
 
@@ -92,9 +95,7 @@ async def del_root(repo: RepoDependency, id: int):
 
 
 @api.get("/objects/{objid}")
-async def get_object(
-    repo: RepoDependency, objid: Annotated[str, Path(pattern=r"[0-9a-fA-F]+")]
-) -> Object:
+async def get_object(repo: RepoDependency, objid: ObjIdParam) -> Object:
     obj = next(
         repo.db.query(
             Object, "SELECT * FROM objects WHERE objid = ?", (bytes.fromhex(objid),)
@@ -124,3 +125,31 @@ async def set_excludes(
 @api.get("/snapshots")
 async def get_snapshots(repo: RepoDependency) -> list[Snapshot]:
     return list(repo.db.query(Snapshot, "SELECT * FROM snapshots ORDER BY timestamp"))
+
+
+@api.get("/objects/{objid}/ls")
+async def get_directory_contents(
+    repo: RepoDependency, objid: ObjIdParam
+) -> list[tuple[str, Object]]:
+    """Given a tree-type object, list the contents of the directory"""
+    ret = []
+    with repo.db.cursor() as cursor:
+        cursor.execute(
+            """
+        SELECT child, name
+        FROM object_relations
+        WHERE parent = ?
+        """,
+            (bytes.fromhex(objid),),
+        )
+        for child, name in cursor:
+            obj = next(
+                repo.db.query(Object, "SELECT * FROM objects WHERE objid = ?", (child,))
+            )
+            ret.append(
+                (
+                    make_path_printable(name),
+                    obj,
+                )
+            )
+    return ret

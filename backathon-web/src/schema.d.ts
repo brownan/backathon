@@ -109,6 +109,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/objects/{objid}/ls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Directory Contents
+         * @description Given a tree-type object, list the contents of the directory
+         */
+        get: operations["get_directory_contents_objects__objid__ls_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -463,6 +483,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Snapshot"][];
+                };
+            };
+        };
+    };
+    get_directory_contents_objects__objid__ls_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                objid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": [string, components["schemas"]["Object"]][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

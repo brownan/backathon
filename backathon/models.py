@@ -66,6 +66,14 @@ class BytesHexEncoder(EncoderProtocol):
         return value.hex().lower().encode("ascii")
 
 
+def make_path_printable(path: bytes):
+    """Use the replacement error handler to turn any surrogate codepoints
+    into something that won't crash attempts to encode them
+
+    """
+    return path.decode(sys.getfilesystemencoding(), errors="replace")
+
+
 class Object(BaseModel):
     """Represents a row in the object table
 
@@ -238,9 +246,7 @@ class FSEntry(BaseModel):
     @cached_property
     def printable_path(self) -> str:
         """Used in printable representations"""
-        # Use the replacement error handler to turn any surrogate codepoints
-        # into something that won't crash attempts to encode them
-        return self.path.decode(sys.getfilesystemencoding(), errors="replace")
+        return make_path_printable(self.path)
 
     parent: int | None = None
 

@@ -1,46 +1,62 @@
-import { ref, toValue, watch } from "vue";
+import { ref, toValue, watch, watchEffect } from "vue";
 
 export function makeUseQuery(client) {
-    function _useQuery(method, url, params) {
-        const state = ref();
+    function _useQuery(method, url, params, disable) {
+        const data = ref();
         const isReady = ref(false);
         const isFetching = ref(false);
         const error = ref(undefined);
 
-        async function execute(unwrappedParams, _, onCleanup) {
+        if (!disable) {
+            disable = ref(false);
+        }
+
+        async function execute(unwrappedParams, onCleanup) {
             error.value = undefined;
             isReady.value = false;
             isFetching.value = true;
 
             const abort = new AbortController();
-
-            const { data, error: fetchError } = await client.request(method, url, {
-                ...unwrappedParams,
-                signal: abort.signal,
-            });
-
             onCleanup(abort.abort);
+
+            const { data: fetchData, error: fetchError } = await client.request(
+                method,
+                url,
+                {
+                    ...unwrappedParams,
+                    signal: abort.signal,
+                },
+            );
 
             if (fetchError) {
                 error.value = fetchError;
             } else {
-                state.value = data;
+                data.value = fetchData;
                 isReady.value = true;
             }
             isFetching.value = false;
         }
 
-        watch(
+        const watchHandle = watch(
             () => toValue(params),
-            (unwrappedParams) => {
-                execute(unwrappedParams);
+            (unwrappedParams, _, onCleanup) => {
+                execute(unwrappedParams, onCleanup);
             },
             {
-                immediate: true,
+                immediate: !disable.value,
             },
         );
+
+        watchEffect(() => {
+            if (disable.value) {
+                watchHandle.pause();
+            } else {
+                watchHandle.resume();
+            }
+        });
+
         return {
-            state,
+            data,
             isReady,
             isFetching,
             error,

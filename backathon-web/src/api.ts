@@ -10,7 +10,7 @@ export interface AppError {
 }
 
 export interface QueryState<T> {
-    state: Ref<T | undefined>;
+    data: Ref<T | undefined>;
     isReady: Ref<boolean>;
     isFetching: Ref<boolean>;
     error: Ref<AppError | undefined>;

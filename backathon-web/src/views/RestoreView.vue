@@ -23,7 +23,7 @@
                             {{ snapshot.path }}
                         </td>
                         <td>
-                            {{ new Date(snapshot.timestamp).toString() }}
+                            {{ new Date(snapshot.timestamp).toLocaleString() }}
                         </td>
                     </tr>
                 </tbody>
@@ -60,7 +60,7 @@ import { useQuery } from "@/api.ts";
 import { type Ref, ref } from "vue";
 import FileList from "@/components/FileList.vue";
 
-const { state: snapshots } = useQuery("get", "/snapshots");
+const { data: snapshots } = useQuery("get", "/snapshots");
 
 const activeSnapshot: Ref<components["schemas"]["Snapshot"] | null> = ref(null);
 </script>
