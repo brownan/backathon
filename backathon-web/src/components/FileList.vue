@@ -45,11 +45,13 @@ const props = defineProps<{
 }>();
 
 const { data: rootObj } = toRefs(
-    useQuery("get", "/objects/{objid}", {
+    useQuery("get", "/objects/{objid}", () => ({
         params: {
-            path: () => ({ objid: props.snapshot.root }),
+            path: {
+                objid: props.snapshot.root,
+            },
         },
-    }),
+    })),
 );
 
 type ObjectWithName = components["schemas"]["Object"] & { name: string };

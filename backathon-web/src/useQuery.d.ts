@@ -10,6 +10,7 @@ import {
     type ClientOptions,
     DefaultParamsOption,
     type HeadersOptions,
+    type MaybeOptionalInit,
     type ParseAs,
     type QuerySerializer,
     type QuerySerializerOptions,
@@ -47,7 +48,7 @@ export interface QueryState<T, E> {
     isReady: boolean;
     isFetching: boolean;
     error: E | null;
-    stop: () => void;
+    cancel: () => void;
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type GetResponses<O> = O extends { responses: Record<string | number, any> }
@@ -58,10 +59,11 @@ export function useQuery<
     Media extends "application/json",
     Method extends HttpMethod,
     Path extends PathsWithMethod<paths, Method>,
+    Init extends MaybeOptionalInit<paths[Path], Method>,
 >(
     method: Method,
     url: Path,
-    options: ReactiveFetchOptions<paths[Path][Method]>,
+    init: MaybeRefOrGetter<Init>,
 ): QueryState<
     SuccessResponse<GetResponses<paths[Path][Method]>, Media>,
     ErrorResponse<GetResponses<paths[Path][Method]>, Media>
