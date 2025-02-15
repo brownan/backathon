@@ -3,22 +3,22 @@ import createClient from "openapi-fetch";
 import type { paths } from "./schema.d.ts";
 import type { Ref } from "vue";
 import type { QueryState } from "@/useQuery";
-import { computed, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 
 export const client = createClient<paths, "application/json">({ baseUrl: "/api" });
 
 export { useQuery } from "@/useQuery";
 
-export function destructureQueryStateRef<T, E>(
+function destructureQueryStateRef<T, E>(
     queryStateRef: Ref<QueryState<T, E> | undefined>,
 ): QueryState<T, E> {
-    return {
-        data: computed(() => queryStateRef.value?.data.value || null),
-        isReady: computed(() => queryStateRef.value?.isReady.value || false),
-        isFetching: computed(() => queryStateRef.value?.isFetching.value || false),
-        error: computed(() => queryStateRef.value?.error.value || null),
+    return reactive({
+        data: computed(() => queryStateRef.value?.data || null),
+        isReady: computed(() => queryStateRef.value?.isReady || false),
+        isFetching: computed(() => queryStateRef.value?.isFetching || false),
+        error: computed(() => queryStateRef.value?.error || null),
         stop: () => queryStateRef.value?.stop(),
-    };
+    });
 }
 
 export function conditionalUseQuery<T, E>(

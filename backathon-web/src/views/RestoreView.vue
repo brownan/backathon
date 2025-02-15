@@ -57,10 +57,10 @@
 <script setup lang="ts">
 import { type components } from "@/schema";
 import { useQuery } from "@/api.ts";
-import { type Ref, ref } from "vue";
+import { type Ref, ref, toRefs } from "vue";
 import FileList from "@/components/FileList.vue";
 
-const { data: snapshots } = useQuery("get", "/snapshots");
+const { data: snapshots } = toRefs(useQuery("get", "/snapshots", {}));
 
 const activeSnapshot: Ref<components["schemas"]["Snapshot"] | null> = ref(null);
 </script>

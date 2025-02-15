@@ -17,7 +17,7 @@ import {
 } from "openapi-fetch";
 import type { paths } from "./schema.d.ts";
 
-import { type MaybeRefOrGetter, type Ref } from "vue";
+import { type MaybeRefOrGetter } from "vue";
 
 type ReactiveKeyedObject<Obj> = { [K in keyof Obj]: MaybeRefOrGetter<Obj[K]> };
 
@@ -43,10 +43,10 @@ export type ReactiveFetchOptions<Operation> = {
     } & Omit<RequestInit, "body" | "headers">;
 
 export interface QueryState<T, E> {
-    data: Ref<T | null>;
-    isReady: Ref<boolean>;
-    isFetching: Ref<boolean>;
-    error: Ref<E | null>;
+    data: T | null;
+    isReady: boolean;
+    isFetching: boolean;
+    error: E | null;
     stop: () => void;
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

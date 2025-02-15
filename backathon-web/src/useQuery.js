@@ -1,6 +1,12 @@
-import { ref, toValue, watch, watchEffect } from "vue";
-import { client } from "@/api.js";
+import { reactive, ref, toValue, watch } from "vue";
+import { client } from "@/api.ts";
 
+/**
+ * Takes an object and passes each key through vue's toValue() to unwrap
+ * it if it's a reference, computed ref, or getter function
+ * @param params Record<string, MaybeRefOrGetter<any>>
+ * @returns {{[p: string]: any}}
+ */
 function unwrapParams(params) {
     return Object.fromEntries(
         Object.keys(params).map((key) => [key, toValue(params[key])]),
@@ -16,9 +22,9 @@ export function useQuery(method, url, options) {
     // Build the fetch options object with everything but the params, which
     // may be reactive and therefore we resolve below.
     // Also pull out any options that won't be passed thru
-    let { enable, params, ...otherOptions } = options;
+    let { params, ...otherOptions } = options;
 
-    enable = enable ? enable : true;
+    params = params ? params : {};
 
     async function execute(unwrappedParams, onCleanup) {
         error.value = undefined;
@@ -29,7 +35,7 @@ export function useQuery(method, url, options) {
         onCleanup(abort.abort);
 
         const ret = await client.request(method, url, {
-            ...unwrappedParams,
+            ...{ params: unwrappedParams },
             ...otherOptions,
             signal: abort.signal,
         });
@@ -50,22 +56,15 @@ export function useQuery(method, url, options) {
         () => unwrapParams(params),
         (unwrappedParams, _, onCleanup) => execute(unwrappedParams, onCleanup),
         {
-            immediate: toValue(enable),
+            immediate: true,
         },
     );
-    watchEffect(() => {
-        if (toValue(enable)) {
-            watchHandle.resume();
-        } else {
-            watchHandle.pause();
-        }
-    });
 
-    return {
+    return reactive({
         data,
         isReady,
         isFetching,
         error,
         stop: () => watchHandle.stop(),
-    };
+    });
 }

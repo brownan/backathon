@@ -1,9 +1,5 @@
 <template>
     <h2 class="title is-4">{{ snapshot.path }}</h2>
-    <ul>
-        <li>Current dir: {{ currentDir }}</li>
-        <li>parent dir: {{ parentDir }}</li>
-    </ul>
     <table class="table is-striped is-fullwidth">
         <thead>
             <tr>
@@ -41,18 +37,20 @@
 
 <script setup lang="ts">
 import { type components } from "@/schema";
-import { computed, reactive } from "vue";
+import { computed, reactive, toRefs } from "vue";
 import { conditionalUseQuery, useQuery } from "@/api";
 
 const props = defineProps<{
     snapshot: components["schemas"]["Snapshot"];
 }>();
 
-const { data: rootObj } = useQuery("get", "/objects/{objid}", {
-    params: {
-        path: () => ({ objid: props.snapshot.root }),
-    },
-});
+const { data: rootObj } = toRefs(
+    useQuery("get", "/objects/{objid}", {
+        params: {
+            path: () => ({ objid: props.snapshot.root }),
+        },
+    }),
+);
 
 type ObjectWithName = components["schemas"]["Object"] & { name: string };
 
@@ -68,18 +66,20 @@ const currentObj = computed(() =>
 
 const selectedObjects = reactive(new Set() as Set<string>);
 
-const { data: currentDirList } = conditionalUseQuery(() => {
-    if (currentObj.value) {
-        return useQuery("get", "/objects/{objid}/ls", {
-            params: {
-                path: {
-                    objid: currentObj.value.objid,
+const { data: currentDirList } = toRefs(
+    conditionalUseQuery(() => {
+        if (currentObj.value) {
+            return useQuery("get", "/objects/{objid}/ls", {
+                params: {
+                    path: {
+                        objid: currentObj.value.objid,
+                    },
                 },
-            },
-        });
-    }
-    return undefined;
-});
+            });
+        }
+        return undefined;
+    }),
+);
 
 const files = computed(() => {
     return currentDirList.value?.map(([name, obj]) => {
