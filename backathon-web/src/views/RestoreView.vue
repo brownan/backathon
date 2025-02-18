@@ -1,7 +1,7 @@
 <template>
     <h1 class="title is-1">Restore Files</h1>
     <div class="columns">
-        <div class="column">
+        <div class="column is-one-quarter">
             <h2 class="subtitle is-2">Snapshots</h2>
             <b>(Select one)</b>
             <table class="table">

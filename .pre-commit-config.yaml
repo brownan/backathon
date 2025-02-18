@@ -28,6 +28,7 @@ repos:
           - fastapi
           - uvicorn
           - typer
+          - natsort
 
 -   repo: https://github.com/pre-commit/mirrors-eslint
     rev: v9.19.0

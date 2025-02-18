@@ -14,6 +14,7 @@ fastapi = {extras = ["standard"], version = "*"}
 click = "*"
 lz4 = "*"
 typer = "*"
+natsort = "*"
 
 [dev-packages]
 mcon = "*"

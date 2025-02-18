@@ -2,8 +2,10 @@ import asyncio
 import contextlib
 import os
 import pathlib
+from operator import itemgetter
 from typing import Annotated
 
+import natsort
 from fastapi import Body
 from fastapi import Depends
 from fastapi import FastAPI
@@ -152,4 +154,8 @@ async def get_directory_contents(
                     obj,
                 )
             )
+    ret.sort(key=file_sort_key_func)
     return ret
+
+
+file_sort_key_func = natsort.os_sort_keygen(itemgetter(0))
