@@ -42,6 +42,7 @@ export default defineConfigWithVueTs(
 
             'vue/v-bind-style': 'off',
             'vue/v-on-style': 'off',
+            'vue/component-name-in-template-casing': ["error", "PascalCase"],
             'no-console': 'off',
             'no-unused-vars': [
                 'error',

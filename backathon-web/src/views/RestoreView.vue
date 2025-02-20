@@ -31,10 +31,9 @@
         </div>
         <div class="column">
             <h2 class="subtitle is-2">Files</h2>
-            <FileList
-                v-if="activeSnapshot"
-                :snapshot="activeSnapshot"
-            />
+            <ul v-if="activeSnapshot">
+                <FileList :snapshot="activeSnapshot" />
+            </ul>
             <div v-else>Choose a snapshot</div>
         </div>
     </div>

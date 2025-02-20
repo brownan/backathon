@@ -1,44 +1,42 @@
 <template>
-    <h2 class="title is-4">{{ snapshot.path }}</h2>
-    <table class="table is-striped is-fullwidth">
-        <thead>
-            <tr>
-                <th></th>
-                <th>Name</th>
-                <th>Size</th>
-                <th>Last Modified</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr
-                v-for="file in files"
-                :key="file.name"
-            >
-                <td>
-                    <input
-                        type="checkbox"
-                        :checked="selectedObjects.has(file.objid)"
-                        @change="
-                            selectedObjects.has(file.objid)
-                                ? selectedObjects.delete(file.objid)
-                                : selectedObjects.add(file.objid)
-                        "
-                    />
-                </td>
-                <td>{{ file.name }}{{ file.type === "tree" ? "/" : "" }}</td>
-                <td>{{ file.size }}</td>
-                <td>{{ file.lastModified?.toLocaleString() }}</td>
-            </tr>
-        </tbody>
-    </table>
+    <li>
+        <div class="filelist-directory">
+            <div class="icon">
+                <MdiIcon :path="mdiMenuRight" />
+            </div>
+            <div class="icon">
+                <MdiIcon :path="mdiCheckboxBlankOutline" />
+            </div>
+            <div class="icon">
+                <MdiIcon :path="mdiFolderOutline" />
+            </div>
+            <div>Filename</div>
+        </div>
+        <ul class="filelist-children">
+            <li>Children</li>
+        </ul>
+    </li>
 </template>
 
-<style scoped></style>
+<style scoped>
+.filelist-directory {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 1em;
+    row-gap: 0.5em;
+}
+.filelist-children {
+    margin-left: 16px;
+}
+</style>
 
 <script setup lang="ts">
 import { type components } from "@/schema";
 import { computed, reactive, toRefs } from "vue";
 import { conditionalUseQuery, useQuery } from "@/api";
+
+import MdiIcon from "@/utils/MdiIcon.vue";
+import { mdiMenuRight, mdiCheckboxBlankOutline, mdiFolderOutline } from "@mdi/js";
 
 const props = defineProps<{
     snapshot: components["schemas"]["Snapshot"];
