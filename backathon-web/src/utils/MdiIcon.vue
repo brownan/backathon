@@ -61,7 +61,7 @@ const types: Record<string, { size: number; viewbox: string }> = {
     },
 };
 
-import { defineComponent } from "vue";
+import { defineComponent, type PropType } from "vue";
 
 export default defineComponent({
     name: "MdiIcon",
@@ -72,7 +72,7 @@ export default defineComponent({
         size: { type: [String, Number], default: 24 },
         viewbox: String,
         flip: {
-            type: String,
+            type: String as PropType<"horizontal" | "vertical" | "both" | "none">,
             default: "none",
             validator: (value: string) =>
                 ["horizontal", "vertical", "both", "none"].includes(value),

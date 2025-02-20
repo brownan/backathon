@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import os
 import pathlib
-from operator import itemgetter
+from operator import attrgetter
 from typing import Annotated
 
 import natsort
@@ -12,6 +12,8 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Path
 from fastapi import Request
+from pydantic import Base64Bytes
+from pydantic import BaseModel
 from starlette.routing import Mount
 
 from backathon import Backathon
@@ -129,10 +131,19 @@ async def get_snapshots(repo: RepoDependency) -> list[Snapshot]:
     return list(repo.db.query(Snapshot, "SELECT * FROM snapshots ORDER BY timestamp"))
 
 
+class DirListEntry(BaseModel):
+    id: Base64Bytes
+    name: str
+    obj: Object
+
+
+dir_list_entry_sort_key = natsort.os_sort_keygen(attrgetter("id"))
+
+
 @api.get("/objects/{objid}/ls")
 async def get_directory_contents(
     repo: RepoDependency, objid: ObjIdParam
-) -> list[tuple[str, Object]]:
+) -> list[DirListEntry]:
     """Given a tree-type object, list the contents of the directory"""
     ret = []
     with repo.db.cursor() as cursor:
@@ -149,13 +160,11 @@ async def get_directory_contents(
                 repo.db.query(Object, "SELECT * FROM objects WHERE objid = ?", (child,))
             )
             ret.append(
-                (
-                    make_path_printable(name),
-                    obj,
+                DirListEntry.model_construct(
+                    id=name,
+                    name=make_path_printable(name),
+                    obj=obj,
                 )
             )
-    ret.sort(key=file_sort_key_func)
+    ret.sort(key=dir_list_entry_sort_key)
     return ret
-
-
-file_sort_key_func = natsort.os_sort_keygen(itemgetter(0))

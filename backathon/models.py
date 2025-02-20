@@ -66,9 +66,13 @@ class BytesHexEncoder(EncoderProtocol):
         return value.hex().lower().encode("ascii")
 
 
-def make_path_printable(path: bytes):
+def make_path_printable(path: bytes) -> str:
     """Use the replacement error handler to turn any surrogate codepoints
     into something that won't crash attempts to encode them
+
+    This function is lossy, and should only be used for user-display. Printable
+    paths and names can't be used to identify files or objects, because they
+    may not be unique.
 
     """
     return path.decode(sys.getfilesystemencoding(), errors="replace")

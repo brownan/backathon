@@ -138,6 +138,17 @@ export interface components {
             /** Path */
             path: string;
         };
+        /** DirListEntry */
+        DirListEntry: {
+            /**
+             * Id
+             * Format: base64
+             */
+            id: string;
+            /** Name */
+            name: string;
+            obj: components["schemas"]["Object"];
+        };
         /**
          * FSEntry
          * @description Represents a row in the fsentry table
@@ -504,7 +515,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": [string, components["schemas"]["Object"]][];
+                    "application/json": components["schemas"]["DirListEntry"][];
                 };
             };
             /** @description Validation Error */
