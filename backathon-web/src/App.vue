@@ -67,11 +67,13 @@
     <div class="section">
         <RouterView />
     </div>
+    <ModalsContainer />
 </template>
 
 <script setup lang="ts">
 import { ref } from "vue";
 import { RouterView } from "vue-router";
+import { ModalsContainer } from "vue-final-modal";
 
 const navbarActive = ref(false);
 </script>

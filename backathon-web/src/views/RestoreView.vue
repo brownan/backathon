@@ -31,11 +31,23 @@
         </div>
         <div class="column">
             <h2 class="subtitle is-2">Files</h2>
-            <ul v-if="activeSnapshot">
-                <FileList :snapshot="activeSnapshot" />
+            <ul v-if="activeSnapshot && rootName && rootObj && rootId">
+                <FileList
+                    :obj="rootObj"
+                    :name="rootName"
+                    :id="rootId"
+                />
             </ul>
             <div v-else>Choose a snapshot</div>
         </div>
+        <StyledModal v-model="modalShow"> Test </StyledModal>
+        <button
+            type="button"
+            class="button"
+            @click="modalShow = !modalShow"
+        >
+            Show Modal
+        </button>
     </div>
 </template>
 
@@ -55,11 +67,38 @@
 
 <script setup lang="ts">
 import { type components } from "@/schema";
-import { useQuery } from "@/api.ts";
-import { type Ref, ref, toRefs } from "vue";
+import { conditionalUseQuery, useQuery } from "@/api.ts";
+import { computed, type Ref, ref, toRefs } from "vue";
 import FileList from "@/components/FileList.vue";
+import StyledModal from "@/components/StyledModal.vue";
+
+const modalShow = ref<boolean>(false);
 
 const { data: snapshots } = toRefs(useQuery("get", "/snapshots", {}));
 
 const activeSnapshot: Ref<components["schemas"]["Snapshot"] | null> = ref(null);
+
+const { data: rootObj } = toRefs(
+    conditionalUseQuery(() => {
+        if (activeSnapshot.value) {
+            return useQuery("get", "/objects/{objid}", {
+                params: {
+                    path: {
+                        objid: activeSnapshot.value.root,
+                    },
+                },
+            });
+        }
+    }),
+);
+
+const rootName = computed(() => {
+    if (activeSnapshot.value) {
+        const date = new Date(activeSnapshot.value.timestamp);
+        return `Snapshot-${date.toISOString()}`;
+    }
+    return null;
+});
+
+const rootId = computed(() => (rootName.value ? window.btoa(rootName.value) : null));
 </script>

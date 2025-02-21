@@ -98,19 +98,6 @@ async def del_root(repo: RepoDependency, id: int):
         cursor.execute("DELETE FROM fsentry WHERE id = ?", (entry.id,))
 
 
-@api.get("/objects/{objid}")
-async def get_object(repo: RepoDependency, objid: ObjIdParam) -> Object:
-    obj = next(
-        repo.db.query(
-            Object, "SELECT * FROM objects WHERE objid = ?", (bytes.fromhex(objid),)
-        ),
-        None,
-    )
-    if obj is None:
-        raise HTTPException(status_code=404)
-    return obj
-
-
 @api.get("/excludes/")
 async def get_excludes(
     repo: RepoDependency,
@@ -129,6 +116,19 @@ async def set_excludes(
 @api.get("/snapshots")
 async def get_snapshots(repo: RepoDependency) -> list[Snapshot]:
     return list(repo.db.query(Snapshot, "SELECT * FROM snapshots ORDER BY timestamp"))
+
+
+@api.get("/objects/{objid}")
+async def get_object(repo: RepoDependency, objid: ObjIdParam) -> Object:
+    obj = next(
+        repo.db.query(
+            Object, "SELECT * FROM objects WHERE objid = ?", (bytes.fromhex(objid),)
+        ),
+        None,
+    )
+    if obj is None:
+        raise HTTPException(status_code=404)
+    return obj
 
 
 class DirListEntry(BaseModel):

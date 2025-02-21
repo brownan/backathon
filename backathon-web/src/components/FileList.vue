@@ -1,19 +1,54 @@
 <template>
     <li>
         <div class="filelist-directory">
-            <div class="icon">
-                <MdiIcon :path="mdiMenuRight" />
+            <button
+                type="button"
+                v-if="isTree"
+                class="icon"
+                @click="expanded = !expanded"
+            >
+                <MdiIcon
+                    class="expand-icon"
+                    :path="mdiMenuRight"
+                    :rotate="expanded ? 90 : 0"
+                />
+            </button>
+            <div
+                v-else
+                class="icon"
+            >
+                <!-- spacer, if no expand icon -->
             </div>
-            <div class="icon">
-                <MdiIcon :path="mdiCheckboxBlankOutline" />
+            <div
+                class="icon"
+                @click="isTree && (expanded = !expanded)"
+            >
+                <MdiIcon :path="isTree ? mdiFolderOutline : mdiFileOutline" />
             </div>
-            <div class="icon">
-                <MdiIcon :path="mdiFolderOutline" />
+            <div
+                class="filelist-name"
+                @click="isTree && (expanded = !expanded)"
+            >
+                {{ name }}
             </div>
-            <div>Filename</div>
+            <button
+                type="button"
+                class="button is-small"
+            >
+                Restore
+            </button>
         </div>
-        <ul class="filelist-children">
-            <li>Children</li>
+        <ul
+            v-if="expanded && isTree"
+            class="filelist-children"
+        >
+            <FileList
+                v-for="child in objList"
+                :obj="child.obj"
+                :name="child.name"
+                :id="child.id"
+                :key="child.id"
+            />
         </ul>
     </li>
 </template>
@@ -25,75 +60,70 @@
     column-gap: 1em;
     row-gap: 0.5em;
 }
+.filelist-directory:hover {
+    background-color: var(--scheme-main-bis);
+}
 .filelist-children {
     margin-left: 16px;
+}
+.filelist-name {
+    flex-grow: 1;
+}
+.expand-icon {
+    transition: transform linear 0.2s;
 }
 </style>
 
 <script setup lang="ts">
 import { type components } from "@/schema";
-import { computed, reactive, toRefs } from "vue";
+import { computed, ref, toRefs } from "vue";
 import { conditionalUseQuery, useQuery } from "@/api";
 
 import MdiIcon from "@/utils/MdiIcon.vue";
-import { mdiMenuRight, mdiCheckboxBlankOutline, mdiFolderOutline } from "@mdi/js";
+import { mdiMenuRight, mdiFolderOutline, mdiFileOutline } from "@mdi/js";
+
+/**
+ * This component takes an object ID that's either a file or a directory, and
+ * displays it.
+ *
+ * Props:
+ * * objid - the object to display
+
+ * Need some notion of a "path" to this object, because objects can appear in multiple
+ * places in a tree. This also includes a name for this object, because an object doesn't
+ * have a name of its own, just the name it's given by whatever directory it's in.
+ *
+ * This component should have the ability to select and un-select itself.
+ * ... or does it? What if I just had a "download" link by each one? You could choose
+ * to restore the entire tree, or just one file. Selecting a complex subset of the backup
+ * would be more complicated, and maybe not even that useful. Unless you wanted to restore
+ * /almost/ everything, but there's like one or two things that are real big and you don't
+ * care about.
+ *
+ * Perhaps that's a later iteration.
+ */
 
 const props = defineProps<{
-    snapshot: components["schemas"]["Snapshot"];
+    obj: components["schemas"]["Object"];
+    name: string; // Printable name
+    id: string; // Actual name, base64 encoded
 }>();
 
-const { data: rootObj } = toRefs(
-    useQuery("get", "/objects/{objid}", () => ({
-        params: {
-            path: {
-                objid: props.snapshot.root,
-            },
-        },
-    })),
-);
+const isTree = computed(() => props.obj.type === "tree");
 
-type ObjectWithName = components["schemas"]["Object"] & { name: string };
-
-const path = reactive([] as ObjectWithName[]);
-
-const currentObj = computed(() =>
-    path.length > 0
-        ? path[path.length - 1]
-        : rootObj.value
-        ? { name: props.snapshot.path, ...rootObj.value }
-        : null,
-);
-
-const selectedObjects = reactive(new Set() as Set<string>);
-
-const { data: currentDirList } = toRefs(
+const { data: objList } = toRefs(
     conditionalUseQuery(() => {
-        if (currentObj.value) {
+        if (isTree.value) {
             return useQuery("get", "/objects/{objid}/ls", {
                 params: {
                     path: {
-                        objid: currentObj.value.objid,
+                        objid: props.obj.objid,
                     },
                 },
             });
         }
-        return undefined;
     }),
 );
 
-const files = computed(() => {
-    return currentDirList.value?.map(([name, obj]) => {
-        return {
-            name: name,
-            objid: obj.objid,
-            type: obj.type,
-            size: obj.file_size,
-            lastModified: obj.last_modified_time
-                ? new Date(obj.last_modified_time)
-                : null,
-        };
-    });
-});
-
-// get info about this snapshot, including the root object
+const expanded = ref<boolean>(false);
 </script>

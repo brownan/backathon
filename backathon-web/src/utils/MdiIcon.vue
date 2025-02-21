@@ -25,6 +25,7 @@ SOFTWARE.
 -->
 <template>
     <svg
+        class="svg-icon"
         :width="sizeValue"
         :height="sizeValue"
         :viewBox="viewboxValue"
@@ -34,13 +35,13 @@ SOFTWARE.
     </svg>
 </template>
 
-<style scoped>
-svg {
+<style>
+svg.svg-icon {
     /*noinspection CssUnresolvedCustomProperty*/
     transform: rotate(var(--r, 0deg)) scale(var(--sx, 1), var(--sy, 1));
 }
 
-path {
+svg.svg-icon > path {
     fill: currentColor;
 }
 </style>
