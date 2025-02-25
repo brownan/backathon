@@ -34,6 +34,7 @@
             <button
                 type="button"
                 class="button is-small"
+                @click="emit('restore', { ...props })"
             >
                 Restore
             </button>
@@ -48,6 +49,7 @@
                 :name="child.name"
                 :id="child.id"
                 :key="child.id"
+                @restore="emit('restore', $event)"
             />
         </ul>
     </li>
@@ -85,28 +87,18 @@ import { mdiMenuRight, mdiFolderOutline, mdiFileOutline } from "@mdi/js";
 /**
  * This component takes an object ID that's either a file or a directory, and
  * displays it.
- *
- * Props:
- * * objid - the object to display
-
- * Need some notion of a "path" to this object, because objects can appear in multiple
- * places in a tree. This also includes a name for this object, because an object doesn't
- * have a name of its own, just the name it's given by whatever directory it's in.
- *
- * This component should have the ability to select and un-select itself.
- * ... or does it? What if I just had a "download" link by each one? You could choose
- * to restore the entire tree, or just one file. Selecting a complex subset of the backup
- * would be more complicated, and maybe not even that useful. Unless you wanted to restore
- * /almost/ everything, but there's like one or two things that are real big and you don't
- * care about.
- *
- * Perhaps that's a later iteration.
  */
 
-const props = defineProps<{
+export type FileListProps = {
     obj: components["schemas"]["Object"];
     name: string; // Printable name
     id: string; // Actual name, base64 encoded
+};
+
+const props = defineProps<FileListProps>();
+
+const emit = defineEmits<{
+    restore: [objinfo: FileListProps];
 }>();
 
 const isTree = computed(() => props.obj.type === "tree");

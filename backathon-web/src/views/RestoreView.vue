@@ -36,18 +36,77 @@
                     :obj="rootObj"
                     :name="rootName"
                     :id="rootId"
+                    @restore="showRestoreModal($event)"
                 />
             </ul>
             <div v-else>Choose a snapshot</div>
         </div>
-        <StyledModal v-model="modalShow"> Test </StyledModal>
-        <button
-            type="button"
-            class="button"
-            @click="modalShow = !modalShow"
-        >
-            Show Modal
-        </button>
+        <StyledModal v-model="modalShow">
+            <div class="card">
+                <header class="card-header">
+                    <p class="card-header-title">
+                        <span class="title is-2">Restore File</span>
+                    </p>
+                </header>
+                <div class="card-content">
+                    <div class="content">
+                        <table class="table">
+                            <tbody>
+                                <tr>
+                                    <th>Name</th>
+                                    <td>{{ restoreInfo?.name }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Type</th>
+                                    <td v-if="restoreInfo?.obj?.type === 'file'">File</td>
+                                    <td v-else-if="restoreInfo?.obj?.type === 'tree'">
+                                        Directory
+                                    </td>
+                                    <td v-else-if="restoreInfo?.obj?.type === 'symlink'">
+                                        Symbolic Link
+                                    </td>
+                                    <td v-else>Other</td>
+                                </tr>
+                                <tr>
+                                    <th>Size</th>
+                                    <td>
+                                        {{
+                                            restoreInfo?.obj?.type === "file"
+                                                ? restoreInfo?.obj?.file_size
+                                                : "-"
+                                        }}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Last Modified</th>
+                                    <td>
+                                        {{
+                                            restoreInfo?.obj?.last_modified_time
+                                                ? new Date(
+                                                      restoreInfo.obj.last_modified_time,
+                                                  ).toLocaleString()
+                                                : ""
+                                        }}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="field is-grouped is-grouped-right">
+                            <div class="control">
+                                <button class="button is-link is-outlined">Cancel</button>
+                            </div>
+                            <div class="is-flex-grow-1"></div>
+                            <div class="control">
+                                <button class="button is-link">Restore</button>
+                            </div>
+                            <div class="control">
+                                <button class="button is-link is-light">Download</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </StyledModal>
     </div>
 </template>
 
@@ -69,14 +128,20 @@
 import { type components } from "@/schema";
 import { conditionalUseQuery, useQuery } from "@/api.ts";
 import { computed, type Ref, ref, toRefs } from "vue";
-import FileList from "@/components/FileList.vue";
+import FileList, { type FileListProps } from "@/components/FileList.vue";
 import StyledModal from "@/components/StyledModal.vue";
-
-const modalShow = ref<boolean>(false);
 
 const { data: snapshots } = toRefs(useQuery("get", "/snapshots", {}));
 
 const activeSnapshot: Ref<components["schemas"]["Snapshot"] | null> = ref(null);
+
+const restoreInfo = ref<FileListProps | null>(null);
+const modalShow = ref<boolean>(false);
+
+function showRestoreModal(objinfo: FileListProps) {
+    restoreInfo.value = objinfo;
+    modalShow.value = true;
+}
 
 const { data: rootObj } = toRefs(
     conditionalUseQuery(() => {

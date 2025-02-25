@@ -7,13 +7,11 @@
         content-class="modal-content"
         :focus-trap="false"
     >
-        <div class="box">
-            <p>Modal Content</p>
-            <slot></slot>
-        </div>
+        <slot></slot>
         <button
             class="modal-close is-large"
             aria-label="close"
+            @click="model = false"
         ></button>
     </VueFinalModal>
 </template>
