@@ -34,7 +34,7 @@
             <button
                 type="button"
                 class="button is-small"
-                @click="emit('restore', { ...props })"
+                @click="() => showRestoreModal()"
             >
                 Restore
             </button>
@@ -49,7 +49,6 @@
                 :name="child.name"
                 :id="child.id"
                 :key="child.id"
-                @restore="emit('restore', $event)"
             />
         </ul>
     </li>
@@ -78,11 +77,13 @@
 
 <script setup lang="ts">
 import { type components } from "@/schema";
-import { computed, ref, toRefs } from "vue";
+import { computed, reactive, ref, toRefs } from "vue";
 import { conditionalUseQuery, useQuery } from "@/api";
 
 import MdiIcon from "@/utils/MdiIcon.vue";
 import { mdiMenuRight, mdiFolderOutline, mdiFileOutline } from "@mdi/js";
+import { useModal } from "vue-final-modal";
+import RestoreModal from "@/components/RestoreModal.vue";
 
 /**
  * This component takes an object ID that's either a file or a directory, and
@@ -96,10 +97,7 @@ export type FileListProps = {
 };
 
 const props = defineProps<FileListProps>();
-
-const emit = defineEmits<{
-    restore: [objinfo: FileListProps];
-}>();
+const { obj, name } = toRefs(props);
 
 const isTree = computed(() => props.obj.type === "tree");
 
@@ -118,4 +116,12 @@ const { data: objList } = toRefs(
 );
 
 const expanded = ref<boolean>(false);
+
+const { open: showRestoreModal } = useModal({
+    component: RestoreModal,
+    attrs: reactive({
+        obj,
+        name,
+    }),
+});
 </script>
