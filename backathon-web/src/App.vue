@@ -6,7 +6,7 @@
     >
         <div class="navbar-brand">
             <RouterLink
-                to="home"
+                :to="{ name: 'home' }"
                 class="navbar-item"
             >
                 <h1 class="title">Backathon</h1>
@@ -34,28 +34,28 @@
         >
             <div class="navbar-start">
                 <RouterLink
-                    to="status"
+                    :to="{ name: 'status' }"
                     class="navbar-item"
                     active-class="is-active"
                 >
                     Status
                 </RouterLink>
                 <RouterLink
-                    to="configure"
+                    :to="{ name: 'configure' }"
                     class="navbar-item"
                     active-class="is-active"
                 >
                     Configure
                 </RouterLink>
                 <RouterLink
-                    to="backup"
+                    :to="{ name: 'backup' }"
                     class="navbar-item"
                     active-class="is-active"
                 >
                     Backup
                 </RouterLink>
                 <RouterLink
-                    to="restore"
+                    :to="{ name: 'restore' }"
                     class="navbar-item"
                     active-class="is-active"
                 >

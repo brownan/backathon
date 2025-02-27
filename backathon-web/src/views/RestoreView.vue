@@ -36,6 +36,7 @@
                     :obj="rootObj"
                     :name="rootName"
                     :id="rootId"
+                    :path-prefix="activeSnapshot.path"
                 />
             </ul>
             <div v-else>Choose a snapshot</div>

@@ -49,6 +49,7 @@
                 :name="child.name"
                 :id="child.id"
                 :key="child.id"
+                :path-prefix="`${props.pathPrefix}/${child.name}`"
             />
         </ul>
     </li>
@@ -77,13 +78,14 @@
 
 <script setup lang="ts">
 import { type components } from "@/schema";
-import { computed, reactive, ref, toRefs } from "vue";
+import { computed, reactive, ref, toRefs, watch } from "vue";
 import { conditionalUseQuery, useQuery } from "@/api";
 
 import MdiIcon from "@/utils/MdiIcon.vue";
 import { mdiMenuRight, mdiFolderOutline, mdiFileOutline } from "@mdi/js";
 import { useModal } from "vue-final-modal";
 import RestoreModal from "@/components/RestoreModal.vue";
+import { useSessionStorage, StorageSerializers } from "@vueuse/core";
 
 /**
  * This component takes an object ID that's either a file or a directory, and
@@ -94,6 +96,7 @@ export type FileListProps = {
     obj: components["schemas"]["Object"];
     name: string; // Printable name
     id: string; // Actual name, base64 encoded
+    pathPrefix: string;
 };
 
 const props = defineProps<FileListProps>();
@@ -115,13 +118,28 @@ const { data: objList } = toRefs(
     }),
 );
 
-const expanded = ref<boolean>(false);
-
 const { open: showRestoreModal } = useModal({
     component: RestoreModal,
     attrs: reactive({
         obj,
         name,
     }),
+});
+
+const sessionStorage = useSessionStorage<Set<string>>(
+    "restore-file-list-expanded",
+    new Set(),
+    {
+        serializer: StorageSerializers.set,
+    },
+);
+
+const expanded = ref<boolean>(sessionStorage.value.has(props.pathPrefix));
+watch(expanded, (newval) => {
+    if (!newval) {
+        sessionStorage.value.delete(props.pathPrefix);
+    } else {
+        sessionStorage.value.add(props.pathPrefix);
+    }
 });
 </script>
