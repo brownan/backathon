@@ -16,7 +16,7 @@
                         :key="snapshot.id"
                         class="is-selectable"
                         :class="{ 'is-selected': snapshot.id === activeSnapshot?.id }"
-                        @click="activeSnapshot = snapshot"
+                        @click="selectSnapshot(snapshot.id)"
                     >
                         <td>{{ snapshot.id }}</td>
                         <td>
@@ -58,14 +58,37 @@
 </style>
 
 <script setup lang="ts">
-import { type components } from "@/schema";
 import { conditionalUseQuery, useQuery } from "@/api.ts";
-import { computed, type Ref, ref, toRefs } from "vue";
+import { computed, toRefs } from "vue";
 import FileList from "@/components/FileList.vue";
+import { useRoute, useRouter } from "vue-router";
 
 const { data: snapshots } = toRefs(useQuery("get", "/snapshots", {}));
 
-const activeSnapshot: Ref<components["schemas"]["Snapshot"] | null> = ref(null);
+const routes = useRoute();
+const router = useRouter();
+
+const activeSnapshot = computed(() => {
+    if (!snapshots.value) {
+        return null;
+    }
+    let targetId;
+    try {
+        targetId = Number.parseInt(routes.params.id as string);
+    } catch {
+        return null;
+    }
+    for (const snapshot of snapshots.value) {
+        if (snapshot.id === targetId) {
+            return snapshot;
+        }
+    }
+    return null;
+});
+
+function selectSnapshot(id: number) {
+    router.replace({ name: "restore", params: { id } });
+}
 
 const { data: rootObj } = toRefs(
     conditionalUseQuery(() => {

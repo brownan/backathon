@@ -29,7 +29,7 @@ const router = createRouter({
             component: BackupView,
         },
         {
-            path: "/restore",
+            path: "/restore/:id(\\d+)?",
             name: "restore",
             component: RestoreView,
         },
