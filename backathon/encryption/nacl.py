@@ -15,8 +15,8 @@ from pydantic import EncodedBytes
 from typing_extensions import Buffer
 from typing_extensions import Self
 
+from backathon.encryption import KeyNotDecrypted
 from backathon.encryption.base import EncrypterBase
-from backathon.encryption.base import KeyNotDecrypted
 from backathon.encryption.base import Payload
 from backathon.exceptions import CorruptedRepository
 from backathon.models import BytesHexEncoder

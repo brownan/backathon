@@ -23,10 +23,6 @@ class Payload(NamedTuple):
     sha1: bytes
 
 
-class KeyNotDecrypted(Exception):
-    pass
-
-
 UnlockCallback = Callable[[Callable[[str], None]], None]
 
 C = TypeVar("C", bound=BaseModel)
@@ -68,7 +64,3 @@ class EncrypterBase(ABC, Generic[C]):
     @abstractmethod
     def make_objid(self, buf: Buffer) -> ObjIDType:
         ...
-
-
-class DecryptionError(Exception):
-    pass

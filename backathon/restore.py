@@ -6,6 +6,7 @@ import os
 import pathlib
 from typing import IO
 from typing import TYPE_CHECKING
+from typing import AsyncIterable
 
 from typing_extensions import Buffer
 
@@ -42,6 +43,47 @@ async def restore_obj(
         return await _restore_symlink(path, header, body)
     else:
         raise ValueError(f"Cannot restore objects of type {header.type}")
+
+
+async def stream_file(
+    objid: ObjIDType, get_object: ObjGetter
+) -> tuple[ObjectHeader, AsyncIterable[bytes]]:
+    """Yields a stream of bytes for the given file"""
+    raw_payload = await get_object(objid)
+    header = raw_payload.header
+    body = raw_payload.body
+    if header.type != ObjectType.FILE:
+        raise ValueError("Object given is not a file")
+
+    logger.info("Starting to stream file objid %s", objid.hex())
+
+    if header.blobs is None:
+
+        async def get_body_single():
+            yield bytes(body)
+
+        return header, get_body_single()
+
+    else:
+        header.blobs.sort(key=lambda blobref: blobref.pos)
+
+        async def get_body_multiple(header: ObjectHeader):
+            assert header.blobs is not None
+            pos = 0
+            for blobref in header.blobs:
+                # Handle holes in the file
+                if pos < blobref.pos:
+                    yield b"\0" * (blobref.pos - pos)
+                    pos = blobref.pos
+                blob_payload = await get_object(blobref.objid)
+                if blob_payload.header != ObjectType.BLOB:
+                    logger.error("Expected blob object: %s", objid.hex())
+                    return
+                blob_body = bytes(blob_payload.body)
+                yield blob_body
+                pos += len(blob_body)
+
+        return header, get_body_multiple(header)
 
 
 async def _restore_file(

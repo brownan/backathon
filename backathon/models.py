@@ -48,6 +48,10 @@ ObjIDType = Annotated[
 ]
 
 
+def decode_objid(s: str) -> ObjIDType:
+    return cast(ObjIDType, bytes.fromhex(s))
+
+
 class ObjectType(str, enum.Enum):
     FILE = "file"
     BLOB = "blob"

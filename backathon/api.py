@@ -12,16 +12,22 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Path
 from fastapi import Request
+from fastapi.responses import StreamingResponse
 from pydantic import Base64Bytes
 from pydantic import BaseModel
 from starlette.routing import Mount
 
+import backathon.encryption
+import backathon.models
+import backathon.repository
 from backathon import Backathon
 from backathon import Database
 from backathon.models import FSEntry
 from backathon.models import Object
 from backathon.models import Snapshot
+from backathon.models import decode_objid
 from backathon.models import make_path_printable
+from backathon.restore import stream_file
 
 
 @contextlib.asynccontextmanager
@@ -168,3 +174,22 @@ async def get_directory_contents(
             )
     ret.sort(key=dir_list_entry_sort_key)
     return ret
+
+
+@api.get("/objects/{objid}/download")
+async def download_object(repo: RepoDependency, objid: ObjIdParam) -> StreamingResponse:
+    obj_getter = repo.make_obj_getter(None)
+    try:
+        header, body_iter = await stream_file(decode_objid(objid), obj_getter)
+    except backathon.encryption.KeyNotDecrypted:
+        raise HTTPException(status_code=403, detail="Decryption key needed")
+    except backathon.encryption.DecryptionError as e:
+        raise HTTPException(status_code=500, detail=f"Decryption error: {e}")
+    if header.type != backathon.models.ObjectType.FILE:
+        raise HTTPException(status_code=404, detail="Object exists but is not a file")
+    if header.stats is None:
+        raise HTTPException(status_code=500, detail="Object header missing stats info")
+
+    return StreamingResponse(
+        content=body_iter, headers={"Content-Length": str(header.stats.size)}
+    )

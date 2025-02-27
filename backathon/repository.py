@@ -257,10 +257,12 @@ class Backathon:
     def _make_snapshot_putter(self, encrypter: EncrypterBase, storage: StorageBase):
         return make_snapshot_putter(self.db, encrypter, storage)
 
-    def _make_obj_getter(
-        self, encrypter: EncrypterBase, storage: StorageBase
-    ) -> "ObjGetter":
-        return make_obj_getter(encrypter, storage)
+    def make_obj_getter(self, password: str | None) -> "ObjGetter":
+        encrypter = self.get_encrypter()
+        if password is not None:
+            encrypter.unlock(password)
+
+        return make_obj_getter(encrypter, self.get_storage())
 
     def backup_async(
         self,
@@ -366,12 +368,7 @@ class Backathon:
         restoredir: str | os.PathLike[str],
         password: str | None,
     ):
-        encrypter = self.get_encrypter()
-        if password is not None:
-            encrypter.unlock(password)
-        storage = self.get_storage()
-
-        get_object = self._make_obj_getter(encrypter, storage)
+        get_object = self.make_obj_getter(password)
 
         asyncio.run(
             backathon.restore.restore_obj(
