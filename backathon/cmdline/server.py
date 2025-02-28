@@ -1,3 +1,4 @@
+import copy
 import logging
 import os
 import pathlib
@@ -6,13 +7,18 @@ import sys
 import time
 
 import typer
-import uvicorn
+import uvicorn.config
 
 from backathon.cmdline.types import PathOption
 
 logger = logging.getLogger("backathon.server")
 
 app = typer.Typer()
+
+LOGGING_CONFIG = copy.deepcopy(uvicorn.config.LOGGING_CONFIG)
+LOGGING_CONFIG["handlers"]["default"] = {"class": "rich.logging.RichHandler"}
+LOGGING_CONFIG["loggers"]["backathon"] = {"level": "INFO"}
+LOGGING_CONFIG["root"] = {"handlers": ["default"]}
 
 
 @app.command()
@@ -41,6 +47,7 @@ def dev(db_path: PathOption):
             "backathon.api:dev_app",
             port=8000,
             log_level="info",
+            log_config=LOGGING_CONFIG,
             reload=True,
         )
     finally:

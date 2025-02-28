@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import logging.config
 import os
 import pathlib
 from operator import attrgetter
@@ -24,14 +25,20 @@ from backathon import Backathon
 from backathon import Database
 from backathon.models import FSEntry
 from backathon.models import Object
+from backathon.models import ObjectType
 from backathon.models import Snapshot
 from backathon.models import decode_objid
 from backathon.models import make_path_printable
+from backathon.restore import stream_dir
 from backathon.restore import stream_file
+
+logger = logging.getLogger("backathon.api")
 
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("API lifecycle started")
+
     async with asyncio.TaskGroup():
         db_path = os.environ["BACKATHON_DB_PATH"]
         db = Database(db_path)
@@ -177,19 +184,45 @@ async def get_directory_contents(
 
 
 @api.get("/objects/{objid}/download")
-async def download_object(repo: RepoDependency, objid: ObjIdParam) -> StreamingResponse:
-    obj_getter = repo.make_obj_getter(None)
-    try:
-        header, body_iter = await stream_file(decode_objid(objid), obj_getter)
-    except backathon.encryption.KeyNotDecrypted:
-        raise HTTPException(status_code=403, detail="Decryption key needed")
-    except backathon.encryption.DecryptionError as e:
-        raise HTTPException(status_code=500, detail=f"Decryption error: {e}")
-    if header.type != backathon.models.ObjectType.FILE:
-        raise HTTPException(status_code=404, detail="Object exists but is not a file")
-    if header.stats is None:
-        raise HTTPException(status_code=500, detail="Object header missing stats info")
-
-    return StreamingResponse(
-        content=body_iter, headers={"Content-Length": str(header.stats.size)}
+async def download_object(
+    repo: RepoDependency, objid: ObjIdParam, name: str
+) -> StreamingResponse:
+    obj = next(
+        repo.db.query(
+            Object, "SELECT * FROM objects WHERE objid=?", (decode_objid(objid),)
+        )
     )
+    obj_getter = repo.make_obj_getter(None)
+    if obj.type == ObjectType.FILE:
+        try:
+            header, body_iter = await stream_file(decode_objid(objid), obj_getter)
+        except backathon.encryption.KeyNotDecrypted:
+            raise HTTPException(status_code=403, detail="Decryption key needed")
+        except backathon.encryption.DecryptionError as e:
+            raise HTTPException(status_code=500, detail=f"Decryption error: {e}")
+        if header.type != backathon.models.ObjectType.FILE:
+            raise HTTPException(status_code=404, detail="Object exists but is not a file")
+        if header.stats is None:
+            raise HTTPException(
+                status_code=500, detail="Object header missing stats info"
+            )
+
+        return StreamingResponse(
+            content=body_iter, headers={"Content-Length": str(header.stats.size)}
+        )
+
+    elif obj.type == ObjectType.TREE:
+        try:
+            stream_iter = stream_dir(
+                decode_objid(objid), obj_getter, name=name.encode("utf-8")
+            )
+        except backathon.encryption.KeyNotDecrypted:
+            raise HTTPException(status_code=403, detail="Decryption key needed")
+        except backathon.encryption.DecryptionError as e:
+            raise HTTPException(status_code=500, detail=f"Decryption error: {e}")
+
+        return StreamingResponse(
+            content=stream_iter, headers={"Content-Type": "application/x-tar"}
+        )
+    else:
+        raise HTTPException(status_code=404, detail=f"Unknown object type: {obj.type}")

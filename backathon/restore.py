@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
+import os.path
 import pathlib
+import sys
+import tarfile
 from typing import IO
 from typing import TYPE_CHECKING
 from typing import AsyncIterable
@@ -14,6 +16,7 @@ from backathon.models import ObjectHeader
 from backathon.models import ObjectStats
 from backathon.models import ObjectType
 from backathon.models import ObjIDType
+from backathon.repoobject import RawPayload
 
 if TYPE_CHECKING:
     from backathon.repository import ObjGetter
@@ -50,19 +53,23 @@ async def stream_file(
 ) -> tuple[ObjectHeader, AsyncIterable[bytes]]:
     """Yields a stream of bytes for the given file"""
     raw_payload = await get_object(objid)
+    return raw_payload.header, _stream_file_helper(objid, raw_payload, get_object)
+
+
+def _stream_file_helper(
+    objid: ObjIDType, raw_payload: RawPayload, get_object: ObjGetter
+) -> AsyncIterable[bytes]:
     header = raw_payload.header
     body = raw_payload.body
     if header.type != ObjectType.FILE:
         raise ValueError("Object given is not a file")
-
-    logger.info("Starting to stream file objid %s", objid.hex())
 
     if header.blobs is None:
 
         async def get_body_single():
             yield bytes(body)
 
-        return header, get_body_single()
+        return get_body_single()
 
     else:
         header.blobs.sort(key=lambda blobref: blobref.pos)
@@ -83,7 +90,85 @@ async def stream_file(
                 yield blob_body
                 pos += len(blob_body)
 
-        return header, get_body_multiple(header)
+        return get_body_multiple(header)
+
+
+async def stream_dir(
+    objid: ObjIDType, get_object: ObjGetter, name: bytes | None = None
+) -> AsyncIterable[bytes]:
+    """Yields a stream of bytes in tar format for the files in the
+    given directory object
+
+    """
+    raw_payload = await get_object(objid)
+    async for block in _stream_dir_helper(
+        objid, raw_payload.header, get_object, (name,) if name else ()
+    ):
+        yield block
+    # Close the tar file
+    yield b"\0" * (tarfile.BLOCKSIZE * 2)
+
+
+async def _stream_dir_helper(
+    objid: ObjIDType,
+    header: ObjectHeader,
+    get_object: ObjGetter,
+    path_prefix: tuple[bytes, ...],
+) -> AsyncIterable[bytes]:
+    if header.type != ObjectType.TREE:
+        raise ValueError("Object given is not a TREE")
+
+    assert header.entries is not None
+    for entry in header.entries:
+        entry_raw_payload = await get_object(entry.objid)
+        entry_header = entry_raw_payload.header
+        entry_path_parts = path_prefix + (entry.name,)
+        if entry_header.type == ObjectType.TREE:
+            sent = 0
+            async for block in _stream_dir_helper(
+                entry_raw_payload.objid, entry_header, get_object, entry_path_parts
+            ):
+                yield block
+                sent += len(block)
+            if sent % tarfile.BLOCKSIZE != 0:
+                logger.warning(
+                    "Output from _stream_dir_helper was not a multiple of blocksize!"
+                )
+        elif entry_header.type == ObjectType.FILE:
+            entry_path = os.path.join(*entry_path_parts)
+            # Build a tar header for this file
+            assert entry_header.stats is not None
+            assert entry_header.file_size is not None
+            tarinfo = tarfile.TarInfo(
+                name=entry_path.decode(sys.getfilesystemencoding(), errors="replace")
+            )
+            tarinfo.mode = entry_header.stats.mode
+            tarinfo.uid = entry_header.stats.uid
+            tarinfo.gid = entry_header.stats.gid
+            tarinfo.size = entry_header.file_size
+            tarinfo.mtime = int(entry_header.stats.mtime // 1e9)
+            header_bytes = tarinfo.tobuf()
+            if len(header_bytes) % tarfile.BLOCKSIZE != 0:
+                logger.warning("Header block was not a multiple of blocksize!")
+            yield header_bytes
+
+            sent = 0
+            async for block in _stream_file_helper(objid, entry_raw_payload, get_object):
+                if sent + len(block) > tarinfo.size:
+                    logger.warning("File size is greater than header indicated")
+                    yield block[: tarinfo.size - sent]
+                    break
+                else:
+                    yield block
+                    sent += len(block)
+            if sent != tarinfo.size:
+                logger.warning("Bytes sent did not match header")
+            remainder = tarinfo.size % tarfile.BLOCKSIZE
+            if remainder > 0:
+                pad = b"\0" * (tarfile.BLOCKSIZE - remainder)
+                yield pad
+        else:
+            logger.warning("File type %s not currently supported", entry_header.type)
 
 
 async def _restore_file(
