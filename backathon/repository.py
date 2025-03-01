@@ -500,20 +500,8 @@ def make_obj_getter(encrypter: EncrypterBase, storage: StorageBase) -> ObjGetter
     """Returns an object getter function
 
     The object getter's job is to retrieve, decrypt, decompress, verify, and deserialize
-    an object from a remote repository. The object getter returns a tuple of
-    (ObjectHeader, IO[bytes]).
-
-    The ObjectHeader is the deserialized header from the object, and the byte stream
-    is the object body (bytes following the header).
-
-    The byte stream is a file-like object open for reading. The file's position may
-    not be at byte 0; it may just point to the position in the object where the body
-    starts. The exact details of what kind of object the byte stream is depends on the
-    storage and encryption implementation. Callers can assume it's seekable, and that
-    the number of bytes in the body matches the header's length.
-
-    Callers MUST close the file-like object when finished reading. Callers should not rely
-    on garbage collection to close the byte stream.
+    an object from a remote repository. The object getter returns a RawPayload
+    object.
 
     """
 

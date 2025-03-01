@@ -140,14 +140,19 @@ async def _stream_dir_helper(
             assert entry_header.stats is not None
             assert entry_header.file_size is not None
             tarinfo = tarfile.TarInfo(
-                name=entry_path.decode(sys.getfilesystemencoding(), errors="replace")
+                name=entry_path.decode(
+                    sys.getfilesystemencoding(), errors=sys.getfilesystemencodeerrors()
+                )
             )
             tarinfo.mode = entry_header.stats.mode
             tarinfo.uid = entry_header.stats.uid
             tarinfo.gid = entry_header.stats.gid
             tarinfo.size = entry_header.file_size
             tarinfo.mtime = int(entry_header.stats.mtime // 1e9)
-            header_bytes = tarinfo.tobuf()
+            header_bytes = tarinfo.tobuf(
+                encoding=sys.getfilesystemencoding(),
+                errors=sys.getfilesystemencodeerrors(),
+            )
             if len(header_bytes) % tarfile.BLOCKSIZE != 0:
                 logger.warning("Header block was not a multiple of blocksize!")
             yield header_bytes
@@ -157,6 +162,7 @@ async def _stream_dir_helper(
                 if sent + len(block) > tarinfo.size:
                     logger.warning("File size is greater than header indicated")
                     yield block[: tarinfo.size - sent]
+                    sent = tarinfo.size
                     break
                 else:
                     yield block
