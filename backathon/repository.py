@@ -7,7 +7,6 @@ import os.path
 import pathlib
 import secrets
 import sqlite3
-from concurrent.futures import ThreadPoolExecutor
 from typing import Awaitable
 from typing import Callable
 from typing import Type
@@ -23,7 +22,6 @@ import backathon.restore
 import backathon.scan
 from backathon import models
 from backathon import repoobject
-from backathon.backup import BackupProgressReport
 from backathon.backup import ObjectRequest
 from backathon.db import Database
 from backathon.encryption.base import EncrypterBase
@@ -31,6 +29,7 @@ from backathon.encryption.base import Payload
 from backathon.encryption.nacl import NaclEncrypter
 from backathon.encryption.null import NullEncrypter
 from backathon.exceptions import CorruptedRepository
+from backathon.job import Job
 from backathon.models import FSEntry
 from backathon.models import ObjIDType
 from backathon.proftools import perf_block
@@ -49,11 +48,8 @@ class Backathon:
     def __init__(self, db: Database):
         self.db = db
 
-        self.scan_task: asyncio.Task | None = None
-        self.scan_progress: backathon.scan.ScanProgress | None = None
-
-        self.backup_task: asyncio.Task | None = None
-        self.backup_progress: BackupProgressReport | None = None
+        self.scan_job: Job[backathon.scan.ScanProgress] = Job()
+        self.backup_job: Job[backathon.backup.BackupProgress] = Job()
 
     @classmethod
     def initialize(
@@ -139,78 +135,41 @@ class Backathon:
     def close(self):
         self.db.close()
 
-    def scan_async(
+    async def scan_async(
         self,
         skip_existing: bool = False,
         rescan_dirs: bool = False,
-        progress_callback: Callable[[backathon.scan.ScanProgress], None] | None = None,
-    ) -> asyncio.Future:
+    ):
         """Launches a scan in a separate thread. Returns a Future
         which completes when the scan is finished.
 
         """
-        if self.scan_task is not None:
+        if self.scan_job.is_running():
             raise RuntimeError("Scan already running")
-        if self.backup_task is not None:
+        if self.backup_job.is_running():
             raise RuntimeError("Backup is running")
 
         loop = asyncio.get_running_loop()
 
         def report_progress(progress):
-            self.scan_progress = progress
-            if progress_callback is not None:
-                loop.call_soon_threadsafe(progress_callback, progress)
+            loop.call_soon_threadsafe(self.scan_job.progress_callback, progress)
 
         def scan_thread():
             db_clone = self.db.clone()
 
-            backathon.scan.scan(
-                db_clone,
-                progress_callback=report_progress,
-                skip_existing=skip_existing,
-                rescan_dirs=rescan_dirs,
-            )
+            try:
+                backathon.scan.scan(
+                    db_clone,
+                    progress_callback=report_progress,
+                    skip_existing=skip_existing,
+                    rescan_dirs=rescan_dirs,
+                )
+            finally:
+                db_clone.close()
 
         task = asyncio.ensure_future(asyncio.to_thread(scan_thread))
-        self.scan_task = task
-
-        def on_done(_):
-            self.scan_task = None
-            self.scan_progress = None
-
-        task.add_done_callback(on_done)
-        return task
-
-    def scan(
-        self,
-        skip_existing=False,
-        progress: None | Callable[[int, int | None, str], None] = None,
-        rescan_dirs: bool = False,
-    ):
-        """Scans the backup set
-
-        The backup set is the set of all local files and directories starting at the
-        root paths.
-
-        This method scans all local files that are to be backed up, and marks in the
-        local database all files and directories that have changed since last backup.
-        This informs the backup routines of what files need backing up.
-
-        This should be run before every backup.
-
-        See more info in the backathon.scan module
-        """
-
-        def progress_shim(p: backathon.scan.ScanProgress):
-            assert progress is not None
-            progress(p.scanned, p.total, p.last_path or "")
-
-        backathon.scan.scan(
-            self.db,
-            progress_callback=progress_shim if progress else None,
-            skip_existing=skip_existing,
-            rescan_dirs=rescan_dirs,
-        )
+        self.scan_job.set_task(task)
+        await task
 
     def add_root(self, root_path: pathlib.Path) -> FSEntry:
         """Adds a new root path to the backup set
@@ -248,13 +207,17 @@ class Backathon:
 
     def _make_obj_putter(
         self,
-        compressor: Compressor | None,
-        encrypter: EncrypterBase,
-        storage: StorageBase,
     ) -> Callable[[ObjectRequest], Awaitable[models.Object]]:
+        compressor: Compressor | None = None
+        if self.db.config_get("enable-compression", True):
+            compressor = repoobject.compress_payload
+        encrypter: EncrypterBase = self.get_encrypter()
+        storage: StorageBase = self.get_storage()
         return make_obj_putter(self.db, compressor, encrypter, storage)
 
-    def _make_snapshot_putter(self, encrypter: EncrypterBase, storage: StorageBase):
+    def _make_snapshot_putter(self):
+        encrypter: EncrypterBase = self.get_encrypter()
+        storage: StorageBase = self.get_storage()
         return make_snapshot_putter(self.db, encrypter, storage)
 
     def make_obj_getter(self, password: str | None) -> "ObjGetter":
@@ -264,75 +227,29 @@ class Backathon:
 
         return make_obj_getter(encrypter, self.get_storage())
 
-    def backup_async(
+    async def backup_async(
         self,
-        progress_callback: Callable[[BackupProgressReport], None] | None = None,
-    ) -> asyncio.Future:
+    ):
         """Launches a backup task in the current event loop and returns the
         Task object
 
         """
-        if self.scan_task is not None:
+        if self.scan_job.is_running():
             raise RuntimeError("Scan is running")
-        if self.backup_task is not None:
+        if self.backup_job.is_running():
             raise RuntimeError("Backup already running")
-
-        loop = asyncio.get_running_loop()
-
-        def report_progress(progress):
-            self.backup_progress = progress
-            if progress_callback is not None:
-                loop.call_soon(progress_callback, progress)
-
-        compressor: Compressor | None = None
-        if self.db.config_get("enable-compression", True):
-            compressor = repoobject.compress_payload
-        encrypter: EncrypterBase = self.get_encrypter()
-        storage: StorageBase = self.get_storage()
 
         db_clone = self.db.clone()
         backup = backathon.backup.Backup(
             db_clone,
-            self._make_obj_putter(compressor, encrypter, storage),
-            self._make_snapshot_putter(encrypter, storage),
-            progress=report_progress,
+            self._make_obj_putter(),
+            self._make_snapshot_putter(),
+            progress=self.backup_job.progress_callback,
         )
         task = asyncio.create_task(backup.backup())
-        self.backup_task = task
+        self.backup_job.set_task(task)
 
-        def on_done(_):
-            self.backup_task = None
-            self.backup_progress = None
-
-        task.add_done_callback(on_done)
-        return task
-
-    def backup(
-        self, progress: None | Callable[[BackupProgressReport], None] = None
-    ) -> BackupProgressReport:
-        """Perform a backup
-
-        See documentation in the backathon.backup module
-
-        """
-        compressor: Compressor | None = None
-        if self.db.config_get("enable-compression", True):
-            compressor = repoobject.compress_payload
-        encrypter: EncrypterBase = self.get_encrypter()
-        storage: StorageBase = self.get_storage()
-
-        put_object = self._make_obj_putter(compressor, encrypter, storage)
-        put_snapshot = self._make_snapshot_putter(encrypter, storage)
-
-        backup = backathon.backup.Backup(
-            self.db, put_object, put_snapshot, progress=progress
-        )
-        logger.debug("Starting event loop")
-        with asyncio.Runner() as runner:
-            loop = runner.get_loop()
-            loop.set_default_executor(ThreadPoolExecutor(max_workers=os.cpu_count() or 4))
-            runner.run(backup.backup())
-        return backup.progress
+        await task
 
     def get_encrypter(self) -> EncrypterBase:
         encrypter_cls_name = self.db.config_get("encrypter")
@@ -408,19 +325,6 @@ def make_obj_putter(
 
     """
 
-    def upload_payload(buf: Buffer, path: pathlib.PurePosixPath) -> Payload:
-        with perf_block("upload_payload_inner"):
-            if compressor is not None:
-                with perf_block("upload_payload_inner.compressor"):
-                    buf = compressor(buf)
-
-            with perf_block("upload_payload_inner.encrypter"):
-                payload = encrypter.encrypt(buf)
-
-            with perf_block("upload_payload_inner.put_object"):
-                storage.put_object(path, payload)
-            return payload
-
     async def put_object(obj_req: ObjectRequest) -> models.Object:
         # Create the raw payload, including calculation of the objid
         # While this is a CPU-bound routine, we perform it in the main thread with
@@ -441,7 +345,7 @@ def make_obj_putter(
                 return obj
 
         with perf_block("put_object.upload_payload to_thread"):
-            obj = await asyncio.to_thread(raw_payload.upload, storage)
+            obj = await asyncio.to_thread(raw_payload.upload, storage, compressor)
 
         # The child relations
         children = raw_payload.get_children()

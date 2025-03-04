@@ -21,6 +21,7 @@ from backathon.models import Object
 from backathon.models import ObjectHeader
 from backathon.models import ObjIDType
 from backathon.proftools import perf_block
+from backathon.repository import Compressor
 from backathon.storage.base import StorageBase
 
 # Same value as shutil.COPY_BUFSIZE but that attribute isn't public
@@ -124,14 +125,17 @@ class RawPayload:
             children.extend((self.objid, e.objid, e.name) for e in self.header.entries)
         return children
 
-    def upload(self, storage: StorageBase) -> Object:
+    def upload(self, storage: StorageBase, compressor: Compressor | None) -> Object:
         """Perform final compression and encryption, upload the payload, and return a new
         Object instance representing what was uploaded
 
         Calling code will typically need to save the returned Object instance to the database
 
         """
-        buf = compress_payload(self.raw_payload_buf)
+        if compressor is not None:
+            buf = compress_payload(self.raw_payload_buf)
+        else:
+            buf = self.raw_payload_buf
         final_payload = self.encrypter.encrypt(buf)
         path = make_object_path(self.objid)
         storage.put_object(path, final_payload)

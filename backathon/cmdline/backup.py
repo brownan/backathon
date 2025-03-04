@@ -2,7 +2,7 @@ import rich.live
 import rich.progress
 import typer
 
-from backathon.backup import BackupProgressReport
+from backathon.backup import BackupProgress
 from backathon.cmdline.common import BackathonContext
 from backathon.cmdline.common import default_columns
 from backathon.cmdline.types import PathOption
@@ -22,7 +22,7 @@ def backup(db_path: PathOption):
     entry_progress = progress.add_task("Items")
     size_progress = progress.add_task("Size", size_display=True)
 
-    def update_progress(report: BackupProgressReport):
+    def update_progress(report: BackupProgress):
         progress.update(
             entry_progress,
             completed=report.count_progress,

@@ -19,7 +19,7 @@ from rich.progress import Progress
 from typing_extensions import NamedTuple
 
 from backathon import proftools
-from backathon.backup import BackupProgressReport
+from backathon.backup import BackupProgress
 from backathon.cmdline.common import default_columns
 from backathon.encryption.nacl import NaclEncrypter
 from backathon.repository import Backathon
@@ -163,7 +163,7 @@ def perform_single_benchmark(
         progress.stop_task(scan_task_id)
         progress.start_task(backup_task_id)
 
-        def on_progress(info: BackupProgressReport):
+        def on_progress(info: BackupProgress):
             progress.update(
                 backup_task_id, total=info.count_total, completed=info.count_progress
             )

@@ -56,7 +56,7 @@ class _EntryProgress:
 
 
 @dataclasses.dataclass
-class BackupProgressReport:
+class BackupProgress:
     count_progress: int = 0
     count_total: int = 0
     size_progress: int = 0
@@ -108,7 +108,7 @@ class Backup:
         db: Database,
         put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
         put_snapshot: Callable[[models.Snapshot], None],
-        progress: None | Callable[[BackupProgressReport], None] = None,
+        progress: None | Callable[[BackupProgress], None] = None,
     ):
         self.db = db
         self.put_object = put_object
@@ -126,7 +126,7 @@ class Backup:
             max_backup_workers=max(1, db.config_get("max-backup-workers", 1)),
         )
 
-        self.progress = BackupProgressReport()
+        self.progress = BackupProgress()
 
         # Tracks tasks launched to process a single FSEntry.
         # Tasks are removed from this set when they have finished
