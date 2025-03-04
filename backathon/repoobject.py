@@ -1,4 +1,5 @@
 """Utility functions for working with repository objects"""
+from __future__ import annotations
 
 import hmac
 import io
@@ -8,6 +9,7 @@ import shutil
 import zlib
 from dataclasses import dataclass
 from typing import IO
+from typing import TYPE_CHECKING
 from typing import Self
 from typing import Sequence
 
@@ -21,8 +23,10 @@ from backathon.models import Object
 from backathon.models import ObjectHeader
 from backathon.models import ObjIDType
 from backathon.proftools import perf_block
-from backathon.repository import Compressor
 from backathon.storage.base import StorageBase
+
+if TYPE_CHECKING:
+    from backathon.repository import Compressor
 
 # Same value as shutil.COPY_BUFSIZE but that attribute isn't public
 COPY_BUFSIZE = 1024 * 1024

@@ -89,7 +89,7 @@ class _TuningParams(NamedTuple):
     # chunk_size determines how large each chunk is.
     chunk_size: int
 
-    max_backup_workers: int
+    max_backup_workers: int | None
 
 
 @contextmanager
@@ -116,14 +116,12 @@ class Backup:
         self.progress_callback = progress
 
         # Get some config items
-        inline_threshold = max(0, db.config_get("inline-threshold", 2**20))
+        inline_threshold = db.config.inline_threshold
         self.params = _TuningParams(
             inline_threshold=inline_threshold,
-            chunk_threshold=max(
-                0, inline_threshold, db.config_get("chunk-threshold", 30 * 2**20)
-            ),
-            chunk_size=max(2**16, db.config_get("chunk-size", 10 * 2**20)),
-            max_backup_workers=max(1, db.config_get("max-backup-workers", 1)),
+            chunk_threshold=max(inline_threshold, db.config.chunk_threshold),
+            chunk_size=db.config.chunk_size,
+            max_backup_workers=db.config.max_backup_workers,
         )
 
         self.progress = BackupProgress()
@@ -166,7 +164,9 @@ class Backup:
                 rich.filesize.decimal(self.progress.size_total),
             )
 
-            async with BoundedTaskGroup() as taskgroup:
+            async with BoundedTaskGroup(
+                max_tasks=self.params.max_backup_workers
+            ) as taskgroup:
                 while self._backup_items_remain():
                     with self.db.atomic(immediate=True):
                         await self._backup_batch(taskgroup)

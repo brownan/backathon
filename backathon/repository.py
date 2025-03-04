@@ -9,7 +9,6 @@ import secrets
 import sqlite3
 from typing import Awaitable
 from typing import Callable
-from typing import Type
 from typing import cast
 
 from typing_extensions import Buffer
@@ -35,7 +34,6 @@ from backathon.models import ObjIDType
 from backathon.proftools import perf_block
 from backathon.repoobject import RawPayload
 from backathon.storage.base import StorageBase
-from backathon.storage.local import LocalStorage
 
 logger = logging.getLogger("backathon.repository")
 
@@ -72,11 +70,11 @@ class Backathon:
 
         # Set up the local database
         db = Database(db_path, create=True)
-        db.config_set("storage", storage.__class__.__name__)
-        db.config_set_json("storage-config", storage.config)
+        db.config.storage = storage.__class__
+        db.config.storage_config = storage.config
 
-        db.config_set("encrypter", encrypter.__class__.__name__)
-        db.config_set_json("encrypter-config", encrypter.config)
+        db.config.encrypter = encrypter.__class__
+        db.config.encrypter_config = encrypter.config
 
         return cls(db)
 
@@ -209,7 +207,7 @@ class Backathon:
         self,
     ) -> Callable[[ObjectRequest], Awaitable[models.Object]]:
         compressor: Compressor | None = None
-        if self.db.config_get("enable-compression", True):
+        if self.db.config.enable_compression:
             compressor = repoobject.compress_payload
         encrypter: EncrypterBase = self.get_encrypter()
         storage: StorageBase = self.get_storage()
@@ -252,31 +250,19 @@ class Backathon:
         await task
 
     def get_encrypter(self) -> EncrypterBase:
-        encrypter_cls_name = self.db.config_get("encrypter")
-        if encrypter_cls_name == "NaclEncrypter":
-            encrypter_cls = NaclEncrypter
-        elif encrypter_cls_name == "NullEncrypter":
-            encrypter_cls = NullEncrypter
-        else:
-            raise RuntimeError(
-                f"Invalid or unknown encryption backend: {encrypter_cls_name}"
-            )
+        encrypter_cls = self.db.config.encrypter
+        assert issubclass(encrypter_cls, EncrypterBase)
         config_cls = encrypter_cls.get_config_class()
-        config = config_cls.model_validate(self.db.config_get_json("encrypter-config"))
+        config = config_cls.model_validate(self.db.config.encrypter_config)
         # pyright seems to not properly detect that the config type and encrypter type will
         # always correspond here
         return encrypter_cls(config)  # pyright: ignore [reportArgumentType]
 
     def get_storage(self) -> StorageBase:
-        storage_cls_name = self.db.config_get("storage")
-        storage_cls: Type[StorageBase]
-        if storage_cls_name == "LocalStorage":
-            storage_cls = LocalStorage
-        else:
-            raise RuntimeError(f"Invalid or unknown storage backend: {storage_cls_name}")
-
+        storage_cls = self.db.config.storage
+        assert issubclass(storage_cls, StorageBase)
         config_cls = storage_cls.get_config_class()
-        config = config_cls.model_validate(self.db.config_get_json("storage-config"))
+        config = config_cls.model_validate(self.db.config.storage_config)
         return storage_cls(config)
 
     def restore(

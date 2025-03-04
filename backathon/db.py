@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime
 import itertools
-import json
 import logging
 import os
 import pathlib
@@ -20,6 +19,7 @@ from pydantic import BaseModel
 
 from backathon import models
 from backathon.exceptions import FSEntryNotFound
+from backathon.settings import Settings
 
 logger = logging.getLogger("backathon.db")
 
@@ -88,6 +88,7 @@ class Database:
             raise FileExistsError(f"Config database already exists: {self.path}")
         self.conn = self._open_db()
         self._setup_db()
+        self.config = Settings.load(self)
         self._savepoint_num: int = 1
 
     def clone(self) -> Database:
@@ -124,7 +125,7 @@ class Database:
             """
         )
 
-        current_migration_level: int | None = self.config_get("migration")
+        current_migration_level: int | None = self._config_get("migration")
         migration_iter = enumerate(MIGRATIONS)
         if current_migration_level is None:
             migrations_to_run = migration_iter
@@ -139,7 +140,7 @@ class Database:
                 for statement in migration:
                     logger.debug("Executing %s", statement.strip())
                     cursor.execute(statement)
-                self.config_set("migration", migration_num)
+                self._config_set("migration", migration_num)
 
         cursor.close()
 
@@ -175,7 +176,7 @@ class Database:
             cursor.execute(query, args)
             yield from map(model_cls.model_validate, batch_fetch_from_cursor(cursor))
 
-    def config_get(self, key: str, default: Any = None) -> Any:
+    def _config_get(self, key: str, default: Any = None) -> Any:
         cursor = self.conn.cursor()
         cursor.execute("SELECT value FROM config WHERE key = ?", (key,))
         result = cursor.fetchone()
@@ -184,23 +185,10 @@ class Database:
             return default
         return result[0]
 
-    def config_set(self, key: str, value: Any):
+    def _config_set(self, key: str, value: Any):
         cursor = self.conn.cursor()
         cursor.execute("INSERT INTO config (key, value) VALUES (?, ?)", (key, value))
         cursor.close()
-
-    def config_get_json(self, key: str, default: Any = None) -> Any:
-        data = self.config_get(key, None)
-        if data is None:
-            return default
-        return json.loads(data)
-
-    def config_set_json(self, key: str, value: Any):
-        if isinstance(value, BaseModel):
-            json_data = value.model_dump_json()
-        else:
-            json_data = json.dumps(value)
-        self.config_set(key, json_data)
 
     @contextmanager
     def atomic(self, *, immediate: bool = False):
