@@ -60,7 +60,7 @@ def scan(
         last_path=None,
     )
 
-    exclude_patterns = db.config_get_json("excludes", [])
+    exclude_patterns = db.config.excludes
 
     if not skip_existing:
         # First pass, scan all existing entries

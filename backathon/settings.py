@@ -12,8 +12,14 @@ if TYPE_CHECKING:
 
 ConfigType = Annotated[
     pydantic.JsonValue,
-    pydantic.AfterValidator(lambda x: json.loads(x)),
-    pydantic.PlainSerializer(lambda x: json.dumps(x)),
+    pydantic.AfterValidator(lambda x: json.loads(x) if isinstance(x, str) else x),
+    pydantic.PlainSerializer(lambda x: json.dumps(x), when_used="json"),
+]
+
+JsonList = Annotated[
+    list,
+    pydantic.BeforeValidator(lambda x: json.loads(x) if isinstance(x, str) else x),
+    pydantic.PlainSerializer(lambda x: json.dumps(x), when_used="json"),
 ]
 
 
@@ -52,7 +58,7 @@ class Settings(pydantic.BaseModel):
         ),
     ] = True
 
-    excludes: list = pydantic.Field(
+    excludes: JsonList = pydantic.Field(
         default_factory=list,
         title="Excludes",
         description="Local directories to exclude from backup",
@@ -113,11 +119,12 @@ class Settings(pydantic.BaseModel):
     ] = None
 
     @classmethod
-    def load(cls, db: Database) -> Self:
+    def load(cls, db: Database, initial_settings: Self | None = None) -> Self:
         with db.cursor() as cursor:
             cursor.execute("SELECT key, value FROM config")
             rows = cursor.fetchall()
-            config_dict = dict(rows)
+            config_dict = initial_settings.model_dump() if initial_settings else {}
+            config_dict.update(rows)
             return cls.model_validate(config_dict)
 
     def save(self, db: Database):
@@ -125,3 +132,10 @@ class Settings(pydantic.BaseModel):
             for key, value in self.model_dump(mode="json").items():
                 # noinspection PyProtectedMember
                 db._config_set(key, value)
+
+
+class MarkerData(pydantic.BaseModel):
+    name: str
+    version: str
+    encrypter: pydantic.ImportString
+    encrypter_params: ConfigType

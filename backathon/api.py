@@ -6,7 +6,9 @@ import pathlib
 from operator import attrgetter
 from typing import Annotated
 
+import anyio
 import natsort
+import sse_starlette
 from fastapi import Body
 from fastapi import Depends
 from fastapi import FastAPI
@@ -18,9 +20,11 @@ from pydantic import Base64Bytes
 from pydantic import BaseModel
 from starlette.routing import Mount
 
+import backathon.backup
 import backathon.encryption
 import backathon.models
 import backathon.repository
+import backathon.scan
 from backathon import Backathon
 from backathon import Database
 from backathon.models import FSEntry
@@ -115,14 +119,15 @@ async def del_root(repo: RepoDependency, id: int):
 async def get_excludes(
     repo: RepoDependency,
 ) -> list[str]:
-    return repo.db.config_get_json("excludes", [])
+    return repo.db.config.excludes
 
 
 @api.post("/excludes/")
 async def set_excludes(
     repo: RepoDependency, new_excludes: Annotated[list[str], Body()]
 ) -> list[str]:
-    repo.db.config_set_json("excludes", new_excludes)
+    repo.db.config.excludes = new_excludes
+    repo.db.config.save(repo.db)
     return new_excludes
 
 
@@ -226,3 +231,69 @@ async def download_object(
         )
     else:
         raise HTTPException(status_code=404, detail=f"Unknown object type: {obj.type}")
+
+
+@api.get("/scan")
+async def scan(repo: RepoDependency) -> backathon.scan.ScanProgress | None:
+    return repo.scan_job.progress
+
+
+@api.get("/backup")
+async def backup(repo: RepoDependency) -> backathon.backup.BackupProgress | None:
+    return repo.backup_job.progress
+
+
+@api.get("/events")
+async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
+    send_stream, recv_stream = anyio.create_memory_object_stream(1)
+
+    # Push an initial status into the object stream so the client gets an
+    # immediate status
+    send_stream.send_nowait(
+        {
+            "scan": repo.scan_job.progress,
+            "backup": repo.backup_job.progress,
+        }
+    )
+
+    async def handle_scan_message(progress: backathon.scan.ScanProgress | None):
+        try:
+            send_stream.send_nowait(
+                {
+                    "scan": progress,
+                    "backup": None,
+                }
+            )
+        except anyio.WouldBlock:
+            pass
+
+    async def handle_backup_message(progress: backathon.backup.BackupProgress | None):
+        try:
+            send_stream.send_nowait(
+                {
+                    "scan": None,
+                    "backup": progress,
+                }
+            )
+        except anyio.WouldBlock:
+            pass
+
+    # EventSourceResponse's data_sender_callable is a convenient feature to run
+    # a coroutine for the duration of the response, and is automatically canceled
+    # when the response closes. We use it to keep the channel listener context
+    # open and automatically stop listening for status updates on the channel
+    # when the response closes.
+    async def event_listener():
+        async with contextlib.AsyncExitStack() as contexts:
+            await contexts.enter_async_context(
+                repo.scan_job.channel.listen(handle_scan_message)
+            )
+            await contexts.enter_async_context(
+                repo.backup_job.channel.listen(handle_backup_message)
+            )
+            while True:
+                await asyncio.sleep(10000)
+
+    return sse_starlette.EventSourceResponse(
+        recv_stream, data_sender_callable=event_listener
+    )

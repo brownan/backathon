@@ -29,6 +29,7 @@ repos:
           - uvicorn
           - typer
           - natsort
+          - sse-starlette
 
 -   repo: https://github.com/pre-commit/mirrors-eslint
     rev: v9.19.0

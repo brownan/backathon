@@ -14,6 +14,7 @@ from typing import Generator
 from typing import Iterator
 from typing import Type
 from typing import TypeVar
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -22,6 +23,8 @@ from backathon.exceptions import FSEntryNotFound
 from backathon.settings import Settings
 
 logger = logging.getLogger("backathon.db")
+sql_logger = logging.getLogger("backathon.db.sql")
+sql_logger.setLevel(logging.INFO)
 
 # Explicit datetime adapter. The default adapter is deprecated in Python 3.12
 # Note: Converting back to Python types is done by Pydantic, not sqlite3 converters.
@@ -79,8 +82,42 @@ def batch_fetch_from_cursor(cursor: sqlite3.Cursor):
         yield from batch
 
 
+class CursorWrapper:
+    def __init__(self, c: sqlite3.Cursor):
+        self.cursor = c
+
+    def execute(self, sql, param_list=()):
+        sql_logger.debug(
+            "Executing sql on conn %s:\n%s\n%r",
+            id(self.cursor.connection),
+            (sql),
+            param_list,
+            stacklevel=2,
+        )
+        return self.cursor.execute(sql, param_list)
+
+    def executemany(self, sql, param_list=()):
+        sql_logger.debug(
+            "Executemany on conn %s:\n%s\n%r",
+            id(self.cursor.connection),
+            (sql),
+            param_list,
+            stacklevel=2,
+        )
+        return self.cursor.executemany(sql, param_list)
+
+    def __getattr__(self, item):
+        return getattr(self.cursor, item)
+
+
 class Database:
-    def __init__(self, path: str | PathLike[str], *, create: bool = False):
+    def __init__(
+        self,
+        path: str | PathLike[str],
+        *,
+        create: bool = False,
+        initial_settings: Settings | None = None,
+    ):
         self.path = pathlib.Path(path)
         if not create and not self.path.is_file():
             raise FileNotFoundError(f"Config database not found: {self.path}")
@@ -88,7 +125,15 @@ class Database:
             raise FileExistsError(f"Config database already exists: {self.path}")
         self.conn = self._open_db()
         self._setup_db()
-        self.config = Settings.load(self)
+        try:
+            self.config = Settings.load(self, initial_settings=initial_settings)
+        except Exception:
+            if create:
+                self.path.unlink()
+            raise
+        else:
+            if create:
+                self.config.save(self)
         self._savepoint_num: int = 1
 
     def clone(self) -> Database:
@@ -152,6 +197,8 @@ class Database:
         c = self.conn.cursor()
         if retdict:
             c.row_factory = lambda c, r: dict(zip(map(itemgetter(0), c.description), r))
+        if sql_logger.isEnabledFor(logging.DEBUG):
+            c = cast(sqlite3.Cursor, CursorWrapper(c))
         try:
             yield c
         finally:

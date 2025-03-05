@@ -38,7 +38,7 @@ class Channel(Generic[MessageType]):
             await handler(item)
 
     @contextlib.asynccontextmanager
-    async def listen(self, handler: HandlerType):
+    async def listen(self, handler: Callable[[MessageType | None], Awaitable[None]]):
         q = asyncio.Queue()
         listener_task = asyncio.create_task(self._listen_task(q, handler))
         try:

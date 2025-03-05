@@ -1,3 +1,4 @@
+import asyncio
 from collections import deque
 
 import rich
@@ -6,6 +7,7 @@ from rich.console import Group
 from rich.live import Live
 from rich.progress import Progress
 
+import backathon.scan
 from backathon.cmdline.common import BackathonContext
 from backathon.cmdline.common import FileListRenderable
 from backathon.cmdline.common import default_columns
@@ -19,7 +21,7 @@ def scan(db_path: PathOption, rescan_dirs: bool = False, no_rich: bool = False):
     b = BackathonContext.from_db_path(db_path)
     repo = b.repo
     if no_rich:
-        repo.scan(rescan_dirs=rescan_dirs)
+        asyncio.run(repo.scan_async(rescan_dirs=rescan_dirs))
     else:
         progress = Progress(
             *default_columns,
@@ -30,12 +32,20 @@ def scan(db_path: PathOption, rescan_dirs: bool = False, no_rich: bool = False):
         last_scanned_files = deque(maxlen=4)
         group = Group(progress, FileListRenderable(last_scanned_files))
 
-        def update(num: int, total: None | int, fname: str):
-            progress.update(task1, completed=num, total=total)
-            last_scanned_files.append(fname)
+        async def update(scan_progress: backathon.scan.ScanProgress | None):
+            if scan_progress is not None:
+                num = scan_progress.scanned
+                total = scan_progress.total
+                fname = scan_progress.last_path
+                progress.update(task1, completed=num, total=total)
+                last_scanned_files.append(fname)
+
+        async def run_scan():
+            async with repo.scan_job.channel.listen(update):
+                await repo.scan_async(rescan_dirs=rescan_dirs)
 
         try:
             with Live(group, refresh_per_second=5, transient=True):
-                repo.scan(progress=update, rescan_dirs=rescan_dirs)
+                asyncio.run(run_scan())
         finally:
             rich.print(progress)

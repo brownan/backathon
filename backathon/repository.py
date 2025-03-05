@@ -19,6 +19,7 @@ import backathon.garbage
 import backathon.recover
 import backathon.restore
 import backathon.scan
+import backathon.settings
 from backathon import models
 from backathon import repoobject
 from backathon.backup import ObjectRequest
@@ -56,25 +57,43 @@ class Backathon:
         storage: StorageBase,
         encrypter: EncrypterBase,
     ) -> Self:
-        # Try and write to the remote repo before we do anything else
+        # Try to access the remote repo before we do anything else
+        marker_file_path = "backathon.json"
+        try:
+            storage.get_object(marker_file_path)
+        except FileNotFoundError:
+            pass
+        else:
+            logger.error(
+                "Marker file backathon.json already exists at the destination. "
+                "Refusing to overwrite"
+            )
+            raise RuntimeError("Marker file backathon.json already exists")
+
         recovery_params = encrypter.get_recovery_state()
-        marker_data = {
-            "name": "Backathon Repository",
-            "version": backathon.__version__,
-            "encrypter": encrypter.__class__.__name__,
-            "encrypter-params": recovery_params,
-        }
-        json_data = json.dumps(marker_data, indent=4).encode("utf-8")
+        marker_data = backathon.settings.MarkerData.model_construct(
+            name="Backathon Repository",
+            version=backathon.__version__,
+            encrypter=encrypter.__class__,
+            encrypter_params=recovery_params,
+        )
+        json_data = marker_data.model_dump_json(indent=4).encode("utf-8")
         payload = Payload(json_data, len(json_data), hashlib.sha1(json_data).digest())
-        storage.put_object(pathlib.PurePath("backathon.json"), payload)
+        storage.put_object(marker_file_path, payload)
+
+        initial_settings = backathon.settings.Settings.model_construct(
+            storage=storage.__class__,
+            storage_config=storage.config.model_dump(mode="json"),
+            encrypter=encrypter.__class__,
+            encrypter_config=encrypter.config.model_dump(mode="json"),
+        )
 
         # Set up the local database
-        db = Database(db_path, create=True)
-        db.config.storage = storage.__class__
-        db.config.storage_config = storage.config
-
-        db.config.encrypter = encrypter.__class__
-        db.config.encrypter_config = encrypter.config
+        try:
+            db = Database(db_path, create=True, initial_settings=initial_settings)
+        except Exception:
+            storage.delete_object(marker_file_path)
+            raise
 
         return cls(db)
 
@@ -204,19 +223,19 @@ class Backathon:
         )
 
     def _make_obj_putter(
-        self,
+        self, db: Database
     ) -> Callable[[ObjectRequest], Awaitable[models.Object]]:
         compressor: Compressor | None = None
-        if self.db.config.enable_compression:
+        if db.config.enable_compression:
             compressor = repoobject.compress_payload
         encrypter: EncrypterBase = self.get_encrypter()
         storage: StorageBase = self.get_storage()
-        return make_obj_putter(self.db, compressor, encrypter, storage)
+        return make_obj_putter(db, compressor, encrypter, storage)
 
-    def _make_snapshot_putter(self):
+    def _make_snapshot_putter(self, db: Database):
         encrypter: EncrypterBase = self.get_encrypter()
         storage: StorageBase = self.get_storage()
-        return make_snapshot_putter(self.db, encrypter, storage)
+        return make_snapshot_putter(db, encrypter, storage)
 
     def make_obj_getter(self, password: str | None) -> "ObjGetter":
         encrypter = self.get_encrypter()
@@ -238,10 +257,13 @@ class Backathon:
             raise RuntimeError("Backup already running")
 
         db_clone = self.db.clone()
+        logger.debug(
+            "Cloned database. Original: %s, new: %s", id(self.db.conn), id(db_clone.conn)
+        )
         backup = backathon.backup.Backup(
             db_clone,
-            self._make_obj_putter(),
-            self._make_snapshot_putter(),
+            self._make_obj_putter(db_clone),
+            self._make_snapshot_putter(db_clone),
             progress=self.backup_job.progress_callback,
         )
         task = asyncio.create_task(backup.backup())
