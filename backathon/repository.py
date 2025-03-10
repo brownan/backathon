@@ -152,11 +152,11 @@ class Backathon:
     def close(self):
         self.db.close()
 
-    async def scan_async(
+    def scan_async(
         self,
         skip_existing: bool = False,
         rescan_dirs: bool = False,
-    ):
+    ) -> asyncio.Task:
         """Launches a scan in a separate thread. Returns a Future
         which completes when the scan is finished.
 
@@ -186,7 +186,7 @@ class Backathon:
 
         task = asyncio.ensure_future(asyncio.to_thread(scan_thread))
         self.scan_job.set_task(task)
-        await task
+        return task
 
     def add_root(self, root_path: pathlib.Path) -> FSEntry:
         """Adds a new root path to the backup set
@@ -244,9 +244,9 @@ class Backathon:
 
         return make_obj_getter(encrypter, self.get_storage())
 
-    async def backup_async(
+    def backup_async(
         self,
-    ):
+    ) -> asyncio.Task:
         """Launches a backup task in the current event loop and returns the
         Task object
 
@@ -269,7 +269,7 @@ class Backathon:
         task = asyncio.create_task(backup.backup())
         self.backup_job.set_task(task)
 
-        await task
+        return task
 
     def get_encrypter(self) -> EncrypterBase:
         encrypter_cls = self.db.config.encrypter

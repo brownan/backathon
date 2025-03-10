@@ -243,13 +243,26 @@ async def scan(repo: RepoDependency) -> backathon.scan.ScanProgress | None:
 @api.post("/scan")
 async def scan_start(repo: RepoDependency):
     logger.debug("Starting scan")
-    asyncio.create_task(repo.scan_async())
+    try:
+        repo.scan_async()
+    except Exception as e:
+        return {"status": "Failed to start scan", "error": str(e)}
     return {"status": "Scan Started"}
 
 
 @api.get("/backup")
 async def backup(repo: RepoDependency) -> backathon.backup.BackupProgress | None:
     return repo.backup_job.progress
+
+
+@api.post("/backup")
+async def backup_start(repo: RepoDependency):
+    logger.debug("Starting backup")
+    try:
+        repo.backup_async()
+    except Exception as e:
+        return {"status": "Failed to start backup", "error": str(e)}
+    return {"status": "Backup Started"}
 
 
 @api.get("/events")

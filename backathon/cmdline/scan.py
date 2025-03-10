@@ -21,7 +21,11 @@ def scan(db_path: PathOption, rescan_dirs: bool = False, no_rich: bool = False):
     b = BackathonContext.from_db_path(db_path)
     repo = b.repo
     if no_rich:
-        asyncio.run(repo.scan_async(rescan_dirs=rescan_dirs))
+
+        async def start():
+            await repo.scan_async(rescan_dirs=rescan_dirs)
+
+        asyncio.run(start())
     else:
         progress = Progress(
             *default_columns,
