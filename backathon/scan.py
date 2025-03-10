@@ -1,4 +1,3 @@
-import dataclasses
 import logging
 import os
 import sqlite3
@@ -7,6 +6,7 @@ import time
 from typing import Callable
 from typing import Collection
 
+import pydantic
 from rich import filesize
 
 from backathon import models
@@ -15,8 +15,7 @@ from backathon.db import Database
 logger = logging.getLogger("backathon.scan")
 
 
-@dataclasses.dataclass
-class ScanProgress:
+class ScanProgress(pydantic.BaseModel):
     scanned: int
     total: int | None
     last_path: str | None

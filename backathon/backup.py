@@ -19,6 +19,7 @@ from typing import Coroutine
 from typing import NamedTuple
 from typing import cast
 
+import pydantic
 import rich.filesize
 
 from backathon import chunker
@@ -55,14 +56,13 @@ class _EntryProgress:
     bytes_total: int = 0
 
 
-@dataclasses.dataclass
-class BackupProgress:
+class BackupProgress(pydantic.BaseModel):
     count_progress: int = 0
     count_total: int = 0
     size_progress: int = 0
     size_total: int = 0
     actual_uploaded: int = 0
-    current_entries: list[_EntryProgress] = dataclasses.field(default_factory=list)
+    current_entries: list[_EntryProgress] = pydantic.Field(default_factory=list)
     objects_processed: int = 0
     objects_uploaded: int = 0
 

@@ -35,7 +35,11 @@ class Channel(Generic[MessageType]):
     ):
         while True:
             item = await queue.get()
-            await handler(item)
+            try:
+                await handler(item)
+            except Exception:
+                logger.error("Error in listener handler", exc_info=True)
+                pass
 
     @contextlib.asynccontextmanager
     async def listen(self, handler: Callable[[MessageType | None], Awaitable[None]]):

@@ -1,4 +1,6 @@
+import copy
 import logging
+import logging.config
 import os
 import pathlib
 import sqlite3
@@ -6,7 +8,7 @@ import sys
 
 import click
 import typer
-from rich.logging import RichHandler
+import uvicorn.config
 
 import backathon.cmdline.backup
 import backathon.cmdline.scan
@@ -25,15 +27,19 @@ logger = logging.getLogger("backathon.cmdline")
 
 app = typer.Typer(no_args_is_help=True)
 
+LOGGING_CONFIG = copy.deepcopy(uvicorn.config.LOGGING_CONFIG)
+LOGGING_CONFIG["handlers"]["default"] = {"class": "rich.logging.RichHandler"}
+LOGGING_CONFIG["loggers"]["backathon"] = {"level": "INFO"}
+LOGGING_CONFIG["loggers"]["backathon.db.sql"] = {"level": "INFO"}
+LOGGING_CONFIG["root"] = {"handlers": ["default"]}
+
 
 @app.callback()
 def app_callback(verbose: bool = False, profile: bool = False):
     loglevel = logging.INFO if not verbose else logging.DEBUG
 
-    logging.basicConfig(
-        format="%(message)s", level=logging.WARNING, handlers=[RichHandler()]
-    )
-    logging.getLogger("backathon").setLevel(loglevel)
+    LOGGING_CONFIG["loggers"]["backathon"]["level"] = loglevel
+    logging.config.dictConfig(LOGGING_CONFIG)
 
     if profile:
         import atexit
