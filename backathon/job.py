@@ -1,67 +1,52 @@
+from __future__ import annotations
+
 import asyncio
-import contextlib
+import dataclasses
 import logging
 from abc import ABC
-from collections.abc import Awaitable
-from collections.abc import Callable
+from typing import TYPE_CHECKING
+from typing import Any
+from typing import AsyncGenerator
 from typing import Generic
 from typing import TypeVar
 
-MessageType = TypeVar("MessageType")
+import pydantic
 
-HandlerType = Callable[[MessageType | None], Awaitable[None]]
+if TYPE_CHECKING:
+    import backathon.backup
+    import backathon.scan
+
+MessageType = TypeVar("MessageType")
 
 logger = logging.getLogger("backathon.job")
 
 
-class Channel(Generic[MessageType]):
-    """Super simple in-memory single-process messaging channel
-
-    Uses context managers on listeners to un-register listeners when they go
-    out of context.
-
-    """
-
+class StatusListener(Generic[MessageType]):
     def __init__(self):
-        self.listeners: list[asyncio.Queue[MessageType | None]] = []
+        self._listeners: list[asyncio.Future] = []
+        self.current_message: MessageType | None = None
 
-    def send(self, message: MessageType | None):
-        for q in self.listeners:
-            q.put_nowait(message)
+    def update(self, message: MessageType | None):
+        self.current_message = message
+        self._notify_listeners()
 
-    @staticmethod
-    async def _listen_task(
-        queue: asyncio.Queue[MessageType | None], handler: HandlerType
-    ):
-        while True:
-            item = await queue.get()
-            try:
-                await handler(item)
-            except Exception:
-                logger.error("Error in listener handler", exc_info=True)
-                pass
+    def _notify_listeners(self):
+        while self._listeners:
+            fut = self._listeners.pop()
+            if not fut.cancelled():
+                fut.set_result(None)
 
-    @contextlib.asynccontextmanager
-    async def listen(self, handler: Callable[[MessageType | None], Awaitable[None]]):
-        q = asyncio.Queue()
-        listener_task = asyncio.create_task(self._listen_task(q, handler))
-        try:
-            self.listeners.append(q)
-            listener_task.add_done_callback(lambda _: self.listeners.remove(q))
-            yield
-        finally:
-            listener_task.cancel()
-            try:
-                await listener_task
-            except asyncio.CancelledError:
-                pass
+    async def wait_get(self) -> MessageType | None:
+        fut = asyncio.Future()
+        self._listeners.append(fut)
+        await fut
+        return self.current_message
 
 
 class Job(ABC, Generic[MessageType]):
     def __init__(self):
         self.task: asyncio.Task | None = None
-        self.channel = Channel[MessageType]()
-        self.progress: MessageType | None = None
+        self.status: StatusListener[MessageType] = StatusListener()
 
     def set_task(self, task: asyncio.Task):
         if self.task is not None:
@@ -73,8 +58,7 @@ class Job(ABC, Generic[MessageType]):
         self.task.add_done_callback(self._finish)
 
     def progress_callback(self, message: MessageType):
-        self.progress = message
-        self.channel.send(message)
+        self.status.update(message)
 
     def is_running(self) -> bool:
         return self.task is not None
@@ -83,9 +67,44 @@ class Job(ABC, Generic[MessageType]):
         if self.task is task:
             # No other task is running. This job is now idle
             self.task = None
-            self.progress = None
-            self.channel.send(None)
+            self.status.update(None)
         else:
             # Another task is replacing this one, which generally shouldn't
             # happen. A warning would have been emitted by set_task()
             pass
+
+
+@dataclasses.dataclass
+class JobCollection:
+    scan: Job[backathon.scan.ScanProgress] = dataclasses.field(default_factory=Job)
+    backup: Job[backathon.backup.BackupProgress] = dataclasses.field(default_factory=Job)
+
+    def asdict(self) -> dict[str, Job[pydantic.BaseModel]]:
+        return vars(self)
+
+    def any_is_running(self) -> bool:
+        return any(j.is_running() for j in self.asdict().values())
+
+    async def iter_status_updates(self) -> AsyncGenerator[dict[str, Any]]:
+        """Yields status updates"""
+        jobs = self.asdict()
+        tasks: dict[str, asyncio.Task[pydantic.BaseModel | None]] = {}
+        async with asyncio.TaskGroup() as tg:
+            while True:
+                for name in jobs.keys() - tasks.keys():
+                    tasks[name] = tg.create_task(jobs[name].status.wait_get())
+                await asyncio.wait(tasks.values(), return_when=asyncio.FIRST_COMPLETED)
+                for name, task in tasks.items():
+                    if task.done():
+                        tasks.pop(name)
+                        await task
+                        yield self.make_status_message()
+                        break
+
+    def make_status_message(self):
+        return {
+            name: job.status.current_message.model_dump(mode="json")
+            if job.status.current_message is not None
+            else None
+            for name, job in self.asdict().items()
+        }

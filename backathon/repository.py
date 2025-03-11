@@ -29,7 +29,7 @@ from backathon.encryption.base import Payload
 from backathon.encryption.nacl import NaclEncrypter
 from backathon.encryption.null import NullEncrypter
 from backathon.exceptions import CorruptedRepository
-from backathon.job import Job
+from backathon.job import JobCollection
 from backathon.models import FSEntry
 from backathon.models import ObjIDType
 from backathon.proftools import perf_block
@@ -47,8 +47,7 @@ class Backathon:
     def __init__(self, db: Database):
         self.db = db
 
-        self.scan_job: Job[backathon.scan.ScanProgress] = Job()
-        self.backup_job: Job[backathon.backup.BackupProgress] = Job()
+        self.jobs = JobCollection()
 
     @classmethod
     def initialize(
@@ -161,15 +160,13 @@ class Backathon:
         which completes when the scan is finished.
 
         """
-        if self.scan_job.is_running():
-            raise RuntimeError("Scan already running")
-        if self.backup_job.is_running():
-            raise RuntimeError("Backup is running")
+        if self.jobs.any_is_running():
+            raise RuntimeError("Another job is running")
 
         loop = asyncio.get_running_loop()
 
         def report_progress(progress):
-            loop.call_soon_threadsafe(self.scan_job.progress_callback, progress)
+            loop.call_soon_threadsafe(self.jobs.scan.progress_callback, progress)
 
         def scan_thread():
             db_clone = self.db.clone()
@@ -185,7 +182,7 @@ class Backathon:
                 db_clone.close()
 
         task = asyncio.ensure_future(asyncio.to_thread(scan_thread))
-        self.scan_job.set_task(task)
+        self.jobs.scan.set_task(task)
         return task
 
     def add_root(self, root_path: pathlib.Path) -> FSEntry:
@@ -251,10 +248,8 @@ class Backathon:
         Task object
 
         """
-        if self.scan_job.is_running():
-            raise RuntimeError("Scan is running")
-        if self.backup_job.is_running():
-            raise RuntimeError("Backup already running")
+        if self.jobs.any_is_running():
+            raise RuntimeError("Another job is running")
 
         db_clone = self.db.clone()
         logger.debug(
@@ -264,10 +259,10 @@ class Backathon:
             db_clone,
             self._make_obj_putter(db_clone),
             self._make_snapshot_putter(db_clone),
-            progress=self.backup_job.progress_callback,
+            progress=self.jobs.backup.progress_callback,
         )
         task = asyncio.create_task(backup.backup())
-        self.backup_job.set_task(task)
+        self.jobs.backup.set_task(task)
 
         return task
 

@@ -4,7 +4,6 @@ import json
 import logging.config
 import os
 import pathlib
-import time
 from operator import attrgetter
 from typing import Annotated
 
@@ -237,7 +236,7 @@ async def download_object(
 
 @api.get("/scan")
 async def scan(repo: RepoDependency) -> backathon.scan.ScanProgress | None:
-    return repo.scan_job.progress
+    return repo.jobs.scan.status.current_message
 
 
 @api.post("/scan")
@@ -252,7 +251,7 @@ async def scan_start(repo: RepoDependency):
 
 @api.get("/backup")
 async def backup(repo: RepoDependency) -> backathon.backup.BackupProgress | None:
-    return repo.backup_job.progress
+    return repo.jobs.backup.status.current_message
 
 
 @api.post("/backup")
@@ -273,94 +272,20 @@ async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
 
     # Push an initial status into the object stream so the client gets an
     # immediate status
-    asyncio.create_task(
-        send_stream.send(
-            json.dumps(
-                {
-                    "scan": repo.scan_job.progress.model_dump(mode="json")
-                    if repo.scan_job.progress
-                    else None,
-                    "backup": repo.backup_job.progress.model_dump(mode="json")
-                    if repo.backup_job.progress
-                    else None,
-                }
-            )
-        )
-    )
+    asyncio.create_task(send_stream.send(json.dumps(repo.jobs.make_status_message())))
 
-    # The following callback handlers use send_nowait() and ignore WouldBlock
-    # exceptions so that we don't end up queuing up more messages than can
-    # be sent to the client. Status messages may get skipped if the network
-    # is slow.
-    # ASGI spec says that servers must flush all data into the send buffer
-    # before returning from a send call. The default buffer may still be a bit
-    # large though, so there's also a timer to make sure no there's no more
-    # than 10 updates per second
-    last_update = time.monotonic()
-
-    async def handle_scan_message(progress: backathon.scan.ScanProgress | None):
-        nonlocal last_update
-        now = time.monotonic()
-        if last_update + 0.1 > now:
-            return
-        last_update = now
+    async def job_status_watcher():
         try:
-            send_stream.send_nowait(
-                json.dumps(
-                    {
-                        "scan": progress.model_dump(mode="json")
-                        if progress is not None
-                        else None,
-                        "backup": None,
-                    }
-                )
-            )
-        except anyio.WouldBlock:
-            pass
-
-    async def handle_backup_message(progress: backathon.backup.BackupProgress | None):
-        nonlocal last_update
-        now = time.monotonic()
-        if last_update + 0.1 > now:
-            return
-        last_update = now
-        try:
-            send_stream.send_nowait(
-                json.dumps(
-                    {
-                        "scan": None,
-                        "backup": progress.model_dump(mode="json")
-                        if progress is not None
-                        else None,
-                    }
-                )
-            )
-        except anyio.WouldBlock:
-            pass
-
-    # EventSourceResponse's data_sender_callable is a convenient feature to run
-    # a coroutine for the duration of the response, and is automatically canceled
-    # when the response closes. We use it to keep the channel listener context
-    # open and automatically stop listening for status updates on the channel
-    # when the response closes.
-    async def event_listener():
-        try:
-            async with contextlib.AsyncExitStack() as contexts:
-                logger.debug("Entering scan job channel context")
-                await contexts.enter_async_context(
-                    repo.scan_job.channel.listen(handle_scan_message)
-                )
-                logger.debug("Entering backup job channel context")
-                await contexts.enter_async_context(
-                    repo.backup_job.channel.listen(handle_backup_message)
-                )
-                logger.debug("data sender callable task sleeping")
-                while True:
-                    await asyncio.sleep(10000)
+            async for status_update in repo.jobs.iter_status_updates():
+                try:
+                    send_stream.send_nowait(json.dumps(status_update))
+                except anyio.WouldBlock:
+                    pass
+                await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             logger.debug("SSE event listener cancelled and closing")
             raise
 
     return sse_starlette.EventSourceResponse(
-        recv_stream, data_sender_callable=event_listener
+        recv_stream, data_sender_callable=job_status_watcher
     )
