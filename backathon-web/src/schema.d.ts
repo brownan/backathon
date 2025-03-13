@@ -57,23 +57,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/objects/{objid}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Object */
-        get: operations["get_object_objects__objid__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/excludes/": {
         parameters: {
             query?: never;
@@ -109,6 +92,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/objects/{objid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Object */
+        get: operations["get_object_objects__objid__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/objects/{objid}/ls": {
         parameters: {
             query?: never;
@@ -129,10 +129,120 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/objects/{objid}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Object */
+        get: operations["download_object_objects__objid__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scan */
+        get: operations["scan_scan_get"];
+        put?: never;
+        /** Scan Start */
+        post: operations["scan_start_scan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Backup */
+        get: operations["backup_backup_get"];
+        put?: never;
+        /** Backup Start */
+        post: operations["backup_start_backup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Events */
+        get: operations["events_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** BackupProgress */
+        BackupProgress: {
+            /**
+             * Count Progress
+             * @default 0
+             */
+            count_progress: number;
+            /**
+             * Count Total
+             * @default 0
+             */
+            count_total: number;
+            /**
+             * Size Progress
+             * @default 0
+             */
+            size_progress: number;
+            /**
+             * Size Total
+             * @default 0
+             */
+            size_total: number;
+            /**
+             * Actual Uploaded
+             * @default 0
+             */
+            actual_uploaded: number;
+            /** Current Entries */
+            current_entries?: components["schemas"]["_EntryProgress"][];
+            /**
+             * Objects Processed
+             * @default 0
+             */
+            objects_processed: number;
+            /**
+             * Objects Uploaded
+             * @default 0
+             */
+            objects_uploaded: number;
+        };
         /** Body_add_root_roots__post */
         Body_add_root_roots__post: {
             /** Path */
@@ -224,6 +334,15 @@ export interface components {
          * @enum {string}
          */
         ObjectType: "file" | "blob" | "tree" | "symlink";
+        /** ScanProgress */
+        ScanProgress: {
+            /** Scanned */
+            scanned: number;
+            /** Total */
+            total: number | null;
+            /** Last Path */
+            last_path: string | null;
+        };
         /**
          * Snapshot
          * @description A snapshot of a filesystem at a particular time
@@ -249,6 +368,26 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** _EntryProgress */
+        _EntryProgress: {
+            /** Path */
+            path: string;
+            /**
+             * Started
+             * @default false
+             */
+            started: boolean;
+            /**
+             * Bytes Backed Up
+             * @default 0
+             */
+            bytes_backed_up: number;
+            /**
+             * Bytes Total
+             * @default 0
+             */
+            bytes_total: number;
         };
     };
     responses: never;
@@ -394,37 +533,6 @@ export interface operations {
             };
         };
     };
-    get_object_objects__objid__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                objid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Object"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_excludes_excludes__get: {
         parameters: {
             query?: never;
@@ -498,6 +606,37 @@ export interface operations {
             };
         };
     };
+    get_object_objects__objid__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                objid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Object"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_directory_contents_objects__objid__ls_get: {
         parameters: {
             query?: never;
@@ -525,6 +664,139 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_object_objects__objid__download_get: {
+        parameters: {
+            query: {
+                name: string;
+            };
+            header?: never;
+            path: {
+                objid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scan_scan_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanProgress"] | null;
+                };
+            };
+        };
+    };
+    scan_start_scan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    backup_backup_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupProgress"] | null;
+                };
+            };
+        };
+    };
+    backup_start_backup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    events_events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };
