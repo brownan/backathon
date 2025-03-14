@@ -64,11 +64,43 @@
             </div>
         </div>
     </nav>
-    <div class="section">
+    <div
+        id="main-router-view"
+        class="section status-open"
+    >
         <RouterView />
+    </div>
+    <div
+        id="status-footer"
+        class="status-open"
+    >
+        Status Bar
     </div>
     <ModalsContainer />
 </template>
+
+<style>
+#main-router-view.status-open {
+    margin-bottom: 6em;
+}
+#status-footer {
+    overflow: hidden;
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    height: 0;
+    background-color: var(--body-background-color);
+    transition: height 0.5s linear;
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+#status-footer.status-open {
+    height: 6em;
+    border-top: 2px solid var(--border);
+}
+</style>
 
 <script setup lang="ts">
 import { ref } from "vue";
