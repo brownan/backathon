@@ -1,8 +1,18 @@
-import createClient from "openapi-fetch";
+import createClient, { type FetchResponse, type MaybeOptionalInit } from "openapi-fetch";
 
 import type { paths } from "./schema.d.ts";
-import { computed, onWatcherCleanup, reactive, type Ref, ref, watchEffect } from "vue";
+import {
+    computed,
+    type MaybeRefOrGetter,
+    onWatcherCleanup,
+    reactive,
+    type Ref,
+    ref,
+    toValue,
+    watchEffect,
+} from "vue";
 import type { QueryState } from "@/useQuery";
+import type { PathsWithMethod, MediaType } from "openapi-typescript-helpers";
 
 export const client = createClient<paths, "application/json">({ baseUrl: "/api" });
 
@@ -86,4 +96,73 @@ export function conditionalUseQuery<T, E>(
         error: computed(() => queryStateRef.value?.error || null),
         cancel: () => queryStateRef.value?.cancel(),
     });
+}
+
+export interface QueryRequest<
+    Method extends "get",
+    Path extends PathsWithMethod<paths, Method>,
+    Init extends MaybeOptionalInit<paths[Path], Method>,
+> {
+    method: Method;
+    url: Path;
+    options: Init;
+}
+
+export type QueryState2<
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    T extends Record<string | number, any>,
+    Options,
+    Media extends MediaType,
+> =
+    | (FetchResponse<T, Options, Media> & {
+          isReady: true;
+          isFetching: false;
+      })
+    | {
+          isReady: false;
+          isFetching: boolean;
+      };
+
+export function useQuery2<
+    Media extends "application/json",
+    Method extends "get",
+    Path extends PathsWithMethod<paths, Method>,
+    Init extends MaybeOptionalInit<paths[Path], Method>,
+>(
+    getter: MaybeRefOrGetter<QueryRequest<Method, Path, Init> | undefined>,
+): Ref<QueryState2<paths[Path][Method], Init, Media>> {
+    const fetchResultRef: Ref<QueryState2<paths[Path][Method], Init, Media>> = ref({
+        isReady: false,
+        isFetching: false,
+    });
+
+    watchEffect(() => {
+        const request: QueryRequest<Method, Path, Init> | undefined = toValue(getter);
+        if (request === undefined) {
+            fetchResultRef.value = {
+                isReady: false,
+                isFetching: false,
+            };
+        } else {
+            fetchResultRef.value = {
+                isReady: false,
+                isFetching: true,
+            };
+            const responsePromise = client.request(
+                request.method,
+                request.url,
+                // @ts-expect-error the request type signature does some type magic that I can't decipher
+                request.options,
+            );
+            responsePromise.then((fetchResponse) => {
+                fetchResultRef.value = {
+                    ...fetchResponse,
+                    isReady: true,
+                    isFetching: false,
+                };
+            });
+        }
+    });
+
+    return fetchResultRef;
 }
