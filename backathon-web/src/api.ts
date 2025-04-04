@@ -8,8 +8,10 @@ import {
     reactive,
     type Ref,
     ref,
+    shallowRef,
     toValue,
     watchEffect,
+    type ComputedRef,
 } from "vue";
 import type { QueryState } from "@/useQuery";
 import type { PathsWithMethod, MediaType } from "openapi-typescript-helpers";
@@ -98,6 +100,22 @@ export function conditionalUseQuery<T, E>(
     });
 }
 
+/*
+The following is my second attempt
+
+useQuery2 takes a single parameter, which is one of:
+* A QueryRequest object
+* A reference to a QueryRequest or undefined
+* A getter function that returns a QueryRequest or undefined
+
+and returns a Ref<QueryState2>. The QueryState2 object is the openapi-fetch's
+FetchResponse object, but with some additional status added to track the state of
+the request.
+
+If the QueryRequest parameter is a ref or getter and returns undefined, no
+request is made and the QueryState2 object's isReady and isFetching are false.
+ */
+
 export interface QueryRequest<
     Method extends "get",
     Path extends PathsWithMethod<paths, Method>,
@@ -130,11 +148,13 @@ export function useQuery2<
     Init extends MaybeOptionalInit<paths[Path], Method>,
 >(
     getter: MaybeRefOrGetter<QueryRequest<Method, Path, Init> | undefined>,
-): Ref<QueryState2<paths[Path][Method], Init, Media>> {
-    const fetchResultRef: Ref<QueryState2<paths[Path][Method], Init, Media>> = ref({
-        isReady: false,
-        isFetching: false,
-    });
+): ComputedRef<QueryState2<paths[Path][Method], Init, Media>> {
+    const fetchResultRef: Ref<QueryState2<paths[Path][Method], Init, Media>> = shallowRef(
+        {
+            isReady: false,
+            isFetching: false,
+        },
+    );
 
     watchEffect(() => {
         const request: QueryRequest<Method, Path, Init> | undefined = toValue(getter);
@@ -148,11 +168,13 @@ export function useQuery2<
                 isReady: false,
                 isFetching: true,
             };
+            const controller = new AbortController();
+            onWatcherCleanup(() => controller.abort());
             const responsePromise = client.request(
                 request.method,
                 request.url,
                 // @ts-expect-error the request type signature does some type magic that I can't decipher
-                request.options,
+                { ...request.options, signal: controller.signal },
             );
             responsePromise.then((fetchResponse) => {
                 fetchResultRef.value = {
@@ -164,5 +186,5 @@ export function useQuery2<
         }
     });
 
-    return fetchResultRef;
+    return computed(() => fetchResultRef.value);
 }
