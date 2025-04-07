@@ -59,12 +59,17 @@
 </style>
 
 <script setup lang="ts">
-import { conditionalUseQuery, useQuery } from "@/api.ts";
+import { useQuery } from "@/api.ts";
 import { computed, toRefs } from "vue";
 import FileList from "@/components/FileList.vue";
 import { useRoute, useRouter } from "vue-router";
 
-const { data: snapshots } = toRefs(useQuery("get", "/snapshots", {}));
+const snapshotResult = useQuery({
+    method: "get",
+    url: "/snapshots",
+    options: {},
+});
+const snapshots = computed(() => snapshotResult.data || []);
 
 const routes = useRoute();
 const router = useRouter();
@@ -92,15 +97,19 @@ function selectSnapshot(id: number) {
 }
 
 const { data: rootObj } = toRefs(
-    conditionalUseQuery(() => {
+    useQuery(() => {
         if (activeSnapshot.value) {
-            return useQuery("get", "/objects/{objid}", {
-                params: {
-                    path: {
-                        objid: activeSnapshot.value.root,
+            return {
+                method: "get",
+                url: "/objects/{objid}",
+                options: {
+                    params: {
+                        path: {
+                            objid: activeSnapshot.value.root,
+                        },
                     },
                 },
-            });
+            };
         }
     }),
 );

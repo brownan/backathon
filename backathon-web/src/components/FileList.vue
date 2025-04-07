@@ -79,7 +79,7 @@
 <script setup lang="ts">
 import { type components } from "@/schema";
 import { computed, reactive, ref, toRefs, watch } from "vue";
-import { conditionalUseQuery, useQuery } from "@/api";
+import { useQuery } from "@/api";
 
 import MdiIcon from "@/utils/MdiIcon.vue";
 import { mdiMenuRight, mdiFolderOutline, mdiFileOutline } from "@mdi/js";
@@ -105,15 +105,19 @@ const { obj, name } = toRefs(props);
 const isTree = computed(() => props.obj.type === "tree");
 
 const { data: objList } = toRefs(
-    conditionalUseQuery(() => {
+    useQuery(() => {
         if (isTree.value) {
-            return useQuery("get", "/objects/{objid}/ls", {
-                params: {
-                    path: {
-                        objid: props.obj.objid,
+            return {
+                method: "get",
+                url: "/objects/{objid}/ls",
+                options: {
+                    params: {
+                        path: {
+                            objid: props.obj.objid,
+                        },
                     },
                 },
-            });
+            };
         }
     }),
 );

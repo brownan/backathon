@@ -1,5 +1,5 @@
 <template>
-    <h1>Home view</h1>
+    <h1 class="title is-1">Home view</h1>
 </template>
 
 <style scoped></style>
