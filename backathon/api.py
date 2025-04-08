@@ -4,6 +4,7 @@ import json
 import logging.config
 import os
 import pathlib
+import time
 from operator import attrgetter
 from typing import Annotated
 
@@ -276,12 +277,22 @@ async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
 
     async def job_status_watcher():
         try:
-            async for status_update in repo.jobs.iter_status_updates():
-                try:
-                    send_stream.send_nowait(json.dumps(status_update))
-                except anyio.WouldBlock:
-                    pass
-                await asyncio.sleep(0.1)
+            last_updated = 0
+            while True:
+                await repo.jobs.wait_for_change()
+
+                now = time.monotonic()
+                if now < last_updated + 0.1:
+                    await asyncio.sleep(last_updated + 0.1 - now)
+
+                status_msg = repo.jobs.make_status_message()
+                await send_stream.send(
+                    sse_starlette.ServerSentEvent(
+                        json.dumps(status_msg), event="statusUpdate"
+                    )
+                )
+                last_updated = now
+
         except asyncio.CancelledError:
             logger.debug("SSE event listener cancelled and closing")
             raise

@@ -11,18 +11,21 @@ type EventType = {
     backup: BackupProgress | null;
 };
 
-export const useJobStatus = defineStore("job-status", () => {
-    const { data, status, error } = useEventSource("/api/events", [], {
-        autoReconnect: true,
-        autoConnect: false,
-        immediate: true,
-    });
+const { data, event, status, error } = useEventSource("/api/events", ["statusUpdate"], {
+    autoReconnect: true,
+    autoConnect: false,
+    immediate: true,
+});
 
+export const useJobStatus = defineStore("job-status", () => {
     const scanStatus = ref<ScanProgress | null>(null);
     const backupStatus = ref<BackupProgress | null>(null);
     const lastUpdated = ref<Date | null>(null);
 
     watchEffect(() => {
+        if (event.value !== "statusUpdate") {
+            return;
+        }
         console.debug("New event received: ", data.value);
         if (data.value === null) {
             return;

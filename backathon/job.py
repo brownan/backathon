@@ -5,8 +5,6 @@ import dataclasses
 import logging
 from abc import ABC
 from typing import TYPE_CHECKING
-from typing import Any
-from typing import AsyncGenerator
 from typing import Generic
 from typing import TypeVar
 
@@ -58,6 +56,11 @@ class Job(ABC, Generic[MessageType]):
         self.task.add_done_callback(self._finish)
 
     def progress_callback(self, message: MessageType):
+        if not self.task:
+            logger.error(
+                "Progress callback called but no task was set. This is a bug",
+                stack_info=True,
+            )
         self.status.update(message)
 
     def is_running(self) -> bool:
@@ -85,21 +88,15 @@ class JobCollection:
     def any_is_running(self) -> bool:
         return any(j.is_running() for j in self.asdict().values())
 
-    async def iter_status_updates(self) -> AsyncGenerator[dict[str, Any]]:
-        """Yields status updates"""
+    async def wait_for_change(self):
         jobs = self.asdict()
-        tasks: dict[str, asyncio.Task[pydantic.BaseModel | None]] = {}
+        tasks = {}
         async with asyncio.TaskGroup() as tg:
-            while True:
-                for name in jobs.keys() - tasks.keys():
-                    tasks[name] = tg.create_task(jobs[name].status.wait_get())
-                await asyncio.wait(tasks.values(), return_when=asyncio.FIRST_COMPLETED)
-                for name, task in tasks.items():
-                    if task.done():
-                        tasks.pop(name)
-                        await task
-                        yield self.make_status_message()
-                        break
+            for name in jobs.keys():
+                tasks[name] = tg.create_task(jobs[name].status.wait_get())
+            await asyncio.wait(tasks.values(), return_when=asyncio.FIRST_COMPLETED)
+            for task in tasks.values():
+                task.cancel()
 
     def make_status_message(self):
         return {

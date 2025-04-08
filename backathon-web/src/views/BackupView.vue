@@ -15,6 +15,7 @@
             <button
                 type="button"
                 class="button"
+                @click="doBackup()"
             >
                 Start Backup
             </button>
@@ -29,5 +30,9 @@ import { client } from "@/api";
 
 function doScan() {
     client.POST("/scan");
+}
+
+function doBackup() {
+    client.POST("/backup");
 }
 </script>

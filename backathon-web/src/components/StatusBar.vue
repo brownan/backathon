@@ -46,6 +46,11 @@
                 {{ filesize(jobStatus.backup.size_progress) }}
                 / {{ filesize(jobStatus.backup.size_total) }}
             </div>
+            <progress
+                class="progress is-info"
+                :value="jobStatus.backup.count_progress"
+                :max="jobStatus.backup.count_total"
+            ></progress>
         </div>
     </div>
 </template>
@@ -82,7 +87,7 @@
 </style>
 
 <script setup lang="ts">
-import { useJobStatus } from "@/utils/status.ts";
+import { useJobStatus } from "@/utils/events.ts";
 import { computed } from "vue";
 import { filesize } from "filesize";
 
