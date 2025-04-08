@@ -23,6 +23,7 @@ export const useJobStatus = defineStore("job-status", () => {
     const lastUpdated = ref<Date | null>(null);
 
     watchEffect(() => {
+        console.debug("New event received: ", data.value);
         if (data.value === null) {
             return;
         }

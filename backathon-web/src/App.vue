@@ -65,47 +65,22 @@
         </div>
     </nav>
     <div
-        id="main-router-view"
-        class="section status-open"
+        id="main-view"
+        class="section"
     >
         <RouterView />
     </div>
-    <div
-        id="status-footer"
-        class="status-open"
-    >
-        Status Bar
-    </div>
+    <StatusBar />
     <ModalsContainer />
 </template>
 
-<style>
-#main-router-view.status-open {
-    margin-bottom: 6em;
-}
-#status-footer {
-    overflow: hidden;
-    position: fixed;
-    bottom: 0;
-    width: 100%;
-    height: 0;
-    background-color: var(--body-background-color);
-    transition: height 0.5s linear;
-
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-#status-footer.status-open {
-    height: 6em;
-    border-top: 2px solid var(--border);
-}
-</style>
+<style></style>
 
 <script setup lang="ts">
 import { ref } from "vue";
 import { RouterView } from "vue-router";
 import { ModalsContainer } from "vue-final-modal";
+import StatusBar from "@/components/StatusBar.vue";
 
 const navbarActive = ref(false);
 </script>

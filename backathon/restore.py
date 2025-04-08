@@ -118,6 +118,9 @@ async def _stream_dir_helper(
     if header.type != ObjectType.TREE:
         raise ValueError("Object given is not a TREE")
 
+    # TODO: output an entry for the directory itself, so that FS
+    # attributes can be set
+
     assert header.entries is not None
     for entry in header.entries:
         entry_raw_payload = await get_object(entry.objid)
@@ -174,6 +177,7 @@ async def _stream_dir_helper(
                 pad = b"\0" * (tarfile.BLOCKSIZE - remainder)
                 yield pad
         else:
+            # TODO: symlinks and any other file types that may be backed up
             logger.warning("File type %s not currently supported", entry_header.type)
 
 
