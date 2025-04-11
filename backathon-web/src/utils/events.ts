@@ -17,6 +17,17 @@ const { data, event, status, error } = useEventSource("/api/events", ["statusUpd
     immediate: true,
 });
 
+export function useConfigChange(key: string, callback: () => void) {
+    watchEffect(() => {
+        if (event.value === "configChange" && data.value) {
+            const dataObj = JSON.parse(data.value);
+            if (dataObj["key"] === key) {
+                callback();
+            }
+        }
+    });
+}
+
 export const useJobStatus = defineStore("job-status", () => {
     const scanStatus = ref<ScanProgress | null>(null);
     const backupStatus = ref<BackupProgress | null>(null);

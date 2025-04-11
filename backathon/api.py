@@ -265,18 +265,43 @@ async def backup_start(repo: RepoDependency):
     return {"status": "Backup Started"}
 
 
+_config_change_listeners: list[asyncio.Queue[str]] = []
+
+
+def send_config_change_event(key: str):
+    for q in _config_change_listeners:
+        q.put_nowait(key)
+
+
 @api.get("/events")
 async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
     send_stream, recv_stream = anyio.create_memory_object_stream(0)
 
     logger.info("Starting SSE event stream task")
 
-    # Push an initial status into the object stream so the client gets an
-    # immediate status
-    asyncio.create_task(send_stream.send(json.dumps(repo.jobs.make_status_message())))
+    async def config_change_watcher():
+        my_queue = asyncio.Queue()
+        _config_change_listeners.append(my_queue)
+        try:
+            while True:
+                key = await my_queue.get()
+                await send_stream.send(
+                    sse_starlette.ServerSentEvent(
+                        json.dumps({"key": key}), event="configChange"
+                    )
+                )
+        except asyncio.CancelledError:
+            logger.debug("event status watcher canceled and closing")
+            raise
+        finally:
+            _config_change_listeners.remove(my_queue)
 
     async def job_status_watcher():
         try:
+            # Push an initial status into the object stream so the client gets an
+            # immediate status
+            await send_stream.send(json.dumps(repo.jobs.make_status_message()))
+
             last_updated = 0
             while True:
                 await repo.jobs.wait_for_change()
@@ -297,6 +322,11 @@ async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
             logger.debug("SSE event listener cancelled and closing")
             raise
 
+    async def data_sender_task():
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(job_status_watcher())
+            tg.create_task(config_change_watcher())
+
     return sse_starlette.EventSourceResponse(
-        recv_stream, data_sender_callable=job_status_watcher
+        recv_stream, data_sender_callable=data_sender_task
     )
