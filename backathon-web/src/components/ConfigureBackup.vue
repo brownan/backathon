@@ -12,7 +12,17 @@
                 placeholder="Add New Root (start typing a path)"
                 :suggestions="suggestions"
                 @complete="complete"
-                :pt="{ listContainer: { style: 'width: 100%' } }"
+                @option-select="submitNewRoot($event.value)"
+                :pt="{
+                    listContainer: { style: 'width: 100%' },
+                    pcInputText: {
+                        root: {
+                            'data-test': 'hello world',
+                            onKeyup: withKeys(() => submitNewRoot(newRootRef), ['enter']),
+                        },
+                    },
+                }"
+                :virtual-scroller-options="{ itemSize: 38 }"
             />
         </div>
         <div
@@ -43,7 +53,7 @@
 <script setup lang="ts">
 import { useQuery } from "@/api.ts";
 import MdiIcon from "@/utils/MdiIcon.vue";
-import { computed, ref } from "vue";
+import { computed, ref, watch, withKeys } from "vue";
 import AutoComplete, { type AutoCompleteCompleteEvent } from "primevue/autocomplete";
 
 import { mdiDelete, mdiPlusCircleOutline } from "@mdi/js";
@@ -63,15 +73,39 @@ function deleteRoot(id: number, path: string) {
     });
 }
 
-const newRootRef = ref<string>();
+const newRootRef = ref<string>("");
+const query = ref<string>();
 
-const suggestions = ref<string[]>([]);
-function complete(event: AutoCompleteCompleteEvent) {
-    const query: string = event.query;
-    if (query.length === 0) {
-        suggestions.value = [];
-    } else {
-        suggestions.value = [`"${query}"-1`, `"${query}"-2`, `"${query}"-3`];
+const autocompleteResult = useQuery(() => {
+    if (query.value) {
+        return {
+            method: "get",
+            url: "/roots/autocomplete",
+            options: {
+                params: {
+                    query: {
+                        query: query.value,
+                    },
+                },
+            },
+        };
     }
+});
+const suggestions = ref<string[]>([]);
+watch(
+    () => autocompleteResult.data,
+    () => {
+        if (autocompleteResult.data) {
+            suggestions.value = autocompleteResult.data;
+        }
+    },
+);
+
+function complete(event: AutoCompleteCompleteEvent) {
+    query.value = event.query;
+}
+
+function submitNewRoot(path: string) {
+    console.log("Selected", path);
 }
 </script>

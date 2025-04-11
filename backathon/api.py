@@ -96,6 +96,36 @@ async def add_root(
     return entry
 
 
+@api.get("/roots/autocomplete")
+async def root_autocomplete(repo: RepoDependency, query: str) -> list[str]:
+    path = pathlib.Path(query)
+    ret = []
+    if (
+        path.exists()
+        and path.is_dir()
+        and not query.endswith("/.")
+        and not query.endswith("/..")
+    ):
+        ret.append(path)
+    if query.endswith("/"):
+        parent = path
+        prefix = ""
+    elif query.endswith("/.."):
+        parent = path
+        prefix = ".."
+    elif query.endswith("/."):
+        parent = path
+        prefix = "."
+    else:
+        parent = path.parent
+        prefix = path.name
+    if parent.exists():
+        for item in parent.iterdir():
+            if item.is_dir() and item.name.startswith(prefix) and item != path:
+                ret.append(item)
+    return sorted(str(item) for item in ret)
+
+
 @api.get("/roots/{id}")
 async def get_root(repo: RepoDependency, id: int) -> FSEntry:
     entry = next(
