@@ -17,6 +17,7 @@
 @use "bulma/sass/grid/columns";
 
 @use "bulma/sass/components/card";
+@use "bulma/sass/components/dropdown";
 @use "bulma/sass/components/modal";
 @use "bulma/sass/components/navbar";
 @use "bulma/sass/components/panel";
@@ -29,3 +30,11 @@
 @use "bulma/sass/helpers/visibility";
 
 @use "bulma/sass/themes";
+
+li.dropdown-item {
+  @extend a, .dropdown-item;
+}
+
+li.dropdown-item.is-active {
+  @extend .is-active
+}

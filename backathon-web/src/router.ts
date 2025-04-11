@@ -25,6 +25,7 @@ const router = createRouter({
             path: "/configure",
             name: "configure",
             component: ConfigureView,
+            redirect: { name: "configure-backup" },
             children: [
                 {
                     path: "backup",
