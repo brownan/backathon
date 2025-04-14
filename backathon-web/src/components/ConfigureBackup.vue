@@ -8,17 +8,22 @@
             />
             <AutoComplete
                 class="add-new-autocomplete"
+                ref="autocomplete"
                 v-model="newRootRef"
                 placeholder="Add New Root (start typing a path)"
                 :suggestions="suggestions"
+                :select-on-focus="false"
+                :complete-on-focus="true"
                 @complete="complete"
-                @option-select="submitNewRoot($event.value)"
+                @option-select="onOptionSelect"
                 :pt="{
                     listContainer: { style: 'width: 100%' },
                     pcInputText: {
                         root: {
-                            'data-test': 'hello world',
-                            onKeyup: withKeys(() => submitNewRoot(newRootRef), ['enter']),
+                            onKeyup: withKeys(
+                                (e: KeyboardEvent) => onEnter(e),
+                                ['enter'],
+                            ),
                         },
                     },
                 }"
@@ -58,6 +63,9 @@ import AutoComplete, { type AutoCompleteCompleteEvent } from "primevue/autocompl
 
 import { mdiDelete, mdiPlusCircleOutline } from "@mdi/js";
 import { confirm } from "@/utils/confirm.ts";
+import { client } from "@/api.ts";
+
+const autocomplete = ref<typeof AutoComplete>();
 
 const rootQuery = useQuery({
     method: "get",
@@ -97,6 +105,11 @@ watch(
     () => {
         if (autocompleteResult.data) {
             suggestions.value = autocompleteResult.data;
+            if (autocomplete.value) {
+                autocomplete.value.show();
+            }
+        } else {
+            suggestions.value = [];
         }
     },
 );
@@ -105,7 +118,22 @@ function complete(event: AutoCompleteCompleteEvent) {
     query.value = event.query;
 }
 
-function submitNewRoot(path: string) {
-    console.log("Selected", path);
+function onOptionSelect() {
+    console.log(`Option selected`, newRootRef.value);
+    query.value = newRootRef.value;
+}
+
+function onEnter() {
+    if (!autocomplete.value) {
+        return;
+    }
+    if (!autocomplete.value.overlayVisible) {
+        console.log("Enter pressed, creating root");
+        client.POST("/roots/", {
+            body: {
+                path: newRootRef.value,
+            },
+        });
+    }
 }
 </script>

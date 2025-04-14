@@ -123,7 +123,7 @@ async def root_autocomplete(repo: RepoDependency, query: str) -> list[str]:
         for item in parent.iterdir():
             if item.is_dir() and item.name.startswith(prefix) and item != path:
                 ret.append(item)
-    return sorted(str(item) for item in ret)
+    return sorted(str(item) + "/" for item in ret)
 
 
 @api.get("/roots/{id}")
