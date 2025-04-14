@@ -30,6 +30,9 @@
                 :virtual-scroller-options="{ itemSize: 38 }"
             />
         </div>
+        <div class="panel-block">
+            <FileBrowser />
+        </div>
         <div
             v-for="root in roots"
             :key="root.id"
@@ -64,6 +67,7 @@ import AutoComplete, { type AutoCompleteCompleteEvent } from "primevue/autocompl
 import { mdiDelete, mdiPlusCircleOutline } from "@mdi/js";
 import { confirm } from "@/utils/confirm.ts";
 import { client } from "@/api.ts";
+import FileBrowser from "@/components/FileBrowser.vue";
 
 const autocomplete = ref<typeof AutoComplete>();
 
