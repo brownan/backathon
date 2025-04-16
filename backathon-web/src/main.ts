@@ -37,6 +37,11 @@ app.use(PrimeVue, {
                 };
             },
         },
+        Checkbox: {
+            root: "checkbox",
+            input: "checkbox-input",
+            box: "checkbox-box",
+        },
     },
 });
 

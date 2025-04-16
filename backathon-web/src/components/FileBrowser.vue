@@ -12,9 +12,6 @@
                 nodeContent: 'file-browser-content',
                 node: 'file-browser-node',
                 nodeToggleButton: 'file-browser-toggle-button',
-                pcNodeCheckbox: {
-                    input: 'file-browser-checkbox checkbox',
-                },
             }"
         />
     </div>
@@ -40,9 +37,6 @@
     padding: 0;
     padding-block-start: 2px;
     padding-inline-start: 2rem;
-}
-.file-browser-checkbox {
-    margin-inline: 0 !important;
 }
 .file-browser-node {
     padding: 0;
@@ -109,5 +103,9 @@ function onNodeExpand(event) {
     console.log("on node expand", event);
 }
 
-const selectedKeys = ref<string[]>([]);
+const selectedKeys = ref<{
+    [key: string]: { checked?: boolean; partialChecked?: boolean };
+}>({
+    a: { checked: true },
+});
 </script>

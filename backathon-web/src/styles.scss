@@ -39,3 +39,46 @@ li.dropdown-item {
 li.dropdown-item.is-active {
   @extend .is-active
 }
+
+$checkbox-size: 1.00rem;
+
+.checkbox {
+  position: relative;
+  display: inline-flex;
+  user-select: none;
+  width: $checkbox-size;
+  height: $checkbox-size;
+}
+
+.checkbox-input {
+  cursor: pointer;
+  appearance: none;
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  opacity: 0;
+  z-index: 1;
+  outline: 0 none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+.checkbox-box {
+  color: var(--text);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  width: $checkbox-size;
+  height: $checkbox-size;
+  transition: background .2s, color .2s, border-color .2s, box-shadow .2s, outline-color .2s;
+  outline-color: transparent;
+  box-shadow: 0 0 #000,0 0 #000,0 1px 2px 0 rgba(18,18,23,0.05);
+
+}
