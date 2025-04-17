@@ -39,6 +39,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/roots/browse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Root Browse */
+        get: operations["root_browse_roots_browse_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/roots/autocomplete": {
         parameters: {
             query?: never;
@@ -351,6 +368,19 @@ export interface components {
          * @enum {string}
          */
         ObjectType: "file" | "blob" | "tree" | "symlink";
+        /** RootBrowseReturn */
+        RootBrowseReturn: {
+            /**
+             * Path Str
+             * Format: path
+             */
+            path_str: string;
+            /**
+             * Path B64
+             * Format: path
+             */
+            path_b64: string;
+        };
         /** ScanProgress */
         ScanProgress: {
             /** Scanned */
@@ -475,6 +505,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FSEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    root_browse_roots_browse_get: {
+        parameters: {
+            query: {
+                path_b64: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RootBrowseReturn"][];
                 };
             };
             /** @description Validation Error */

@@ -2,6 +2,7 @@
     <div>
         <Tree
             v-model:selection-keys="selectedKeys"
+            v-model:expanded-keys="expandedKeys"
             :value="nodes"
             selection-mode="checkbox"
             @node-expand="onNodeExpand"
@@ -83,27 +84,46 @@
 </style>
 
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { reactive } from "vue";
 import Tree from "primevue/tree";
 import { type TreeNode } from "primevue/treenode";
+import { client } from "@/api.ts";
 
 const nodes = reactive<TreeNode[]>([
     {
-        key: "/",
+        key: "Lw==",
         label: "/",
-        children: [
-            { key: "a", label: "A" },
-            { key: "b", label: "B" },
-            { key: "c", label: "C" },
-        ],
     },
 ]);
 
-function onNodeExpand(event) {
-    console.log("on node expand", event);
+function fetchDirContents(node: TreeNode) {
+    client
+        .GET("/roots/browse", {
+            params: {
+                query: {
+                    path_b64: node.key,
+                },
+            },
+        })
+        .then((result) => {
+            node.children =
+                result?.data?.map(({ path_str, path_b64 }) => ({
+                    key: path_b64,
+                    label: path_str,
+                })) || [];
+        });
 }
 
-const selectedKeys = ref<{
+fetchDirContents(nodes[0]);
+
+function onNodeExpand(node: TreeNode) {
+    console.log("on node expand", node);
+    fetchDirContents(node);
+}
+
+const expandedKeys = reactive<{ [key: string]: boolean }>({ "Lw==": true });
+
+const selectedKeys = reactive<{
     [key: string]: { checked?: boolean; partialChecked?: boolean };
 }>({
     a: { checked: true },

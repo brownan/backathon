@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import contextlib
 import json
 import logging.config
@@ -9,7 +10,9 @@ from operator import attrgetter
 from typing import Annotated
 
 import anyio
+import fastapi
 import natsort
+import pydantic
 import sse_starlette
 from fastapi import Body
 from fastapi import Depends
@@ -20,6 +23,8 @@ from fastapi import Request
 from fastapi.responses import StreamingResponse
 from pydantic import Base64Bytes
 from pydantic import BaseModel
+from pydantic import BeforeValidator
+from pydantic import PlainSerializer
 from starlette.routing import Mount
 
 import backathon.backup
@@ -67,6 +72,26 @@ RepoDependency = Annotated[Backathon, Depends(repo)]
 
 ObjIdParam = Annotated[str, Path(pattern=r"[0-9a-fA-F]{2}+")]
 
+# This pydantic type serializes a pathlib.Path into an opaque object that
+# will preserve un-decodable bytes in the path without hitting decode errors
+# in serialization
+PathType = Annotated[
+    pathlib.Path,
+    PlainSerializer(
+        lambda x: base64.urlsafe_b64encode(FSEntry.encode_path(x)).decode("ascii"),
+        return_type=str,
+    ),
+    BeforeValidator(
+        lambda x: pathlib.Path(os.fsdecode(base64.urlsafe_b64decode(x.encode("ascii"))))
+    ),
+]
+
+# Strips unprintable characters for user display
+PrintablePath = Annotated[
+    pathlib.Path, PlainSerializer(lambda x: make_path_printable(os.fsencode(x)))
+]
+
+
 api = FastAPI()
 
 dev_app = FastAPI(
@@ -94,6 +119,30 @@ async def add_root(
 ) -> FSEntry:
     entry = repo.add_root(pathlib.Path(path))
     return entry
+
+
+class RootBrowseReturn(pydantic.BaseModel):
+    path_str: PrintablePath
+    path_b64: PathType
+
+
+@api.get("/roots/browse")
+async def root_browse(path_b64: PathType) -> list[RootBrowseReturn]:
+    path = pathlib.Path(path_b64)
+    if not path.is_dir():
+        raise fastapi.HTTPException(status_code=404, detail="Path not found")
+
+    items: list[RootBrowseReturn] = []
+    for subpath in path.iterdir():
+        if subpath.is_dir():
+            items.append(
+                RootBrowseReturn.model_construct(
+                    path_str=subpath,
+                    path_b64=subpath,
+                )
+            )
+
+    return natsort.os_sorted(items, key=lambda x: x.path_str)
 
 
 @api.get("/roots/autocomplete")
