@@ -6,6 +6,7 @@
             :value="nodes"
             selection-mode="checkbox"
             @node-expand="onNodeExpand"
+            @node-collapse="onNodeCollapse"
             :pt="{
                 wrapper: 'file-browser-wrapper',
                 rootChildren: 'file-browser-root-children',
@@ -84,7 +85,7 @@
 </style>
 
 <script setup lang="ts">
-import { reactive } from "vue";
+import { reactive, ref } from "vue";
 import Tree from "primevue/tree";
 import { type TreeNode } from "primevue/treenode";
 import { client } from "@/api.ts";
@@ -121,11 +122,15 @@ function onNodeExpand(node: TreeNode) {
     fetchDirContents(node);
 }
 
-const expandedKeys = reactive<{ [key: string]: boolean }>({ "Lw==": true });
+function onNodeCollapse(node: TreeNode) {
+    // Cull the tree in memory so things don't grow as the user
+    // opens and closes directories
+    node.children = [];
+}
 
-const selectedKeys = reactive<{
+const expandedKeys = ref<{ [key: string]: boolean }>({ "Lw==": true });
+
+const selectedKeys = ref<{
     [key: string]: { checked?: boolean; partialChecked?: boolean };
-}>({
-    a: { checked: true },
-});
+}>({});
 </script>
