@@ -56,23 +56,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/roots/autocomplete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Root Autocomplete */
-        get: operations["root_autocomplete_roots_autocomplete_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/roots/{id}": {
         parameters: {
             query?: never;
@@ -279,7 +262,10 @@ export interface components {
         };
         /** Body_add_root_roots__post */
         Body_add_root_roots__post: {
-            /** Path */
+            /**
+             * Path
+             * Format: path
+             */
             path: string;
         };
         /** DirListEntry */
@@ -371,15 +357,23 @@ export interface components {
         /** RootBrowseReturn */
         RootBrowseReturn: {
             /**
-             * Path Str
+             * Path
              * Format: path
              */
-            path_str: string;
+            path: string;
             /**
-             * Path B64
+             * Key
              * Format: path
              */
-            path_b64: string;
+            key: string;
+            /** Root */
+            root: boolean;
+            /** Excluded */
+            excluded: boolean;
+            /** Parentofroot */
+            parentOfRoot: boolean;
+            /** Childofroot */
+            childOfRoot: boolean;
         };
         /** ScanProgress */
         ScanProgress: {
@@ -480,7 +474,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FSEntry"][];
+                    "application/json": components["schemas"]["RootBrowseReturn"][];
                 };
             };
         };
@@ -521,7 +515,7 @@ export interface operations {
     root_browse_roots_browse_get: {
         parameters: {
             query: {
-                path_b64: string;
+                key: string;
             };
             header?: never;
             path?: never;
@@ -536,37 +530,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RootBrowseReturn"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    root_autocomplete_roots_autocomplete_get: {
-        parameters: {
-            query: {
-                query: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": string[];
                 };
             };
             /** @description Validation Error */

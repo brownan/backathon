@@ -92,6 +92,54 @@ PrintablePath = Annotated[
 ]
 
 
+class RootBrowseReturn(pydantic.BaseModel):
+    path: PrintablePath
+    key: PathType
+    root: bool
+    excluded: bool
+
+    # If this node is the parent of some root, then it should be partially
+    # checked in the UI
+    parentOfRoot: bool
+
+    # If this node is the child of a root, then it is implicitly checked,
+    # UNLESS it is excluded or the child of an excluded node
+    childOfRoot: bool
+
+    @staticmethod
+    def closest_common_path(
+        base_paths: list[pathlib.Path], relative_path: pathlib.Path
+    ) -> int | None:
+        distances: list[int] = []
+        for base_path in base_paths:
+            for step, path in enumerate([relative_path] + list(relative_path.parents)):
+                if path == base_path:
+                    distances.append(step)
+                    break
+        return min(distances) if distances else None
+
+    @classmethod
+    def from_path(
+        cls, path: pathlib.Path, roots: list[pathlib.Path], excludes: list[pathlib.Path]
+    ):
+        closest_root = cls.closest_common_path(roots, path)
+        closest_exclude = cls.closest_common_path(excludes, path)
+
+        parent_of_root = (
+            any(path == p for root in roots for p in root.parents) and closest_root != 0
+        )
+
+        return cls.model_construct(
+            path=path,
+            key=path,
+            root=closest_root == 0,
+            excluded=closest_exclude == 0,
+            parentOfRoot=parent_of_root,
+            childOfRoot=closest_root is not None
+            and (closest_exclude is None or closest_exclude > closest_root),
+        )
+
+
 api = FastAPI()
 
 dev_app = FastAPI(
@@ -109,70 +157,44 @@ async def top(db: DatabaseDependency, repo: RepoDependency):
 
 
 @api.get("/roots/")
-async def list_roots(repo: RepoDependency) -> list[FSEntry]:
-    return repo.get_roots()
+async def list_roots(repo: RepoDependency) -> list[RootBrowseReturn]:
+    roots = repo.get_roots()
+    root_paths = [entry.decoded_path for entry in roots]
+    exclude_paths = []
+    return [
+        RootBrowseReturn.from_path(path, root_paths, exclude_paths) for path in root_paths
+    ]
 
 
 @api.post("/roots/")
 async def add_root(
-    repo: RepoDependency, path: Annotated[str, Body(embed=True)]
+    repo: RepoDependency, path: Annotated[PathType, Body(embed=True)]
 ) -> FSEntry:
-    entry = repo.add_root(pathlib.Path(path))
+    entry = repo.add_root(path)
     return entry
 
 
-class RootBrowseReturn(pydantic.BaseModel):
-    path_str: PrintablePath
-    path_b64: PathType
-
-
 @api.get("/roots/browse")
-async def root_browse(path_b64: PathType) -> list[RootBrowseReturn]:
-    path = pathlib.Path(path_b64)
+async def root_browse(repo: RepoDependency, key: PathType) -> list[RootBrowseReturn]:
+    path = pathlib.Path(key)
     if not path.is_dir():
         raise fastapi.HTTPException(status_code=404, detail="Path not found")
+
+    root_paths = [entry.decoded_path for entry in repo.get_roots()]
+    exclude_paths = []
 
     items: list[RootBrowseReturn] = []
     for subpath in path.iterdir():
         if subpath.is_dir():
             items.append(
-                RootBrowseReturn.model_construct(
-                    path_str=subpath,
-                    path_b64=subpath,
+                RootBrowseReturn.from_path(
+                    subpath,
+                    root_paths,
+                    exclude_paths,
                 )
             )
 
-    return natsort.os_sorted(items, key=lambda x: x.path_str)
-
-
-@api.get("/roots/autocomplete")
-async def root_autocomplete(repo: RepoDependency, query: str) -> list[str]:
-    path = pathlib.Path(query)
-    ret = []
-    if (
-        path.exists()
-        and path.is_dir()
-        and not query.endswith("/.")
-        and not query.endswith("/..")
-    ):
-        ret.append(path)
-    if query.endswith("/"):
-        parent = path
-        prefix = ""
-    elif query.endswith("/.."):
-        parent = path
-        prefix = ".."
-    elif query.endswith("/."):
-        parent = path
-        prefix = "."
-    else:
-        parent = path.parent
-        prefix = path.name
-    if parent.exists():
-        for item in parent.iterdir():
-            if item.is_dir() and item.name.startswith(prefix) and item != path:
-                ret.append(item)
-    return sorted(str(item) + "/" for item in ret)
+    return natsort.os_sorted(items, key=lambda x: x.path)
 
 
 @api.get("/roots/{id}")
