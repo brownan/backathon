@@ -122,13 +122,27 @@
  * File Browser component
  *
  * Clicks:
- * - Unchecked node is clicked
- *     check it and all descendents. Add node as a root
+ * - Unchecked or partial checked node is clicked
+ *     Check it and all descendents up to any excluded nodes
+ *     Partial check all ancestors
+ *     Add node as a root
  * - Checked node is clicked:
- *     if root: uncheck it and all descendents. Remove node as root
- *     if parent is root: set checked status to "exclude". Add to excludes
+ *     If root:
+ *       Uncheck it
+ *       Recurse downward unchecking nodes and removing explicit root flag. Stop recursing
+ *         if an excluded node is hit
+ *       Recurse upward and remove partial checks if none of its children are checked.
+ *       Remove node as root
+ *     If node is a child of a root:
+ *       set checked status to "exclude"
+ *       recurse downward setting everything to exclude
+ *       Add to excludes
  * - Excluded node is clicked:
- *     Remove exclude check. remove from excludes
+ *     If node is explicitly excluded:
+ *       Remove exclude check
+ *       Recurse downward and remove exclude checks from descendents
+ *       Remove from excludes
+ *     Otherwise: do nothing
  *
  * APIs:
  * - Get dir listing
@@ -166,7 +180,9 @@ const nodes = reactive<TreeNode[]>([
 
 // Passed to the Tree component to define the checked status
 const selectedKeys = ref<{
-    [key: string]: { checked?: boolean; partialChecked?: boolean; excluded?: boolean };
+    [key: string]:
+        | { checked?: boolean; partialChecked?: boolean; excluded?: boolean }
+        | undefined;
 }>({});
 
 // Updates the checked status of the given node
@@ -248,5 +264,117 @@ function onNodeCollapse(node: TreeNode) {
 
 function onCheckClick(node: TreeNode) {
     console.log("Check clicked", node);
+    const nodeInfo = getNodeInfo(node);
+    if (selectedKeys.value[node.key]?.checked) {
+        if (nodeInfo?.root) {
+            console.log("Removing root. unchecking node", node);
+            setCheckStatusUnchecked(node);
+            // TODO: call remove-root api
+        } else if (nodeInfo?.childOfRoot) {
+            console.log("adding exclude. excluding node", node);
+            setCheckStatusExcluded(node);
+            // TODO: call add-exclude api
+        }
+    } else if (selectedKeys.value[node.key]?.excluded) {
+        console.log("removing exclude. un-excluding node", node);
+        setCheckStatusUnchecked(node);
+        // TODO: call remove-exclude api
+    } else {
+        // unchecked or partial-checked case
+        console.log("Adding root. Checking node", node);
+        setCheckStatusChecked(node);
+        if (node.parent) {
+            setCheckStatusPartial(node.parent);
+        }
+        // TODO: call add-root api
+    }
+}
+
+/*
+ * Checks a node and all descendents up to any excluded nodes
+ */
+function setCheckStatusChecked(node: TreeNode) {
+    selectedKeys.value[node.key] = { checked: true };
+    if (node.children) {
+        for (const child of node.children) {
+            if (!selectedKeys.value[child.key]?.excluded) {
+                setCheckStatusChecked(child);
+            }
+        }
+    }
+}
+
+/*
+ * Recurse downward unchecking nodes and removing any explicit root flag.
+ * Stop recursing if an excluded node is hit
+ */
+function setCheckStatusUnchecked(node: TreeNode) {
+    if (!getNodeInfo(node)?.excluded) {
+        delete selectedKeys.value[node.key];
+        const nodeInfo = getNodeInfo(node);
+        if (nodeInfo?.root) {
+            nodeInfo.root = false;
+        }
+        if (node.children) {
+            for (const child of node.children) {
+                setCheckStatusUnchecked(child);
+            }
+        }
+    }
+}
+
+/*
+ * Recurse downward and set everything to excluded
+ */
+function setCheckStatusExcluded(node: TreeNode) {
+    selectedKeys.value[node.key] = { excluded: true };
+    if (node.children) {
+        for (const child of node.children) {
+            setCheckStatusExcluded(child);
+        }
+    }
+}
+
+/*
+ * Recurse downward and remove exclude checks from descendents
+ * Stop if any explicitly excluded nodes are hit (they need to
+ * be unexcluded explicitly)
+ */
+function setCheckStatusUnexcluded(node: TreeNode) {
+    delete selectedKeys.value[node.key];
+    if (node.children) {
+        for (const child of node.children) {
+            if (!getNodeInfo(child)?.excluded) {
+                setCheckStatusUnexcluded(child);
+            }
+        }
+    }
+}
+
+/*
+ * Partial check all ancestors
+ */
+function setCheckStatusPartial(node: TreeNode) {
+    selectedKeys.value[node.key] = { partialChecked: true };
+    if (node.paren) {
+        setCheckStatusPartial(node.parent);
+    }
+}
+
+/*
+ * Recurse upward and remove partial checks if none of its children are checked.
+ */
+function setCheckStatusRemovePartial(node: TreeNode) {
+    if (selectedKeys.value[node.key]?.partialChecked) {
+        if (
+            node.children &&
+            !node.children.some((child) => selectedKeys.value[child.key]?.checked)
+        ) {
+            delete selectedKeys.value[node.key];
+            if (node.parent) {
+                setCheckStatusRemovePartial(node.parent);
+            }
+        }
+    }
 }
 </script>
