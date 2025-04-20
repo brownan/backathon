@@ -95,48 +95,29 @@ PrintablePath = Annotated[
 class RootBrowseReturn(pydantic.BaseModel):
     path: PrintablePath
     key: PathType
+
+    # Roots are checked
     root: bool
+
+    # Excluded items are shown with an X
     excluded: bool
 
-    # If this node is the parent of some root, then it should be partially
-    # checked in the UI
+    # If this node is the parent of some root, then it is shown partially
+    # checked
     parentOfRoot: bool
-
-    # If this node is the child of a root, then it is implicitly checked,
-    # UNLESS it is excluded or the child of an excluded node
-    childOfRoot: bool
-
-    @staticmethod
-    def closest_common_path(
-        base_paths: list[pathlib.Path], relative_path: pathlib.Path
-    ) -> int | None:
-        distances: list[int] = []
-        for base_path in base_paths:
-            for step, path in enumerate([relative_path] + list(relative_path.parents)):
-                if path == base_path:
-                    distances.append(step)
-                    break
-        return min(distances) if distances else None
 
     @classmethod
     def from_path(
         cls, path: pathlib.Path, roots: list[pathlib.Path], excludes: list[pathlib.Path]
     ):
-        closest_root = cls.closest_common_path(roots, path)
-        closest_exclude = cls.closest_common_path(excludes, path)
-
-        parent_of_root = (
-            any(path == p for root in roots for p in root.parents) and closest_root != 0
-        )
+        parent_of_root = any(path == p for root in roots for p in root.parents)
 
         return cls.model_construct(
             path=path,
             key=path,
-            root=closest_root == 0,
-            excluded=closest_exclude == 0,
+            root=path in roots,
+            excluded=path in excludes,
             parentOfRoot=parent_of_root,
-            childOfRoot=closest_root is not None
-            and (closest_exclude is None or closest_exclude > closest_root),
         )
 
 

@@ -120,44 +120,6 @@
 <script setup lang="ts">
 /**
  * File Browser component
- *
- * Clicks:
- * - Unchecked or partial checked node is clicked
- *     Check it and all descendents up to any excluded nodes
- *     Partial check all ancestors
- *     Add node as a root
- * - Checked node is clicked:
- *     If root:
- *       Uncheck it
- *       Recurse downward unchecking nodes and removing explicit root flag. Stop recursing
- *         if an excluded node is hit
- *       Recurse upward and remove partial checks if none of its children are checked.
- *       Remove node as root
- *     If node is a child of a root:
- *       set checked status to "exclude"
- *       recurse downward setting everything to exclude
- *       Add to excludes
- * - Excluded node is clicked:
- *     If node is explicitly excluded:
- *       Remove exclude check
- *       Recurse downward and remove exclude checks from descendents
- *       Remove from excludes
- *     Otherwise: do nothing
- *
- * APIs:
- * - Get dir listing
- *     - Retrieves info on all directories that are an immediate child of given dir
- *     - Info includes root status, exclude status, parent of root (partial check),
- *       and ancestry distance to nearest parent and exclude (for check / exclude UI
- *       when this node is a descendent of a root or exclude)
- * - Add a root
- *     - Adds node as root
- * - Remove root
- *     - Removes node from root list
- * - Add exclude
- *     - Adds node to exclude list
- * - Remove exclude
- *     - Removes node from exclude list
  */
 import { reactive, ref } from "vue";
 import Tree from "primevue/tree";
@@ -185,6 +147,34 @@ const selectedKeys = ref<{
         | undefined;
 }>({});
 
+/**
+ * Checks this node's ancestors to find what "child flags" should be set
+ *
+ * childOfRoot indicates this node is implicitly included in a backup set
+ * childOfExclude indicates this node is implicitly excluded, even though a further
+ *   ancestor may be a root
+ *
+ * These flags are use to determine what kind of checkbox to use for a node, and also
+ * what to do when a checkbox is clicked
+ */
+function getNodeChildFlags(node: TreeNode | null): {
+    childOfRoot: boolean;
+    childOfExclude: boolean;
+} {
+    if (!node) {
+        return { childOfRoot: false, childOfExclude: false };
+    }
+    while ((node = getNodeParent(node))) {
+        const nodeInfo = getNodeInfo(node);
+        if (nodeInfo?.root) {
+            return { childOfRoot: true, childOfExclude: false };
+        } else if (nodeInfo?.excluded) {
+            return { childOfRoot: false, childOfExclude: true };
+        }
+    }
+    return { childOfRoot: false, childOfExclude: false };
+}
+
 // Updates the checked status of the given node
 function updateCheckedStatus(node: TreeNode) {
     const nodeInfo = getNodeInfo(node);
@@ -192,20 +182,31 @@ function updateCheckedStatus(node: TreeNode) {
         delete selectedKeys.value[node.key];
         return;
     }
-    if (nodeInfo.root) {
+
+    const isRoot = nodeInfo.root;
+    const isExcluded = nodeInfo.excluded;
+    const parentOfRoot = nodeInfo.parentOfRoot;
+    const { childOfRoot, childOfExclude } = getNodeChildFlags(node);
+
+    if (isRoot) {
         // This is a root node
         selectedKeys.value[node.key] = { checked: true };
-    } else if (nodeInfo.excluded) {
+    } else if (isExcluded) {
         // This node is explicitly excluded
-        selectedKeys.value[node.key] = {};
-    } else if (nodeInfo.parentOfRoot) {
+        selectedKeys.value[node.key] = { excluded: true };
+    } else if (parentOfRoot) {
         // This is the parent of some root, so we indicate this with
         // a partial checkmark
         selectedKeys.value[node.key] = { partialChecked: true };
-    } else if (nodeInfo.childOfRoot) {
-        // This node is the child of a root, so it is implicitly included
-        // in the backup set
+    } else if (childOfRoot) {
+        // A child of a root is implicitly included and indicated with a check
         selectedKeys.value[node.key] = { checked: true };
+    } else if (childOfExclude) {
+        // A child of an exclude is implicitly excluded, and indicated with the excluded
+        // icon
+        selectedKeys.value[node.key] = { excluded: true };
+    } else {
+        delete selectedKeys.value[node.key];
     }
 }
 
@@ -265,115 +266,91 @@ function onNodeCollapse(node: TreeNode) {
 function onCheckClick(node: TreeNode) {
     console.log("Check clicked", node);
     const nodeInfo = getNodeInfo(node);
-    if (selectedKeys.value[node.key]?.checked) {
-        if (nodeInfo?.root) {
-            console.log("Removing root. unchecking node", node);
-            setCheckStatusUnchecked(node);
-            // TODO: call remove-root api
-        } else if (nodeInfo?.childOfRoot) {
-            console.log("adding exclude. excluding node", node);
-            setCheckStatusExcluded(node);
-            // TODO: call add-exclude api
-        }
-    } else if (selectedKeys.value[node.key]?.excluded) {
-        console.log("removing exclude. un-excluding node", node);
-        setCheckStatusUnchecked(node);
-        // TODO: call remove-exclude api
+
+    if (!nodeInfo) {
+        console.warn("No node info found");
+        return;
+    }
+
+    const isRoot = nodeInfo.root;
+    const isExcluded = nodeInfo.excluded;
+    const { childOfRoot, childOfExclude } = getNodeChildFlags(node);
+
+    if (isRoot) {
+        console.log("Root clicked. removing root");
+        nodeInfo.root = false;
+        setCheckStatusRemovePartial(node);
+        updateDescendentCheckStatus(node);
+        // TODO: API call
+    } else if (isExcluded) {
+        console.log("Exclude clicked. Removing exclude");
+        nodeInfo.excluded = false;
+        updateDescendentCheckStatus(node);
+        // TODO: api call
+    } else if (childOfRoot) {
+        console.log("Implicit include clicked. Adding exclude");
+        nodeInfo.excluded = true;
+        updateDescendentCheckStatus(node);
+        // TODO: api call
+    } else if (childOfExclude) {
+        console.log("Implicit exclude clicked. No action");
     } else {
-        // unchecked or partial-checked case
-        console.log("Adding root. Checking node", node);
-        setCheckStatusChecked(node);
-        if (node.parent) {
-            setCheckStatusPartial(node.parent);
-        }
-        // TODO: call add-root api
+        console.log("Unchecked or partially checked node clicked. Adding root");
+        nodeInfo.root = true;
+        setCheckStatusPartial(node);
+        updateDescendentCheckStatus(node);
+        // TODO: api call
     }
 }
 
 /*
- * Checks a node and all descendents up to any excluded nodes
+ * Recurses downward and updates the checked status of all nodes. Generally
+ * called on any node that's had its root or excluded flag changed, so that
+ * descendents can update the UI accordingly.
  */
-function setCheckStatusChecked(node: TreeNode) {
-    selectedKeys.value[node.key] = { checked: true };
-    if (node.children) {
-        for (const child of node.children) {
-            if (!selectedKeys.value[child.key]?.excluded) {
-                setCheckStatusChecked(child);
-            }
+function updateDescendentCheckStatus(start: TreeNode) {
+    updateCheckedStatus(start);
+    if (start.children) {
+        for (const child of start.children) {
+            updateDescendentCheckStatus(child);
         }
     }
 }
 
 /*
- * Recurse downward unchecking nodes and removing any explicit root flag.
- * Stop recursing if an excluded node is hit
- */
-function setCheckStatusUnchecked(node: TreeNode) {
-    if (!getNodeInfo(node)?.excluded) {
-        delete selectedKeys.value[node.key];
-        const nodeInfo = getNodeInfo(node);
-        if (nodeInfo?.root) {
-            nodeInfo.root = false;
-        }
-        if (node.children) {
-            for (const child of node.children) {
-                setCheckStatusUnchecked(child);
-            }
-        }
-    }
-}
-
-/*
- * Recurse downward and set everything to excluded
- */
-function setCheckStatusExcluded(node: TreeNode) {
-    selectedKeys.value[node.key] = { excluded: true };
-    if (node.children) {
-        for (const child of node.children) {
-            setCheckStatusExcluded(child);
-        }
-    }
-}
-
-/*
- * Recurse downward and remove exclude checks from descendents
- * Stop if any explicitly excluded nodes are hit (they need to
- * be unexcluded explicitly)
- */
-function setCheckStatusUnexcluded(node: TreeNode) {
-    delete selectedKeys.value[node.key];
-    if (node.children) {
-        for (const child of node.children) {
-            if (!getNodeInfo(child)?.excluded) {
-                setCheckStatusUnexcluded(child);
-            }
-        }
-    }
-}
-
-/*
- * Partial check all ancestors
+ * Called on new roots. Goes and sets the parentOfRoot flag on all ancestors
  */
 function setCheckStatusPartial(node: TreeNode) {
-    selectedKeys.value[node.key] = { partialChecked: true };
-    if (node.paren) {
-        setCheckStatusPartial(node.parent);
+    if (node.parent) {
+        const parent = node.parent;
+        const nodeInfo = getNodeInfo(parent);
+        if (nodeInfo) {
+            nodeInfo.parentOfRoot = true;
+        }
+        setCheckStatusPartial(parent);
+        updateCheckedStatus(parent);
     }
 }
 
 /*
- * Recurse upward and remove partial checks if none of its children are checked.
+ * Called on newly removed roots. Goes and clears the parentOfRoot flag
+ * on all ancestors, unless those ancestors have any children that are either
+ * roots or themselves parents of roots.
  */
 function setCheckStatusRemovePartial(node: TreeNode) {
-    if (selectedKeys.value[node.key]?.partialChecked) {
+    const parent = getNodeParent(node);
+    if (parent) {
+        const nodeInfo = getNodeInfo(parent);
         if (
-            node.children &&
-            !node.children.some((child) => selectedKeys.value[child.key]?.checked)
+            nodeInfo?.parentOfRoot &&
+            parent.children &&
+            !parent.children.some(
+                (child) => getNodeInfo(child)?.root || getNodeInfo(child)?.parentOfRoot,
+            )
         ) {
-            delete selectedKeys.value[node.key];
-            if (node.parent) {
-                setCheckStatusRemovePartial(node.parent);
-            }
+            nodeInfo.parentOfRoot = false;
+            setCheckStatusRemovePartial(parent);
+            updateCheckedStatus(parent);
         }
     }
 }

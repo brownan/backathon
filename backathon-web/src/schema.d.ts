@@ -372,8 +372,6 @@ export interface components {
             excluded: boolean;
             /** Parentofroot */
             parentOfRoot: boolean;
-            /** Childofroot */
-            childOfRoot: boolean;
         };
         /** ScanProgress */
         ScanProgress: {
