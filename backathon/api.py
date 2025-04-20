@@ -92,7 +92,7 @@ PrintablePath = Annotated[
 ]
 
 
-class RootBrowseReturn(pydantic.BaseModel):
+class PathInfo(pydantic.BaseModel):
     path: PrintablePath
     key: PathType
 
@@ -121,6 +121,11 @@ class RootBrowseReturn(pydantic.BaseModel):
         )
 
 
+class Browse(pydantic.BaseModel):
+    info: PathInfo
+    children: list[PathInfo]
+
+
 api = FastAPI()
 
 dev_app = FastAPI(
@@ -138,65 +143,62 @@ async def top(db: DatabaseDependency, repo: RepoDependency):
 
 
 @api.get("/roots/")
-async def list_roots(repo: RepoDependency) -> list[RootBrowseReturn]:
+async def list_roots(repo: RepoDependency) -> list[PathInfo]:
     roots = repo.get_roots()
     root_paths = [entry.decoded_path for entry in roots]
     exclude_paths = []
-    return [
-        RootBrowseReturn.from_path(path, root_paths, exclude_paths) for path in root_paths
-    ]
+    return [PathInfo.from_path(path, root_paths, exclude_paths) for path in root_paths]
 
 
-@api.post("/roots/")
-async def add_root(
-    repo: RepoDependency, path: Annotated[PathType, Body(embed=True)]
-) -> FSEntry:
-    entry = repo.add_root(path)
+@api.put("/roots/{key}")
+async def add_root(repo: RepoDependency, key: PathType) -> FSEntry:
+    entry = repo.add_root(key)
     return entry
 
 
-@api.get("/roots/browse")
-async def root_browse(repo: RepoDependency, key: PathType) -> list[RootBrowseReturn]:
-    path = pathlib.Path(key)
+@api.delete("/roots/{key}")
+async def delete_root(repo: RepoDependency, key: PathType):
+    repo.del_root(key)
+
+
+@api.get("/browse/")
+async def browse_root(repo: RepoDependency) -> Browse:
+    return await browse(repo, pathlib.Path("/"))
+
+
+@api.get("/browse/{key}")
+async def browse(repo: RepoDependency, key: PathType | None = None) -> Browse:
+    path = key
+    if not path:
+        path = pathlib.Path("/")
     if not path.is_dir():
         raise fastapi.HTTPException(status_code=404, detail="Path not found")
 
     root_paths = [entry.decoded_path for entry in repo.get_roots()]
     exclude_paths = []
 
-    items: list[RootBrowseReturn] = []
-    for subpath in path.iterdir():
-        if subpath.is_dir():
-            items.append(
-                RootBrowseReturn.from_path(
-                    subpath,
-                    root_paths,
-                    exclude_paths,
+    children: list[PathInfo] = []
+    try:
+        query_path_info = PathInfo.from_path(
+            path,
+            root_paths,
+            exclude_paths,
+        )
+        for subpath in path.iterdir():
+            if subpath.is_dir():
+                children.append(
+                    PathInfo.from_path(
+                        subpath,
+                        root_paths,
+                        exclude_paths,
+                    )
                 )
-            )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission Denied")
 
-    return natsort.os_sorted(items, key=lambda x: x.path)
-
-
-@api.get("/roots/{id}")
-async def get_root(repo: RepoDependency, id: int) -> FSEntry:
-    entry = next(
-        repo.db.query(FSEntry, "SELECT * FROM fsentry WHERE id = ?", (id,)), None
+    return Browse.model_construct(
+        info=query_path_info, children=natsort.os_sorted(children, key=lambda x: x.path)
     )
-    if entry is None:
-        raise HTTPException(status_code=404)
-
-    if entry.parent is not None:
-        raise HTTPException(status_code=404)
-
-    return entry
-
-
-@api.delete("/roots/{id}")
-async def del_root(repo: RepoDependency, id: int):
-    entry = await get_root(repo, id)
-    with repo.db.cursor() as cursor:
-        cursor.execute("DELETE FROM fsentry WHERE id = ?", (entry.id,))
 
 
 @api.get("/excludes/")

@@ -31,23 +31,40 @@ export interface paths {
         /** List Roots */
         get: operations["list_roots_roots__get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/roots/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
         /** Add Root */
-        post: operations["add_root_roots__post"];
-        delete?: never;
+        put: operations["add_root_roots__key__put"];
+        post?: never;
+        /** Delete Root */
+        delete: operations["delete_root_roots__key__delete"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/roots/browse": {
+    "/browse/": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Root Browse */
-        get: operations["root_browse_roots_browse_get"];
+        /** Browse Root */
+        get: operations["browse_root_browse__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -56,19 +73,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/roots/{id}": {
+    "/browse/{key}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Root */
-        get: operations["get_root_roots__id__get"];
+        /** Browse */
+        get: operations["browse_browse__key__get"];
         put?: never;
         post?: never;
-        /** Del Root */
-        delete: operations["del_root_roots__id__delete"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -260,13 +276,11 @@ export interface components {
              */
             objects_uploaded: number;
         };
-        /** Body_add_root_roots__post */
-        Body_add_root_roots__post: {
-            /**
-             * Path
-             * Format: path
-             */
-            path: string;
+        /** Browse */
+        Browse: {
+            info: components["schemas"]["PathInfo"];
+            /** Children */
+            children: components["schemas"]["PathInfo"][];
         };
         /** DirListEntry */
         DirListEntry: {
@@ -354,8 +368,8 @@ export interface components {
          * @enum {string}
          */
         ObjectType: "file" | "blob" | "tree" | "symlink";
-        /** RootBrowseReturn */
-        RootBrowseReturn: {
+        /** PathInfo */
+        PathInfo: {
             /**
              * Path
              * Format: path
@@ -472,82 +486,18 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RootBrowseReturn"][];
+                    "application/json": components["schemas"]["PathInfo"][];
                 };
             };
         };
     };
-    add_root_roots__post: {
+    add_root_roots__key__put: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Body_add_root_roots__post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FSEntry"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    root_browse_roots_browse_get: {
-        parameters: {
-            query: {
+            path: {
                 key: string;
             };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RootBrowseReturn"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_root_roots__id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
             cookie?: never;
         };
         requestBody?: never;
@@ -572,12 +522,12 @@ export interface operations {
             };
         };
     };
-    del_root_roots__id__delete: {
+    delete_root_roots__key__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                id: number;
+                key: string;
             };
             cookie?: never;
         };
@@ -590,6 +540,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    browse_root_browse__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Browse"];
+                };
+            };
+        };
+    };
+    browse_browse__key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Browse"];
                 };
             };
             /** @description Validation Error */

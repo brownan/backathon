@@ -224,16 +224,16 @@ function updateCheckedStatus(node: TreeNode) {
 
 function fetchDirContents(node: TreeNode) {
     client
-        .GET("/roots/browse", {
+        .GET("/browse/{key}", {
             params: {
-                query: {
+                path: {
                     key: node.key,
                 },
             },
         })
         .then((result) => {
             if (result.data) {
-                node.children = result.data.map((child) => ({
+                node.children = result.data.children.map((child) => ({
                     key: child.key,
                     label: child.path,
                     nodeInfo: child,
@@ -242,6 +242,9 @@ function fetchDirContents(node: TreeNode) {
                 for (const child of node.children) {
                     updateCheckedStatus(child);
                 }
+
+                node.nodeInfo = result.data.info;
+                updateCheckedStatus(node);
             }
         });
 }
@@ -249,7 +252,7 @@ function fetchDirContents(node: TreeNode) {
 fetchDirContents(nodes[0]);
 
 // This function adds typing info for use in templates and elsewhere
-function getNodeInfo(node: TreeNode): components["schemas"]["RootBrowseReturn"] | null {
+function getNodeInfo(node: TreeNode): components["schemas"]["PathInfo"] | null {
     return node?.nodeInfo || null;
 }
 
@@ -293,7 +296,14 @@ function onCheckClick(node: TreeNode) {
         nodeInfo.root = false;
         setCheckStatusRemovePartial(node);
         updateDescendentCheckStatus(node);
-        // TODO: API call
+
+        client.DELETE("/roots/{key}", {
+            params: {
+                path: {
+                    key: node.key,
+                },
+            },
+        });
     } else if (isExcluded) {
         console.log("Exclude clicked. Removing exclude");
         nodeInfo.excluded = false;
@@ -311,7 +321,14 @@ function onCheckClick(node: TreeNode) {
         nodeInfo.root = true;
         setCheckStatusPartial(node);
         updateDescendentCheckStatus(node);
-        // TODO: api call
+
+        client.PUT("/roots/{key}", {
+            params: {
+                path: {
+                    key: node.key,
+                },
+            },
+        });
     }
 }
 
