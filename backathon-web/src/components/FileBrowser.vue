@@ -1,6 +1,14 @@
 <template>
     <div>
+        <label>
+            <Checkbox
+                v-model="showHiddenFiles"
+                binary
+            />
+            Show Hidden Files
+        </label>
         <Tree
+            :class="{ 'hide-hidden-files': !showHiddenFiles }"
             :selection-keys="selectedKeys"
             v-model:expanded-keys="expandedKeys"
             :value="nodes"
@@ -11,7 +19,7 @@
                 rootChildren: 'file-browser-root-children',
                 nodeChildren: 'file-browser-node-children',
                 nodeContent: 'file-browser-content',
-                node: 'file-browser-node',
+                node: ({ context }) => ['file-browser-node', getNodeClass(context.node)],
                 nodeToggleButton: 'file-browser-toggle-button',
                 nodeLabel: ({ context }) => [
                     'nodelabel',
@@ -83,6 +91,11 @@
     padding: 0;
     outline: 0 none;
 }
+
+.hide-hidden-files .file-browser-node.node-hidden {
+    display: none;
+}
+
 .file-browser-content {
     border-radius: 2px;
     padding: 0 0.5rem;
@@ -138,6 +151,8 @@ import CheckIcon from "@primevue/icons/check";
 import MinusIcon from "@primevue/icons/minus";
 import TimesIcon from "@primevue/icons/times";
 
+const showHiddenFiles = ref<boolean>(false);
+
 // Passed to the Tree component to define the tree nodes
 const nodes = reactive<TreeNode[]>([
     {
@@ -152,6 +167,15 @@ const selectedKeys = ref<{
         | { checked?: boolean; partialChecked?: boolean; excluded?: boolean }
         | undefined;
 }>({});
+
+function getNodeClass(node: TreeNode) {
+    if (!node.label) {
+        return;
+    }
+    const labelParts = node.label?.split("/");
+    const finalPart = labelParts[labelParts.length - 1];
+    return finalPart.startsWith(".") ? "node-hidden" : null;
+}
 
 function getNodeLabelClass(node: TreeNode) {
     if (selectedKeys.value[node.key]?.excluded) {
