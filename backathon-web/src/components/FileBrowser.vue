@@ -13,6 +13,10 @@
                 nodeContent: 'file-browser-content',
                 node: 'file-browser-node',
                 nodeToggleButton: 'file-browser-toggle-button',
+                nodeLabel: ({ context }) => [
+                    'nodelabel',
+                    getNodeLabelClass(context.node),
+                ],
             }"
         >
             <template v-slot:nodeicon="{ node }">
@@ -27,12 +31,12 @@
             <template v-slot:default="{ node }">
                 {{ node.label }}
                 <span
-                    class="root"
+                    class="root-text"
                     v-if="getNodeInfo(node)?.root"
                     >(root)</span
                 >
                 <span
-                    class="excluded"
+                    class="excluded-text"
                     v-if="getNodeInfo(node)?.excluded"
                     >(excluded)</span
                 >
@@ -41,18 +45,20 @@
     </div>
 </template>
 
-<style scoped>
-.root {
+<style>
+.nodelabel.excluded {
+    text-decoration: line-through;
+}
+
+.nodelabel .root-text {
     font-weight: bold;
     color: red;
 }
-.excluded {
-    font-weight: bold;
-    color: blue;
-}
-</style>
 
-<style>
+.nodelabel .excluded-text {
+    font-weight: bold;
+    color: red;
+}
 .file-browser-wrapper {
 }
 
@@ -146,6 +152,12 @@ const selectedKeys = ref<{
         | { checked?: boolean; partialChecked?: boolean; excluded?: boolean }
         | undefined;
 }>({});
+
+function getNodeLabelClass(node: TreeNode) {
+    if (selectedKeys.value[node.key]?.excluded) {
+        return "excluded";
+    }
+}
 
 /**
  * Checks this node's ancestors to find what "child flags" should be set
