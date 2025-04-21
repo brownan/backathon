@@ -332,12 +332,26 @@ function onCheckClick(node: TreeNode) {
         console.log("Exclude clicked. Removing exclude");
         nodeInfo.excluded = false;
         updateDescendentCheckStatus(node);
-        // TODO: api call
+
+        client.DELETE("/excludes/{key}", {
+            params: {
+                path: {
+                    key: node.key,
+                },
+            },
+        });
     } else if (childOfRoot) {
         console.log("Implicit include clicked. Adding exclude");
         nodeInfo.excluded = true;
         updateDescendentCheckStatus(node);
-        // TODO: api call
+
+        client.PUT("/excludes/{key}", {
+            params: {
+                path: {
+                    key: node.key,
+                },
+            },
+        });
     } else if (childOfExclude) {
         console.log("Implicit exclude clicked. No action");
     } else {

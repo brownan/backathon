@@ -7,13 +7,14 @@ import pathlib
 import time
 from operator import attrgetter
 from typing import Annotated
+from typing import Collection
+from typing import Container
 
 import anyio
 import fastapi
 import natsort
 import pydantic
 import sse_starlette
-from fastapi import Body
 from fastapi import Depends
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -88,7 +89,10 @@ class PathInfo(pydantic.BaseModel):
 
     @classmethod
     def from_path(
-        cls, path: pathlib.Path, roots: list[pathlib.Path], excludes: list[pathlib.Path]
+        cls,
+        path: pathlib.Path,
+        roots: Collection[pathlib.Path],
+        excludes: Container[pathlib.Path],
     ):
         parent_of_root = any(path == p for root in roots for p in root.parents)
 
@@ -126,7 +130,7 @@ async def top(db: DatabaseDependency, repo: RepoDependency):
 async def list_roots(repo: RepoDependency) -> list[PathInfo]:
     roots = repo.get_roots()
     root_paths = [entry.decoded_path for entry in roots]
-    exclude_paths = []
+    exclude_paths = repo.db.config.excludes
     return [PathInfo.from_path(path, root_paths, exclude_paths) for path in root_paths]
 
 
@@ -155,7 +159,7 @@ async def browse(repo: RepoDependency, key: PathType | None = None) -> Browse:
         raise fastapi.HTTPException(status_code=404, detail="Path not found")
 
     root_paths = [entry.decoded_path for entry in repo.get_roots()]
-    exclude_paths = []
+    exclude_paths = repo.db.config.excludes
 
     children: list[PathInfo] = []
     try:
@@ -184,17 +188,24 @@ async def browse(repo: RepoDependency, key: PathType | None = None) -> Browse:
 @api.get("/excludes/")
 async def get_excludes(
     repo: RepoDependency,
-) -> set[PathType]:
-    return repo.db.config.excludes
+) -> list[PathInfo]:
+    root_paths = [entry.decoded_path for entry in repo.get_roots()]
+    return [
+        PathInfo.from_path(path, roots=root_paths, excludes=repo.db.config.excludes)
+        for path in repo.db.config.excludes
+    ]
 
 
-@api.post("/excludes/")
-async def set_excludes(
-    repo: RepoDependency, new_excludes: Annotated[set[PathType], Body()]
-) -> set[PathType]:
-    repo.db.config.excludes = new_excludes
+@api.put("/excludes/{key}")
+async def put_exclude(repo: RepoDependency, key: PathType):
+    repo.db.config.excludes.add(key)
     repo.db.config.save(repo.db)
-    return new_excludes
+
+
+@api.delete("/excludes/{key}")
+async def delete_exclude(repo: RepoDependency, key: PathType):
+    repo.db.config.excludes.remove(key)
+    repo.db.config.save(repo.db)
 
 
 @api.get("/snapshots")

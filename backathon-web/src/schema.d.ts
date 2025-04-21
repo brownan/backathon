@@ -100,9 +100,26 @@ export interface paths {
         /** Get Excludes */
         get: operations["get_excludes_excludes__get"];
         put?: never;
-        /** Set Excludes */
-        post: operations["set_excludes_excludes__post"];
+        post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/excludes/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Exclude */
+        put: operations["put_exclude_excludes__key__put"];
+        post?: never;
+        /** Delete Exclude */
+        delete: operations["delete_exclude_excludes__key__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -619,23 +636,21 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": string[];
+                    "application/json": components["schemas"]["PathInfo"][];
                 };
             };
         };
     };
-    set_excludes_excludes__post: {
+    put_exclude_excludes__key__put: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                key: string;
+            };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": string[];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -643,7 +658,38 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": string[];
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_exclude_excludes__key__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
