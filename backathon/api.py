@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import contextlib
 import json
 import logging.config
@@ -23,8 +22,6 @@ from fastapi import Request
 from fastapi.responses import StreamingResponse
 from pydantic import Base64Bytes
 from pydantic import BaseModel
-from pydantic import BeforeValidator
-from pydantic import PlainSerializer
 from starlette.routing import Mount
 
 import backathon.backup
@@ -42,6 +39,8 @@ from backathon.models import decode_objid
 from backathon.models import make_path_printable
 from backathon.restore import stream_dir
 from backathon.restore import stream_file
+from backathon.types import PathType
+from backathon.types import PrintablePath
 
 logger = logging.getLogger("backathon.api")
 
@@ -71,25 +70,6 @@ async def repo(req: Request) -> Backathon:
 RepoDependency = Annotated[Backathon, Depends(repo)]
 
 ObjIdParam = Annotated[str, Path(pattern=r"[0-9a-fA-F]{2}+")]
-
-# This pydantic type serializes a pathlib.Path into an opaque object that
-# will preserve un-decodable bytes in the path without hitting decode errors
-# in serialization
-PathType = Annotated[
-    pathlib.Path,
-    PlainSerializer(
-        lambda x: base64.urlsafe_b64encode(FSEntry.encode_path(x)).decode("ascii"),
-        return_type=str,
-    ),
-    BeforeValidator(
-        lambda x: pathlib.Path(os.fsdecode(base64.urlsafe_b64decode(x.encode("ascii"))))
-    ),
-]
-
-# Strips unprintable characters for user display
-PrintablePath = Annotated[
-    pathlib.Path, PlainSerializer(lambda x: make_path_printable(os.fsencode(x)))
-]
 
 
 class PathInfo(pydantic.BaseModel):
@@ -204,14 +184,14 @@ async def browse(repo: RepoDependency, key: PathType | None = None) -> Browse:
 @api.get("/excludes/")
 async def get_excludes(
     repo: RepoDependency,
-) -> list[str]:
+) -> set[PathType]:
     return repo.db.config.excludes
 
 
 @api.post("/excludes/")
 async def set_excludes(
-    repo: RepoDependency, new_excludes: Annotated[list[str], Body()]
-) -> list[str]:
+    repo: RepoDependency, new_excludes: Annotated[set[PathType], Body()]
+) -> set[PathType]:
     repo.db.config.excludes = new_excludes
     repo.db.config.save(repo.db)
     return new_excludes

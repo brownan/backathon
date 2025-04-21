@@ -4,33 +4,51 @@ import json
 from typing import TYPE_CHECKING
 from typing import Annotated
 from typing import Self
+from typing import TypeVar
 
 import pydantic
+
+from backathon.types import PathType
 
 if TYPE_CHECKING:
     from backathon import Database
 
-ConfigType = Annotated[
-    pydantic.JsonValue,
-    pydantic.AfterValidator(lambda x: json.loads(x) if isinstance(x, str) else x),
-    pydantic.PlainSerializer(lambda x: json.dumps(x), when_used="json"),
-]
+T = TypeVar("T")
+"""Wraps a pydantic-compatible type in json for serialization
 
-JsonList = Annotated[
-    list,
-    pydantic.BeforeValidator(lambda x: json.loads(x) if isinstance(x, str) else x),
-    pydantic.PlainSerializer(lambda x: json.dumps(x), when_used="json"),
+This is used below to serialize list, set, and json fields to a json string
+for storage in an sqlite field. SQLite can store types like int and boolean
+directly, but more complex types need to be serialized explicitly.
+"""
+JsonWrap = Annotated[
+    T,
+    pydantic.WrapSerializer(
+        lambda x, h: json.dumps(h(x)), return_type=str, when_used="json"
+    ),
+    pydantic.BeforeValidator(lambda x: json.loads(x)),
 ]
 
 
 class Settings(pydantic.BaseModel):
+    """Backathon settings
+
+    This class is used a bit differently than a normal pydantic model.
+    Instead of serializing the entire instance using .model_dump_json(),
+    we dump each individual field to json with .model_dump(mode='json')
+    and then store each field in a separate row in the sqlite settings table.
+
+    This lets fields like int and boolean to be stored natively in sqlite,
+    while more complex types like list, set, and json objects will use the
+    JsonWrap type above to serialize to string for storage in sqlite as text.
+    """
+
     encrypter: Annotated[
         pydantic.ImportString,
         pydantic.Field(title="Encryption Backend", description="The encryption backend"),
     ]
 
     encrypter_config: Annotated[
-        ConfigType,
+        JsonWrap[pydantic.JsonValue],
         pydantic.Field(
             title="Encrypter Config", description="Encrypter configuration, in JSON"
         ),
@@ -44,7 +62,7 @@ class Settings(pydantic.BaseModel):
         ),
     ]
     storage_config: Annotated[
-        ConfigType,
+        JsonWrap[pydantic.JsonValue],
         pydantic.Field(
             title="Storage Config", description="Storage configuration, in JSON"
         ),
@@ -58,8 +76,8 @@ class Settings(pydantic.BaseModel):
         ),
     ] = True
 
-    excludes: JsonList = pydantic.Field(
-        default_factory=list,
+    excludes: JsonWrap[set[PathType]] = pydantic.Field(
+        default_factory=set,
         title="Excludes",
         description="Local directories to exclude from backup",
     )
@@ -122,9 +140,14 @@ class Settings(pydantic.BaseModel):
     def load(cls, db: Database, initial_settings: Self | None = None) -> Self:
         with db.cursor() as cursor:
             cursor.execute("SELECT key, value FROM config")
-            rows = cursor.fetchall()
-            config_dict = initial_settings.model_dump() if initial_settings else {}
-            config_dict.update(rows)
+            db_config = {key: value for key, value in cursor.fetchall()}
+
+            config_dict = (
+                initial_settings.model_dump(mode="json") if initial_settings else {}
+            )
+
+            config_dict.update(db_config)
+
             return cls.model_validate(config_dict)
 
     def save(self, db: Database):
@@ -138,4 +161,4 @@ class MarkerData(pydantic.BaseModel):
     name: str
     version: str
     encrypter: pydantic.ImportString
-    encrypter_params: ConfigType
+    encrypter_params: pydantic.JsonValue
