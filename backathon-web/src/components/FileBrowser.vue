@@ -28,7 +28,10 @@
             }"
         >
             <template v-slot:nodeicon="{ node }">
-                <Checkbox @click="onCheckClick(node)">
+                <Checkbox
+                    @click="onCheckClick(node)"
+                    :input-id="`checkbox-${node.key}`"
+                >
                     <template v-slot:icon>
                         <CheckIcon v-if="selectedKeys[node.key]?.checked" />
                         <MinusIcon v-else-if="selectedKeys[node.key]?.partialChecked" />
@@ -37,7 +40,9 @@
                 </Checkbox>
             </template>
             <template v-slot:default="{ node }">
-                {{ node.label }}
+                <label :for="`checkbox-${node.key}`">
+                    {{ node.label }}
+                </label>
                 <span
                     class="root-text"
                     v-if="getNodeInfo(node)?.root"
