@@ -48,7 +48,7 @@ logger = logging.getLogger("backathon.api")
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("API lifecycle started")
+    logger.debug("API lifecycle started")
 
     async with asyncio.TaskGroup():
         db_path = os.environ["BACKATHON_DB_PATH"]
@@ -323,6 +323,33 @@ async def scan_start(repo: RepoDependency):
     except Exception as e:
         return {"status": "Failed to start scan", "error": str(e)}
     return {"status": "Scan Started"}
+
+
+class ScanInfo(pydantic.BaseModel):
+    unscanned: list[FSEntry]
+    outdatedCount: int
+    outdatedSize: int
+    totalCount: int
+    totalSize: int
+
+
+@api.get("/scan/info")
+async def scan_info(repo: RepoDependency) -> ScanInfo:
+    needs_scan = repo.db.query(FSEntry, "SELECT * FROM fsentry WHERE new")
+
+    with repo.db.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*), SUM(st_size) FROM fsentry WHERE objid IS NULL")
+        needs_backup, backup_size = cursor.fetchone()
+        cursor.execute("SELECT COUNT(*), SUM(st_size) FROM fsentry")
+        total_backup, total_size = cursor.fetchone()
+
+    return ScanInfo.model_construct(
+        unscanned=needs_scan,
+        outdatedCount=needs_backup,
+        outdatedSize=backup_size,
+        totalCount=total_backup,
+        totalSize=total_size,
+    )
 
 
 @api.get("/backup")

@@ -45,6 +45,7 @@ def dev(db_path: PathOption):
             log_level="info",
             log_config=backathon.cmdline.main.LOGGING_CONFIG,
             reload=True,
+            timeout_graceful_shutdown=1,
         )
     finally:
         vite.terminate()

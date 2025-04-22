@@ -214,6 +214,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/scan/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scan Info */
+        get: operations["scan_info_scan_info_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/backup": {
         parameters: {
             query?: never;
@@ -403,6 +420,19 @@ export interface components {
             excluded: boolean;
             /** Parentofroot */
             parentOfRoot: boolean;
+        };
+        /** ScanInfo */
+        ScanInfo: {
+            /** Unscanned */
+            unscanned: components["schemas"]["FSEntry"][];
+            /** Outdatedcount */
+            outdatedCount: number;
+            /** Outdatedsize */
+            outdatedSize: number;
+            /** Totalcount */
+            totalCount: number;
+            /** Totalsize */
+            totalSize: number;
         };
         /** ScanProgress */
         ScanProgress: {
@@ -854,6 +884,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    scan_info_scan_info_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanInfo"];
                 };
             };
         };

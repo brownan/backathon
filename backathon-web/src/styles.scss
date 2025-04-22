@@ -4,6 +4,7 @@
 
 @use "bulma/sass/base";
 
+@use "bulma/sass/elements/content";
 @use "bulma/sass/elements/block";
 @use "bulma/sass/elements/box";
 @use "bulma/sass/elements/button";
@@ -19,6 +20,7 @@
 @use "bulma/sass/components/card";
 @use "bulma/sass/components/dropdown";
 @use "bulma/sass/components/menu";
+@use "bulma/sass/components/message";
 @use "bulma/sass/components/modal";
 @use "bulma/sass/components/navbar";
 @use "bulma/sass/components/panel";

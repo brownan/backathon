@@ -11,7 +11,12 @@
                 Scanning
                 <span class="scan-count">
                     {{ formatter.format(jobStatus.scan.scanned) }}
-                    <template v-if="jobStatus.scan.total">
+                    <template
+                        v-if="
+                            jobStatus.scan.total &&
+                            jobStatus.scan.total >= jobStatus.scan.scanned
+                        "
+                    >
                         / {{ formatter.format(jobStatus.scan.total) }} ({{
                             `${Math.floor(
                                 (jobStatus.scan.scanned / jobStatus.scan.total) * 100,

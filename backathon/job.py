@@ -70,6 +70,7 @@ class Job(ABC, Generic[MessageType]):
         if self.task is task:
             # No other task is running. This job is now idle
             self.task = None
+            logger.debug("Task done. Clearing status")
             self.status.update(None)
         else:
             # Another task is replacing this one, which generally shouldn't
