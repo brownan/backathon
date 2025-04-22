@@ -12,6 +12,7 @@
             :selection-keys="selectedKeys"
             v-model:expanded-keys="expandedKeys"
             :value="nodes"
+            loading-mode="icon"
             @node-expand="onNodeExpand"
             @node-collapse="onNodeCollapse"
             :pt="{
@@ -27,6 +28,15 @@
                 ],
             }"
         >
+            <template v-slot:nodetoggleicon="{ node }">
+                <SpinnerIcon
+                    v-if="node.loading"
+                    :spin="true"
+                    :unstyled="false"
+                />
+                <ChevronDownIcon v-else-if="expandedKeys[node.key]" />
+                <ChevronRightIcon v-else />
+            </template>
             <template v-slot:nodeicon="{ node }">
                 <Checkbox
                     @click="onCheckClick(node)"
@@ -145,7 +155,7 @@
 /**
  * File Browser component
  */
-import { reactive, ref } from "vue";
+import { reactive, type Ref, ref } from "vue";
 import Tree from "primevue/tree";
 import { type TreeNode } from "primevue/treenode";
 import { client } from "@/api.ts";
@@ -155,6 +165,9 @@ import Checkbox from "primevue/checkbox";
 import CheckIcon from "@primevue/icons/check";
 import MinusIcon from "@primevue/icons/minus";
 import TimesIcon from "@primevue/icons/times";
+import SpinnerIcon from "@primevue/icons/spinner";
+import ChevronDownIcon from "@primevue/icons/chevrondown";
+import ChevronRightIcon from "@primevue/icons/chevronright";
 
 const showHiddenFiles = ref<boolean>(false);
 
@@ -252,6 +265,7 @@ function updateCheckedStatus(node: TreeNode) {
 }
 
 function fetchDirContents(node: TreeNode) {
+    node.loading = true;
     client
         .GET("/browse/{key}", {
             params: {
@@ -275,6 +289,9 @@ function fetchDirContents(node: TreeNode) {
                 node.nodeInfo = result.data.info;
                 updateCheckedStatus(node);
             }
+        })
+        .finally(() => {
+            node.loading = false;
         });
 }
 
@@ -289,7 +306,8 @@ function getNodeParent(node: TreeNode): TreeNode | null {
     return node.parent || null;
 }
 
-const expandedKeys = ref<{ [key: string]: boolean }>({ "Lw==": true });
+const expandedKeys: Ref<{ [key: string]: boolean }> = ref({ "Lw==": true });
+
 function onNodeExpand(node: TreeNode) {
     console.log("on node expand", node);
     fetchDirContents(node);
