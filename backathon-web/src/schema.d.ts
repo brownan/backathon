@@ -327,43 +327,29 @@ export interface components {
             name: string;
             obj: components["schemas"]["Object"];
         };
-        /**
-         * FSEntry
-         * @description Represents a row in the fsentry table
-         *
-         *     Keeps track of an entry in the local filesystem, either a directory,
-         *     or a file.
-         *
-         *     This tracks the last known state of each filesystem entry, so that it can
-         *     be compared to the actual state of the filesystem to see if it has changed.
-         *
-         *     It also keeps track of the last known object ID that was uploaded for
-         *     this object. If obj is null, then this entry is considered "dirty"
-         *     and needs to be uploaded.
-         */
-        FSEntry: {
+        /** FSEntry */
+        FSEntryType: {
             /** Id */
             id: number;
             /** Objid */
-            objid?: string | null;
+            objid: string | null;
+            /** Name */
+            name: string;
             /**
              * Path
-             * Format: binary
+             * Format: path
              */
             path: string;
             /** Parent */
-            parent?: number | null;
-            /**
-             * New
-             * @default true
-             */
+            parent: number | null;
+            /** New */
             new: boolean;
             /** St Mode */
-            st_mode?: number | null;
-            /** St Mtime Ns */
-            st_mtime_ns?: number | null;
+            st_mode: number | null;
+            /** St Mtime */
+            st_mtime: number | null;
             /** St Size */
-            st_size?: number | null;
+            st_size: number | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -424,7 +410,7 @@ export interface components {
         /** ScanInfo */
         ScanInfo: {
             /** Unscanned */
-            unscanned: components["schemas"]["FSEntry"][];
+            unscanned: components["schemas"]["FSEntryType"][];
             /** Outdatedcount */
             outdatedCount: number;
             /** Outdatedsize */
@@ -555,7 +541,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FSEntry"];
+                    "application/json": components["schemas"]["FSEntryType"];
                 };
             };
             /** @description Validation Error */

@@ -95,10 +95,9 @@
 import { useJobStatus } from "@/utils/events.ts";
 import { computed } from "vue";
 import { filesize } from "filesize";
+import { formatter } from "@/utils/formatting.ts";
 
 const jobStatus = useJobStatus();
 
 const statusOpen = computed(() => jobStatus.scan || jobStatus.backup);
-
-const formatter = Intl.NumberFormat();
 </script>

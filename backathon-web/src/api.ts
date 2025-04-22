@@ -65,10 +65,12 @@ export function useQuery<
     Method extends "get",
     Path extends PathsWithMethod<paths, Method>,
     Init extends MaybeOptionalInit<paths[Path], Method>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    OP extends paths[Path][Method] & Record<string | number, any>,
 >(
     getter: MaybeRefOrGetter<QueryRequest<Method, Path, Init> | undefined>,
-): QueryState<paths[Path][Method], Init, Media> {
-    const fetchResult: QueryState<paths[Path][Method], Init, Media> = shallowReactive({
+): QueryState<OP, Init, Media> {
+    const fetchResult: QueryState<OP, Init, Media> = shallowReactive({
         isReady: false,
         isFetching: false,
         data: undefined,

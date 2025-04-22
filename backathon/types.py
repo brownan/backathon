@@ -9,8 +9,7 @@ from typing import Annotated
 from pydantic import PlainSerializer
 from pydantic import PlainValidator
 
-from backathon.models import FSEntry
-from backathon.models import make_path_printable
+import backathon.models
 
 # This pydantic type serializes a pathlib.Path into an opaque object that
 # will preserve un-decodable bytes in the path without hitting decode errors
@@ -18,7 +17,9 @@ from backathon.models import make_path_printable
 PathType = Annotated[
     pathlib.Path,
     PlainSerializer(
-        lambda x: base64.urlsafe_b64encode(FSEntry.encode_path(x)).decode("ascii"),
+        lambda x: base64.urlsafe_b64encode(
+            backathon.models.FSEntry.encode_path(x)
+        ).decode("ascii"),
         return_type=str,
     ),
     PlainValidator(
@@ -26,7 +27,10 @@ PathType = Annotated[
     ),
 ]
 
+PrintableBytes = Annotated[bytes, PlainSerializer(backathon.models.make_path_printable)]
+
 # Strips unprintable characters for user display
 PrintablePath = Annotated[
-    pathlib.Path, PlainSerializer(lambda x: make_path_printable(os.fsencode(x)))
+    pathlib.Path,
+    PlainSerializer(lambda x: backathon.models.make_path_printable(os.fsencode(x))),
 ]

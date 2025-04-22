@@ -10,7 +10,9 @@
 @use "bulma/sass/elements/button";
 @use "bulma/sass/elements/icon";
 @use "bulma/sass/elements/progress";
-@use "bulma/sass/elements/table";
+@use "bulma/sass/elements/table" with (
+  $table-background-color: "transparent",
+);
 @use "bulma/sass/elements/title";
 
 @use "bulma/sass/layout/section";

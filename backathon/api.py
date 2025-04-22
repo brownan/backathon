@@ -35,12 +35,14 @@ from backathon import Database
 from backathon.models import FSEntry
 from backathon.models import Object
 from backathon.models import ObjectType
+from backathon.models import ObjIDType
 from backathon.models import Snapshot
 from backathon.models import decode_objid
 from backathon.models import make_path_printable
 from backathon.restore import stream_dir
 from backathon.restore import stream_file
 from backathon.types import PathType
+from backathon.types import PrintableBytes
 from backathon.types import PrintablePath
 
 logger = logging.getLogger("backathon.api")
@@ -110,6 +112,37 @@ class Browse(pydantic.BaseModel):
     children: list[PathInfo]
 
 
+class FSEntryType(pydantic.BaseModel):
+    # Wrapper for the FSEntry model used in the api, because the underlying
+    # FSEntry model has byte fields that may not be serializable
+
+    model_config = pydantic.ConfigDict(title="FSEntry")
+
+    id: int
+    objid: ObjIDType | None
+    name: PrintableBytes
+    path: PrintablePath
+    parent: int | None
+    new: bool
+    st_mode: int | None
+    st_mtime: int | None
+    st_size: int | None
+
+    @classmethod
+    def from_fsentry(cls, entry: FSEntry):
+        return cls.model_construct(
+            id=entry.id,
+            objid=entry.objid,
+            name=entry.name,
+            path=entry.decoded_path,
+            parent=entry.parent,
+            new=entry.new,
+            st_mode=entry.st_mode,
+            st_mtime=int(entry.st_mtime_ns // 1e9) if entry.st_mtime_ns else None,
+            st_size=entry.st_size,
+        )
+
+
 api = FastAPI()
 
 dev_app = FastAPI(
@@ -135,9 +168,9 @@ async def list_roots(repo: RepoDependency) -> list[PathInfo]:
 
 
 @api.put("/roots/{key}")
-async def add_root(repo: RepoDependency, key: PathType) -> FSEntry:
+async def add_root(repo: RepoDependency, key: PathType) -> FSEntryType:
     entry = repo.add_root(key)
-    return entry
+    return FSEntryType.from_fsentry(entry)
 
 
 @api.delete("/roots/{key}")
@@ -326,7 +359,7 @@ async def scan_start(repo: RepoDependency):
 
 
 class ScanInfo(pydantic.BaseModel):
-    unscanned: list[FSEntry]
+    unscanned: list[FSEntryType]
     outdatedCount: int
     outdatedSize: int
     totalCount: int
@@ -344,11 +377,11 @@ async def scan_info(repo: RepoDependency) -> ScanInfo:
         total_backup, total_size = cursor.fetchone()
 
     return ScanInfo.model_construct(
-        unscanned=needs_scan,
+        unscanned=[FSEntryType.from_fsentry(e) for e in needs_scan],
         outdatedCount=needs_backup,
-        outdatedSize=backup_size,
+        outdatedSize=backup_size or 0,
         totalCount=total_backup,
-        totalSize=total_size,
+        totalSize=total_size or 0,
     )
 
 
