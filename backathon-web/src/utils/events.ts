@@ -37,16 +37,19 @@ function openEventSource() {
     eventSourceStatus.value = "CONNECTING";
 
     es.onopen = () => {
+        console.log("Event source opened");
         eventSourceStatus.value = "OPEN";
         eventSourceError.value = null;
     };
 
     es.onerror = (e) => {
+        console.log(`Event source errored. readyState is ${es.readyState}`, e);
         eventSourceStatus.value = "CLOSED";
         eventSourceError.value = e;
 
         if (es.readyState === 2) {
             es.close();
+            _opened = false;
             setTimeout(openEventSource, 1000);
         }
     };
@@ -62,15 +65,11 @@ export function onConfigChange(callback: (e: ConfigChangeEvent) => void) {
     openEventSource();
     const off = bus.on(({ type, msg }) => {
         if (type === "configChange") {
-            console.log("Config change event. notifying listener");
             callback(JSON.parse(msg.data) as ConfigChangeEvent);
         }
     });
     console.debug("Config change listener added");
-    onScopeDispose(() => {
-        console.debug("Config change listener removed due to scope disposal");
-        off();
-    });
+    onScopeDispose(off);
 }
 
 export const useJobStatus = defineStore("job-status", () => {
