@@ -1,21 +1,9 @@
 <template>
     <h1 class="title is-2">Backup</h1>
 
-    <div
-        class="message"
-        :class="{ 'is-warning': needsScan }"
-    >
+    <div class="message">
         <div class="message-header">Scan</div>
         <div class="message-body content">
-            <div>
-                <button
-                    type="button"
-                    class="button"
-                    @click="doScan()"
-                >
-                    Scan Now
-                </button>
-            </div>
             <template v-if="scanInfo.data && needsScan">
                 The following new paths need scanning
                 <ul>
@@ -27,6 +15,18 @@
                     </li>
                 </ul>
             </template>
+            <template v-else>
+                Run a scan to check for new and changed files within the backup set
+            </template>
+            <div>
+                <button
+                    type="button"
+                    class="button mt-2"
+                    @click="doScan()"
+                >
+                    Scan Now
+                </button>
+            </div>
         </div>
     </div>
 
@@ -57,20 +57,12 @@
                     </tr>
                 </tbody>
             </table>
-        </div>
-    </div>
-
-    <div class="card">
-        <header class="card-header">
-            <p class="card-header-title title is-4">Debug Actions</p>
-        </header>
-        <div class="card-content is-flex">
             <button
                 type="button"
                 class="button"
                 @click="doBackup()"
             >
-                Start Backup
+                Backup Now
             </button>
         </div>
     </div>

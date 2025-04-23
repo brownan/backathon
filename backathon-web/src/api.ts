@@ -10,6 +10,7 @@ import {
     shallowReadonly,
 } from "vue";
 import type { PathsWithMethod, MediaType } from "openapi-typescript-helpers";
+import { onConfigChange } from "@/utils/events.ts";
 
 export const client = createClient<paths, "application/json">({ baseUrl: "/api" });
 
@@ -51,6 +52,7 @@ export type QueryState<
     | (FetchResponse<T, Options, Media> & {
           isReady: true;
           isFetching: false;
+          retry: () => void;
       })
     | {
           isReady: false;
@@ -58,6 +60,7 @@ export type QueryState<
           data: undefined;
           error: undefined;
           response: undefined;
+          retry: () => void;
       };
 
 export function useQuery<
@@ -76,9 +79,12 @@ export function useQuery<
         data: undefined,
         error: undefined,
         response: undefined,
+        retry: doRequest,
     });
 
-    watchEffect(() => {
+    let controller: AbortController | null = null;
+
+    function doRequest() {
         const request: QueryRequest<Method, Path, Init> | undefined = toValue(getter);
         if (request === undefined) {
             Object.assign(fetchResult, {
@@ -96,21 +102,48 @@ export function useQuery<
                 error: undefined,
                 response: undefined,
             });
-            const controller = new AbortController();
-            onWatcherCleanup(() => controller.abort());
+            if (controller) {
+                controller.abort();
+            }
+            const myController = new AbortController();
+            controller = myController;
             const responsePromise = client.request(
                 request.method,
                 request.url,
                 // @ts-expect-error the request type signature does some type magic that I can't decipher
                 { ...request.options, signal: controller.signal },
             );
-            responsePromise.then((fetchResponse) => {
-                Object.assign(fetchResult, {
-                    ...fetchResponse,
-                    isReady: true,
-                    isFetching: false,
+            responsePromise
+                .then((fetchResponse) => {
+                    Object.assign(fetchResult, {
+                        ...fetchResponse,
+                        isReady: true,
+                        isFetching: false,
+                    });
+                })
+                .finally(() => {
+                    if (controller === myController) {
+                        controller = null;
+                    }
                 });
-            });
+        }
+    }
+
+    watchEffect(() => {
+        doRequest();
+        onWatcherCleanup(() => {
+            if (controller) {
+                controller.abort();
+                controller = null;
+            }
+        });
+    });
+
+    onConfigChange((event) => {
+        const req = toValue(getter);
+        if (req && event.url === req.url) {
+            console.debug(`Config change for ${event.url}. Retrying request`);
+            doRequest();
         }
     });
 

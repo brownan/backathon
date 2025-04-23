@@ -5,6 +5,7 @@ import logging.config
 import os
 import pathlib
 import time
+from functools import cache
 from operator import attrgetter
 from typing import Annotated
 from typing import Collection
@@ -24,6 +25,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import Base64Bytes
 from pydantic import BaseModel
 from starlette.routing import Mount
+from starlette.routing import Route
 
 import backathon.backup
 import backathon.encryption
@@ -154,6 +156,14 @@ dev_app = FastAPI(
 )
 
 
+@cache
+def url_for_func(f) -> str:
+    for x in api.routes:
+        if isinstance(x, Route) and x.endpoint is f:
+            return x.path
+    raise ValueError(f"Function {f} is not a route")
+
+
 @api.get("/")
 async def top(db: DatabaseDependency, repo: RepoDependency):
     return {"message": "Hello, world!", "db": repr(db), "repo": repr(repo)}
@@ -164,18 +174,24 @@ async def list_roots(repo: RepoDependency) -> list[PathInfo]:
     roots = repo.get_roots()
     root_paths = [entry.decoded_path for entry in roots]
     exclude_paths = repo.db.config.excludes
-    return [PathInfo.from_path(path, root_paths, exclude_paths) for path in root_paths]
+    pathinfos = [
+        PathInfo.from_path(path, root_paths, exclude_paths) for path in root_paths
+    ]
+    pathinfos.sort(key=natsort.os_sort_keygen(attrgetter("path")))
+    return pathinfos
 
 
 @api.put("/roots/{key}")
 async def add_root(repo: RepoDependency, key: PathType) -> FSEntryType:
     entry = repo.add_root(key)
+    send_config_change_event(url_for_func(list_roots))
     return FSEntryType.from_fsentry(entry)
 
 
 @api.delete("/roots/{key}")
 async def delete_root(repo: RepoDependency, key: PathType):
     repo.del_root(key)
+    send_config_change_event(url_for_func(list_roots))
 
 
 @api.get("/browse/")
@@ -403,9 +419,14 @@ async def backup_start(repo: RepoDependency):
 _config_change_listeners: list[asyncio.Queue[str]] = []
 
 
-def send_config_change_event(key: str):
+def send_config_change_event(url: str):
+    logger.debug(
+        "Sending config change event for %s to %s listeners",
+        url,
+        len(_config_change_listeners),
+    )
     for q in _config_change_listeners:
-        q.put_nowait(key)
+        q.put_nowait(url)
 
 
 @api.get("/events")
@@ -417,14 +438,19 @@ async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
     async def config_change_watcher():
         my_queue = asyncio.Queue()
         _config_change_listeners.append(my_queue)
+        logger.debug("Starting config change watcher")
+        event_id = 0
         try:
             while True:
-                key = await my_queue.get()
+                url = await my_queue.get()
                 await send_stream.send(
                     sse_starlette.ServerSentEvent(
-                        json.dumps({"key": key}), event="configChange"
+                        json.dumps({"url": url}),
+                        event="configChange",
+                        id=str(event_id),
                     )
                 )
+                event_id += 1
         except asyncio.CancelledError:
             logger.debug("event status watcher canceled and closing")
             raise
@@ -432,6 +458,7 @@ async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
             _config_change_listeners.remove(my_queue)
 
     async def job_status_watcher():
+        logger.debug("Starting job status watcher")
         try:
             # Push an initial status into the object stream so the client gets an
             # immediate status

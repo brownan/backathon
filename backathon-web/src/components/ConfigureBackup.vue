@@ -2,7 +2,22 @@
     <div class="panel is-primary">
         <p class="panel-heading">Backup Roots</p>
         <div class="panel-block">
-            <FileBrowser />
+            <div class="columns is-flex-grow-1">
+                <div class="column is-two-thirds">
+                    <FileBrowser />
+                </div>
+                <div class="column content">
+                    Current Roots:
+                    <ul v-if="rootQuery.data">
+                        <li
+                            v-for="root in rootQuery.data"
+                            :key="root.key"
+                        >
+                            {{ root.path }}
+                        </li>
+                    </ul>
+                </div>
+            </div>
         </div>
     </div>
 </template>
@@ -11,7 +26,6 @@
 
 <script setup lang="ts">
 import { useQuery } from "@/api.ts";
-import { ref, watch } from "vue";
 
 import FileBrowser from "@/components/FileBrowser.vue";
 
@@ -20,16 +34,4 @@ const rootQuery = useQuery({
     url: "/roots/",
     options: {},
 });
-
-const roots = ref<string[]>([]);
-
-watch(
-    () => rootQuery.data,
-    (newData) => {
-        if (newData) {
-            console.debug("Updating new root data:", newData);
-            roots.value = newData.map((p) => p.key);
-        }
-    },
-);
 </script>
