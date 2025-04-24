@@ -29,11 +29,7 @@
             }"
         >
             <template v-slot:nodetoggleicon="{ node }">
-                <SpinnerIcon
-                    v-if="node.loading"
-                    :spin="true"
-                    :unstyled="false"
-                />
+                <SpinnerIcon v-if="node.loading" />
                 <ChevronDownIcon v-else-if="expandedKeys[node.key]" />
                 <ChevronRightIcon v-else />
             </template>
@@ -165,7 +161,7 @@ import Checkbox from "primevue/checkbox";
 import CheckIcon from "@primevue/icons/check";
 import MinusIcon from "@primevue/icons/minus";
 import TimesIcon from "@primevue/icons/times";
-import SpinnerIcon from "@primevue/icons/spinner";
+import SpinnerIcon from "@/components/SpinnerIcon.vue";
 import ChevronDownIcon from "@primevue/icons/chevrondown";
 import ChevronRightIcon from "@primevue/icons/chevronright";
 

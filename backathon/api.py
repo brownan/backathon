@@ -368,9 +368,10 @@ async def scan(repo: RepoDependency) -> backathon.scan.ScanProgress | None:
 async def scan_start(repo: RepoDependency):
     logger.debug("Starting scan")
     try:
-        repo.scan_async()
+        task = repo.scan_async()
     except Exception as e:
         return {"status": "Failed to start scan", "error": str(e)}
+    task.add_done_callback(lambda _: send_config_change_event(url_for_func(scan_info)))
     return {"status": "Scan Started"}
 
 
