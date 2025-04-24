@@ -152,6 +152,12 @@
                             </tr>
                         </tbody>
                     </table>
+                    <i>
+                        Note: Actual disk usage may be higher than the total size of the
+                        bytes stored on disk due to filesystem overhead. It may be lower
+                        than the scanned backup total size due to compression and
+                        deduplication.
+                    </i>
                 </div>
             </div>
         </div>
