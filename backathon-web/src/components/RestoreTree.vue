@@ -43,7 +43,7 @@
             v-if="expanded && isTree"
             class="filelist-children"
         >
-            <FileList
+            <RestoreTree
                 v-for="child in objList"
                 :obj="child.obj"
                 :name="child.name"
@@ -77,6 +77,13 @@
 </style>
 
 <script setup lang="ts">
+/*
+Note: This custom tree component is used instead of prime vue's tree component
+because I found it easier to write this recursively, instead of having the top level
+component build a single data structure representing the hierarchy to pass in as the
+node prop.
+ */
+
 import { type components } from "@/schema";
 import { computed, reactive, ref, toRefs, watch } from "vue";
 import { useQuery } from "@/api";

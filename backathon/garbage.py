@@ -11,12 +11,13 @@ This approach was chosen for two main reasons:
 
 
 """
-
+import json
 import logging
 import math
 import random
 from typing import Iterator
 from typing import NamedTuple
+from typing import Self
 
 from rich import filesize
 
@@ -34,85 +35,81 @@ class BloomFilter(NamedTuple):
     hashes: list[int]
     m: int
 
+    @classmethod
+    def build_filter(cls, db: Database, snapshot_ids: list[int] | None = None) -> Self:
+        """Builds the bloom filter"""
+        with db.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM objects")
+            num_objects: int = cursor.fetchone()[0] or 0
 
-def _build_filter(db: Database) -> BloomFilter:
-    """Builds the bloom filter"""
-    with db.cursor() as cursor:
-        cursor.execute("SELECT COUNT(*) FROM objects")
-        num_objects: int = cursor.fetchone()[0] or 0
+        # m - number of bits in the filter. Depends on num_objects
+        # k - number of hash functions needed. Should be 4 for p=0.05
+        p = 0.05
+        m = int(
+            math.ceil(
+                (num_objects * math.log(p)) / math.log(1 / math.pow(2, math.log(2)))
+            )
+        )
+        k = 4  # = int(round(math.log(2) * m / num_objects))
 
-    # m - number of bits in the filter. Depends on num_objects
-    # k - number of hash functions needed. Should be 4 for p=0.05
-    p = 0.05
-    m = int(
-        math.ceil((num_objects * math.log(p)) / math.log(1 / math.pow(2, math.log(2))))
-    )
-    k = 4  # = int(round(math.log(2) * m / num_objects))
+        arr_size = int(math.ceil(m / 8))
+        logger.debug(
+            f"{num_objects} objects in database, allocating {filesize.decimal(arr_size)} for bloom filter. ({m} bits)"
+        )
+        bloom = bytearray(arr_size)
 
-    arr_size = int(math.ceil(m / 8))
-    logger.debug(
-        f"{num_objects} objects in database, allocating {filesize.decimal(arr_size)} for bloom filter"
-    )
-    bloom = bytearray(arr_size)
+        # The "hash" functions will just be a random number that will be
+        # xor'd with the object IDs. Using a different random int each time
+        # also guards against false positives from collisions happening from
+        # the same two objects each run.
+        r = random.SystemRandom()
+        hashes = [r.getrandbits(256) for _ in range(k)]
 
-    # The "hash" functions will just be a random number that will be
-    # xor'd with the object IDs. Using a different random int each time
-    # also guards against false positives from collisions happening from
-    # the same two objects each run.
-    r = random.SystemRandom()
-    hashes = [r.getrandbits(256) for _ in range(k)]
+        with db.cursor() as cursor:
+            if snapshot_ids is None:
+                cursor.execute("SELECT id FROM snapshots")
+                snapshot_ids = [row[0] for row in cursor]
 
-    # This query iterates over all the reachable objects by walking the
-    # hierarchy formed using the Snapshot table as the roots and
-    # traversing the links in the object_relations table
-    query = """
-        WITH RECURSIVE reachable(id) AS (
-            SELECT root FROM snapshots
-            UNION ALL
-            SELECT child FROM object_relations
-            INNER JOIN reachable ON reachable.id=parent
-        ) SELECT id FROM reachable
-        """
-    with db.cursor() as cursor:
-        cursor.execute(query)
-        for row in batch_fetch_from_cursor(cursor):
-            objid_int = int.from_bytes(row[0], "little")
+            # This query iterates over all the reachable objects by walking the
+            # hierarchy formed using the Snapshot table as the roots and
+            # traversing the links in the object_relations table
+            query = """
+                WITH RECURSIVE reachable(id) AS (
+                    SELECT root FROM snapshots WHERE id IN (SELECT value FROM json_each(?))
+                    UNION ALL
+                    SELECT child FROM object_relations
+                    INNER JOIN reachable ON reachable.id=parent
+                ) SELECT id FROM reachable
+                """
+            cursor.execute(query, (json.dumps(snapshot_ids),))
+            for row in batch_fetch_from_cursor(cursor):
+                objid_int = int.from_bytes(row[0], "little")
 
-            for h in hashes:
-                h ^= objid_int
-                h %= m
-                bytepos, bitpos = divmod(h, 8)
-                bloom[bytepos] |= 1 << bitpos
+                for h in hashes:
+                    h ^= objid_int
+                    h %= m
+                    bytepos, bitpos = divmod(h, 8)
+                    bloom[bytepos] |= 1 << bitpos
 
-    return BloomFilter(bloom=bloom, hashes=hashes, m=m)
+        return cls(bloom=bloom, hashes=hashes, m=m)
 
+    def iter_unreachable(self, db: Database) -> Iterator[models.Object]:
+        """Iterates over unreachable objects"""
+        hashes = self.hashes
 
-def _iter_garbage(db: Database, bloomfilter: BloomFilter) -> Iterator[models.Object]:
-    """Iterates over garbage objects
+        def hash_match(h, objid, bloom=self.bloom, m=self.m):
+            h ^= objid
+            h %= m
+            bytepos, bitpos = divmod(h, 8)
+            return bloom[bytepos] & (1 << bitpos)
 
-    Callers should take care to atomically delete objects in the remote
-    storage backend along with rows in the Object table. It's more
-    important to delete the rows, however, because if a row exists
-    without a backing object, that can corrupt future backups that may
-    try to reference that object. Leaving an un-referenced object on the
-    backing store doesn't hurt anything except by taking up space.
+        # Now we can iterate over all objects. If an object does not appear
+        # in the bloom filter, we can guarantee it's not reachable.
+        for obj in db.query(models.Object, "SELECT * FROM objects"):
+            objid = int.from_bytes(obj.objid, "little")
 
-    """
-    hashes = bloomfilter.hashes
-
-    def hash_match(h, objid, bloom=bloomfilter.bloom, m=bloomfilter.m):
-        h ^= objid
-        h %= m
-        bytepos, bitpos = divmod(h, 8)
-        return bloom[bytepos] & (1 << bitpos)
-
-    # Now we can iterate over all objects. If an object does not appear
-    # in the bloom filter, we can guarantee it's not reachable.
-    for obj in db.query(models.Object, "SELECT * FROM objects"):
-        objid = int.from_bytes(obj.objid, "little")
-
-        if not all(hash_match(h, objid) for h in hashes):
-            yield obj
+            if not all(hash_match(h, objid) for h in hashes):
+                yield obj
 
 
 def collect_garbage(db: Database, storage: StorageBase) -> tuple[int, int]:
@@ -126,7 +123,7 @@ def collect_garbage(db: Database, storage: StorageBase) -> tuple[int, int]:
     with db.atomic(immediate=True), db.cursor() as cursor:
         # Build the bloom filter
         logger.info("Garbage scan, first pass...")
-        bloom_filter = _build_filter(db)
+        bloom_filter = BloomFilter.build_filter(db)
 
         # Log garbage objects to the garbage table for deletion in the next step
         # We don't want to delete the garbage from the remote repo within this
@@ -134,7 +131,7 @@ def collect_garbage(db: Database, storage: StorageBase) -> tuple[int, int]:
         # the local database will lose track of which objects in the remote repo were
         # deleted and which still exist.
         logger.info("Garbage scan, counting garbage objects")
-        for obj in _iter_garbage(db, bloom_filter):
+        for obj in bloom_filter.iter_unreachable(db):
             cursor.execute("DELETE FROM objects WHERE objid=?", (obj.objid,))
             cursor.execute("INSERT INTO garbage (objid) VALUES (?)", (obj.objid,))
             n += 1

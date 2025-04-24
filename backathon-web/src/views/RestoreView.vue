@@ -1,7 +1,7 @@
 <template>
     <h1 class="title is-1">Restore Files</h1>
     <div class="columns">
-        <div class="column is-one-quarter">
+        <div class="column is-one-third">
             <h2 class="subtitle is-2">Snapshots</h2>
             <b>(Select one)</b>
             <table class="table">
@@ -30,9 +30,97 @@
             </table>
         </div>
         <div class="column">
+            <div class="panel">
+                <div class="panel-heading">Snapshot Info</div>
+                <div class="panel-block">
+                    <table class="table is-narrow">
+                        <tbody>
+                            <tr>
+                                <th>Path</th>
+                                <td>
+                                    <SpinnerIcon v-if="snapshotInfo.isFetching" />
+                                    <template v-else-if="snapshotInfo.data">
+                                        {{ snapshotInfo.data.path }}
+                                    </template>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>Timestamp</th>
+                                <td>
+                                    <SpinnerIcon v-if="snapshotInfo.isFetching" />
+                                    <template v-else-if="snapshotInfo.data">
+                                        {{
+                                            new Date(
+                                                snapshotInfo.data.timestamp,
+                                            ).toLocaleString()
+                                        }}
+                                    </template>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>Total size of all files</th>
+                                <td>
+                                    <SpinnerIcon v-if="snapshotInfo.isFetching" />
+                                    <template v-else-if="snapshotInfo.data">
+                                        {{ filesize(snapshotInfo.data.fileSize) }}
+                                    </template>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>Uploaded Size</th>
+                                <td>
+                                    <SpinnerIcon v-if="snapshotInfo.isFetching" />
+                                    <template v-else-if="snapshotInfo.data">
+                                        {{ filesize(snapshotInfo.data.uploadedSize) }}
+                                    </template>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>Exclusive Size</th>
+                                <td>
+                                    <SpinnerIcon v-if="snapshotExtendedInfo.isFetching" />
+                                    <template v-else-if="snapshotExtendedInfo.data">
+                                        {{
+                                            filesize(
+                                                snapshotExtendedInfo.data.exclusiveSize,
+                                            )
+                                        }}
+                                        (approx.)
+                                    </template>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>Shared Size</th>
+                                <td>
+                                    <SpinnerIcon
+                                        v-if="
+                                            snapshotExtendedInfo.isFetching ||
+                                            snapshotInfo.isFetching
+                                        "
+                                    />
+                                    <template
+                                        v-else-if="
+                                            snapshotExtendedInfo.data && snapshotInfo.data
+                                        "
+                                    >
+                                        {{
+                                            filesize(
+                                                snapshotInfo.data.uploadedSize -
+                                                    snapshotExtendedInfo.data
+                                                        .exclusiveSize,
+                                            )
+                                        }}
+                                        (approx.)
+                                    </template>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
             <h2 class="subtitle is-2">Files</h2>
             <ul v-if="activeSnapshot && rootName && rootObj && rootId">
-                <FileList
+                <RestoreTree
                     :obj="rootObj"
                     :name="rootName"
                     :id="rootId"
@@ -61,8 +149,10 @@
 <script setup lang="ts">
 import { useQuery } from "@/api.ts";
 import { computed, toRefs } from "vue";
-import FileList from "@/components/FileList.vue";
+import RestoreTree from "@/components/RestoreTree.vue";
 import { useRoute, useRouter } from "vue-router";
+import SpinnerIcon from "@/components/SpinnerIcon.vue";
+import { filesize } from "filesize";
 
 const snapshotResult = useQuery({
     method: "get",
@@ -116,11 +206,42 @@ const { data: rootObj } = toRefs(
 
 const rootName = computed(() => {
     if (activeSnapshot.value) {
-        const date = new Date(activeSnapshot.value.timestamp);
-        return `Snapshot-${date.toISOString()}`;
+        return `${activeSnapshot.value.path}`;
     }
     return null;
 });
 
 const rootId = computed(() => (rootName.value ? window.btoa(rootName.value) : null));
+
+const snapshotInfo = useQuery(() => {
+    if (activeSnapshot.value) {
+        return {
+            method: "get",
+            url: "/snapshots/{id}",
+            options: {
+                params: {
+                    path: {
+                        id: activeSnapshot.value.id,
+                    },
+                },
+            },
+        };
+    }
+});
+
+const snapshotExtendedInfo = useQuery(() => {
+    if (activeSnapshot.value) {
+        return {
+            method: "get",
+            url: "/snapshots/{id}/extended",
+            options: {
+                params: {
+                    path: {
+                        id: activeSnapshot.value.id,
+                    },
+                },
+            },
+        };
+    }
+});
 </script>

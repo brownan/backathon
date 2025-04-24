@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import datetime
 import json
 import logging.config
 import os
@@ -7,6 +8,7 @@ import pathlib
 import time
 from functools import cache
 from operator import attrgetter
+from typing import AbstractSet
 from typing import Annotated
 from typing import Collection
 from typing import Container
@@ -29,6 +31,7 @@ from starlette.routing import Route
 
 import backathon.backup
 import backathon.encryption
+import backathon.garbage
 import backathon.models
 import backathon.repository
 import backathon.scan
@@ -260,6 +263,104 @@ async def delete_exclude(repo: RepoDependency, key: PathType):
 @api.get("/snapshots")
 async def get_snapshots(repo: RepoDependency) -> list[Snapshot]:
     return list(repo.db.query(Snapshot, "SELECT * FROM snapshots ORDER BY timestamp"))
+
+
+class SnapshotInfo(pydantic.BaseModel):
+    id: int
+    path: PrintablePath
+    root: ObjIDType
+    timestamp: datetime.datetime
+    numObjects: int
+    uploadedSize: int
+    fileSize: int
+
+
+@api.get("/snapshots/{id}")
+async def get_snapshot_info(repo: RepoDependency, id: int) -> SnapshotInfo:
+    snapshot = next(
+        repo.db.query(Snapshot, "SELECT * FROM snapshots WHERE id = ?", (id,)), None
+    )
+    if snapshot is None:
+        raise HTTPException(status_code=404)
+
+    info = SnapshotInfo.model_construct(
+        id=snapshot.id,
+        path=pathlib.Path(snapshot.path),
+        root=snapshot.root,
+        timestamp=snapshot.timestamp,
+    )
+
+    # Now for some fun recursive queries to get some juicy info
+    with repo.db.cursor() as cursor:
+        # Aggregate info on all objects related to this snapshot
+        cursor.execute(
+            """
+        WITH RECURSIVE reachable(id) AS (
+            VALUES (?)
+            UNION ALL
+            SELECT child FROM object_relations
+            INNER JOIN reachable ON reachable.id=parent
+        ) SELECT COUNT(*), SUM(uploaded_size), SUM(file_size) FROM objects WHERE objid IN reachable
+        """,
+            (snapshot.root,),
+        )
+        info.numObjects, info.uploadedSize, info.fileSize = cursor.fetchone()
+
+    return info
+
+
+class SnapshotExtendedInfo(pydantic.BaseModel):
+    exclusiveObjs: int
+    exclusiveSize: int
+
+
+_extended_info_cache: dict[int, tuple[AbstractSet[int], SnapshotExtendedInfo]] = {}
+
+
+@api.get("/snapshots/{id}/extended")
+async def get_snapshot_exclusive_info(
+    repo: RepoDependency, id: int
+) -> SnapshotExtendedInfo:
+    global _extended_info_cache
+
+    snapshot = next(
+        repo.db.query(Snapshot, "SELECT * FROM snapshots WHERE id = ?", (id,)), None
+    )
+    if snapshot is None:
+        raise HTTPException(status_code=404)
+
+    with repo.db.cursor() as cursor:
+        cursor.execute("SELECT id FROM snapshots")
+        all_snapshot_ids = [row[0] for row in cursor]
+
+    if cached_value := _extended_info_cache.get(snapshot.id):
+        if cached_value[0] == set(all_snapshot_ids):
+            return cached_value[1]
+
+    exclusive_objs = 0
+    exclusive_size = 0
+
+    # Do this in a thread with a new DB connection because it's quite
+    # expensive and we wouldn't want to block the main event loop
+    # for this long. That's also why this is a separate API call from
+    # the regular snapshot info. So that one can return easy data quickly.
+    def thread():
+        nonlocal exclusive_objs, exclusive_size
+        db = repo.db.clone()
+        bloom = backathon.garbage.BloomFilter.build_filter(
+            db, [s for s in all_snapshot_ids if s != snapshot.id]
+        )
+        for obj in bloom.iter_unreachable(db):
+            exclusive_objs += 1
+            exclusive_size += obj.uploaded_size if obj.uploaded_size else 0
+
+    await asyncio.to_thread(thread)
+    ret = SnapshotExtendedInfo.model_construct(
+        exclusiveObjs=exclusive_objs,
+        exclusiveSize=exclusive_size,
+    )
+    _extended_info_cache[snapshot.id] = (frozenset(all_snapshot_ids), ret)
+    return ret
 
 
 @api.get("/objects/{objid}")

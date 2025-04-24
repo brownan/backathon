@@ -142,6 +142,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/snapshots/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Snapshot Info */
+        get: operations["get_snapshot_info_snapshots__id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/snapshots/{id}/extended": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Snapshot Exclusive Info */
+        get: operations["get_snapshot_exclusive_info_snapshots__id__extended_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/objects/{objid}": {
         parameters: {
             query?: never;
@@ -478,6 +512,36 @@ export interface components {
              */
             timestamp: string;
         };
+        /** SnapshotExtendedInfo */
+        SnapshotExtendedInfo: {
+            /** Exclusiveobjs */
+            exclusiveObjs: number;
+            /** Exclusivesize */
+            exclusiveSize: number;
+        };
+        /** SnapshotInfo */
+        SnapshotInfo: {
+            /** Id */
+            id: number;
+            /**
+             * Path
+             * Format: path
+             */
+            path: string;
+            /** Root */
+            root: string;
+            /**
+             * Timestamp
+             * Format: date-time
+             */
+            timestamp: string;
+            /** Numobjects */
+            numObjects: number;
+            /** Uploadedsize */
+            uploadedSize: number;
+            /** Filesize */
+            fileSize: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -767,6 +831,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Snapshot"][];
+                };
+            };
+        };
+    };
+    get_snapshot_info_snapshots__id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_snapshot_exclusive_info_snapshots__id__extended_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SnapshotExtendedInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
