@@ -221,7 +221,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Scan Info */
+        /**
+         * Scan Info
+         * @description Gets information about the backup set
+         */
         get: operations["scan_info_scan_info_get"];
         put?: never;
         post?: never;
@@ -243,6 +246,26 @@ export interface paths {
         put?: never;
         /** Backup Start */
         post: operations["backup_start_backup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/repository/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Repository Info
+         * @description Gets information about the repository
+         */
+        get: operations["repository_info_repository_info_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -406,6 +429,15 @@ export interface components {
             excluded: boolean;
             /** Parentofroot */
             parentOfRoot: boolean;
+        };
+        /** RepoInfo */
+        RepoInfo: {
+            /** Numobjects */
+            numObjects: number;
+            /** Uploadedsize */
+            uploadedSize: number;
+            /** Numsnapshots */
+            numSnapshots: number;
         };
         /** ScanInfo */
         ScanInfo: {
@@ -930,6 +962,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    repository_info_repository_info_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepoInfo"];
                 };
             };
         };

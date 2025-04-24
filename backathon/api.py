@@ -385,6 +385,7 @@ class ScanInfo(pydantic.BaseModel):
 
 @api.get("/scan/info")
 async def scan_info(repo: RepoDependency) -> ScanInfo:
+    """Gets information about the backup set"""
     needs_scan = repo.db.query(FSEntry, "SELECT * FROM fsentry WHERE new")
 
     with repo.db.cursor() as cursor:
@@ -411,10 +412,34 @@ async def backup(repo: RepoDependency) -> backathon.backup.BackupProgress | None
 async def backup_start(repo: RepoDependency):
     logger.debug("Starting backup")
     try:
-        repo.backup_async()
+        task = repo.backup_async()
     except Exception as e:
         return {"status": "Failed to start backup", "error": str(e)}
+    task.add_done_callback(
+        lambda _: send_config_change_event(url_for_func(repository_info))
+    )
+    task.add_done_callback(lambda _: send_config_change_event(url_for_func(scan_info)))
     return {"status": "Backup Started"}
+
+
+class RepoInfo(pydantic.BaseModel):
+    numObjects: int
+    uploadedSize: int
+    numSnapshots: int
+
+
+@api.get("/repository/info")
+async def repository_info(repo: RepoDependency) -> RepoInfo:
+    """Gets information about the repository"""
+    info = RepoInfo.model_construct()
+    with repo.db.cursor() as cursor:
+        cursor.execute("SELECT COUNT(*), SUM(uploaded_size) FROM objects")
+        info.numObjects, info.uploadedSize = cursor.fetchone()
+
+        cursor.execute("SELECT COUNT(*) FROM (SELECT DISTINCT timestamp FROM snapshots)")
+        info.numSnapshots = cursor.fetchone()[0]
+
+    return info
 
 
 _config_change_listeners: list[asyncio.Queue[str]] = []
