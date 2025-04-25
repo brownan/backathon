@@ -8,7 +8,6 @@ import pathlib
 import time
 from functools import cache
 from operator import attrgetter
-from typing import AbstractSet
 from typing import Annotated
 from typing import Collection
 from typing import Container
@@ -37,6 +36,7 @@ import backathon.repository
 import backathon.scan
 from backathon import Backathon
 from backathon import Database
+from backathon.asyncutils import non_reentrant
 from backathon.models import FSEntry
 from backathon.models import Object
 from backathon.models import ObjectType
@@ -157,6 +157,34 @@ dev_app = FastAPI(
     ],
     openapi_url=None,
 )
+
+
+@api.middleware("http")
+async def cancel_on_disconnect(request: fastapi.Request, call_next):
+    if request.method != "GET" or request.url.path != "/api/snapshots/1/extended":
+        return await call_next(request)
+
+    async def watch_for_disconnect(inner_scope: anyio.CancelScope):
+        logger.debug("Watching for disconnects")
+        try:
+            while True:
+                rec = await request.receive()
+                logger.debug("Received %s", rec)
+                if rec["type"] == "http.disconnect":
+                    logger.warning(
+                        "Disconnect message received from asgi server. Cancelling"
+                    )
+                    inner_scope.cancel()
+                    return
+        finally:
+            logger.debug("Disconnect watcher exiting")
+
+    with anyio.CancelScope() as scope:
+        t = asyncio.create_task(watch_for_disconnect(scope))
+        response = await call_next(request)
+        logger.debug("Call returned a response. Cancelling disconnect watcher")
+        t.cancel()
+        return response
 
 
 @cache
@@ -314,31 +342,14 @@ class SnapshotExtendedInfo(pydantic.BaseModel):
     exclusiveSize: int
 
 
-_extended_info_cache: dict[int, tuple[AbstractSet[int], SnapshotExtendedInfo]] = {}
-
-
-@api.get("/snapshots/{id}/extended")
-async def get_snapshot_exclusive_info(
-    repo: RepoDependency, id: int
-) -> SnapshotExtendedInfo:
-    global _extended_info_cache
-
-    snapshot = next(
-        repo.db.query(Snapshot, "SELECT * FROM snapshots WHERE id = ?", (id,)), None
-    )
-    if snapshot is None:
-        raise HTTPException(status_code=404)
-
-    with repo.db.cursor() as cursor:
-        cursor.execute("SELECT id FROM snapshots")
-        all_snapshot_ids = [row[0] for row in cursor]
-
-    if cached_value := _extended_info_cache.get(snapshot.id):
-        if cached_value[0] == set(all_snapshot_ids):
-            return cached_value[1]
-
+@non_reentrant
+async def _compute_exclusive_info(db: Database, snapshot_id: int):
     exclusive_objs = 0
     exclusive_size = 0
+
+    with db.cursor() as cursor:
+        cursor.execute("SELECT id FROM snapshots")
+        all_snapshot_ids = [row[0] for row in cursor]
 
     # Do this in a thread with a new DB connection because it's quite
     # expensive and we wouldn't want to block the main event loop
@@ -346,21 +357,36 @@ async def get_snapshot_exclusive_info(
     # the regular snapshot info. So that one can return easy data quickly.
     def thread():
         nonlocal exclusive_objs, exclusive_size
-        db = repo.db.clone()
+        thread_local_db = db.clone()
         bloom = backathon.garbage.BloomFilter.build_filter(
-            db, [s for s in all_snapshot_ids if s != snapshot.id]
+            thread_local_db, [s for s in all_snapshot_ids if s != snapshot_id]
         )
-        for obj in bloom.iter_unreachable(db):
+        for obj in bloom.iter_unreachable(thread_local_db):
             exclusive_objs += 1
             exclusive_size += obj.uploaded_size if obj.uploaded_size else 0
 
     await asyncio.to_thread(thread)
-    ret = SnapshotExtendedInfo.model_construct(
+    return SnapshotExtendedInfo.model_construct(
         exclusiveObjs=exclusive_objs,
         exclusiveSize=exclusive_size,
     )
-    _extended_info_cache[snapshot.id] = (frozenset(all_snapshot_ids), ret)
-    return ret
+
+
+@api.get("/snapshots/{id}/extended")
+async def get_snapshot_exclusive_info(
+    repo: RepoDependency, id: int
+) -> SnapshotExtendedInfo:
+    snapshot = next(
+        repo.db.query(Snapshot, "SELECT * FROM snapshots WHERE id = ?", (id,)), None
+    )
+    if snapshot is None:
+        raise HTTPException(status_code=404)
+
+    try:
+        return await _compute_exclusive_info(repo.db, snapshot.id)
+    except BaseException:
+        logger.exception("Exclusive info exiting with exception")
+        raise
 
 
 @api.get("/objects/{objid}")

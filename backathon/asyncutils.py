@@ -1,12 +1,19 @@
 import asyncio
+import logging
 import os
 from asyncio import Task
+from collections.abc import Callable
 from collections.abc import Coroutine
 from contextvars import Context
+from functools import wraps
 from typing import Any
 from typing import AsyncGenerator
+from typing import Awaitable
 from typing import Iterable
+from typing import ParamSpec
 from typing import TypeVar
+
+logger = logging.getLogger("backathon.asyncutils")
 
 _T = TypeVar("_T")
 
@@ -101,3 +108,41 @@ class BoundedTaskGroup:
         task = self.tg.create_task(coro, name=name, context=context)
         task.add_done_callback(lambda _: self._sem.release())
         return task
+
+
+R = TypeVar("R")
+P = ParamSpec("P")
+
+
+def non_reentrant(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+    """Decorator for an async function such that only one execution
+    is running at a time. If a second call comes in, it will wait on the
+    first call's execution to finish and both invocations get the same
+    return value
+
+    """
+    values: dict[Any, asyncio.Future[R]] = {}
+
+    # Sneak into functools to steal their make_key routine
+    # noinspection PyUnresolvedReferences,PyProtectedMember
+    from functools import _make_key as make_key
+
+    @wraps(func)
+    async def new_func(*args: P.args, **kwargs: P.kwargs) -> R:
+        key = make_key(args, kwargs, False)
+        if fut := values.get(key):
+            logger.debug(
+                "non-reentrant function waiting on existing invocation for %s", key
+            )
+            return await fut
+
+        def on_finish(_):
+            del values[key]
+
+        logger.debug("non-reentrant function calling routine with key %s", key)
+        fut = asyncio.ensure_future(func(*args, **kwargs))
+        values[key] = fut
+        fut.add_done_callback(on_finish)
+        return await fut
+
+    return new_func

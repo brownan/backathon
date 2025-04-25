@@ -104,6 +104,7 @@ export function useQuery<
             });
             if (controller) {
                 controller.abort();
+                controller = null;
             }
             const myController = new AbortController();
             controller = myController;
@@ -120,6 +121,13 @@ export function useQuery<
                         isReady: true,
                         isFetching: false,
                     });
+                })
+                .catch((err) => {
+                    if (err.name === "AbortError") {
+                        console.debug("Request aborted");
+                    } else {
+                        console.error("Request errored", err);
+                    }
                 })
                 .finally(() => {
                     if (controller === myController) {
