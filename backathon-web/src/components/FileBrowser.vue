@@ -153,9 +153,9 @@
  */
 import { reactive, type Ref, ref } from "vue";
 import Tree from "primevue/tree";
-import { type TreeNode } from "primevue/treenode";
+import type { TreeNode } from "primevue/treenode";
 import { client } from "@/api.ts";
-import { type components } from "@/schema";
+import type { components } from "@/schema";
 
 import Checkbox from "primevue/checkbox";
 import CheckIcon from "@primevue/icons/check";

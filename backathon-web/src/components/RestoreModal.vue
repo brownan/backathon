@@ -46,7 +46,7 @@
 
 <script setup lang="ts">
 import StyledModal from "@/components/StyledModal.vue";
-import { type components } from "@/schema";
+import type { components } from "@/schema";
 import { computed } from "vue";
 
 type RestoreProps = {

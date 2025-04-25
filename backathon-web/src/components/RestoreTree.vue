@@ -84,7 +84,7 @@ component build a single data structure representing the hierarchy to pass in as
 node prop.
  */
 
-import { type components } from "@/schema";
+import type { components } from "@/schema";
 import { computed, reactive, ref, toRefs, watch } from "vue";
 import { useQuery } from "@/api";
 
