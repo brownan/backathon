@@ -30,6 +30,7 @@ repos:
           - typer
           - natsort
           - sse-starlette
+          - blacknoise
 
 -   repo: https://github.com/pre-commit/mirrors-eslint
     rev: v9.19.0

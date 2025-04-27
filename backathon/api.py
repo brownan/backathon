@@ -13,10 +13,12 @@ from typing import Collection
 from typing import Container
 
 import anyio
+import blacknoise
 import fastapi
 import natsort
 import pydantic
 import sse_starlette
+import starlette.types
 from fastapi import Depends
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -152,10 +154,35 @@ api = FastAPI()
 
 dev_app = FastAPI(
     lifespan=lifespan,
+    openapi_url=None,
     routes=[
         Mount("/api", api),
     ],
+)
+
+
+def make_static_app():
+    async def not_found(*args):
+        raise fastapi.HTTPException(status_code=404, detail="Path not found")
+
+    app = blacknoise.BlackNoise(not_found)
+    app.add("backathon-web/dist", "/")
+
+    async def wrapper(scope: starlette.types.Scope, receive, send):
+        if scope["type"] == "http" and scope["path"] == "/":
+            scope["path"] = "/index.html"
+        await app(scope, receive, send)
+
+    return wrapper
+
+
+prod_app = FastAPI(
+    lifespan=lifespan,
     openapi_url=None,
+    routes=[
+        Mount("/api", api),
+        Mount("/", make_static_app()),
+    ],
 )
 
 

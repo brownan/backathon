@@ -17,6 +17,7 @@ typer = "*"
 natsort = "*"
 sse-starlette = "*"
 anyio = "*"
+blacknoise = "*"
 
 [dev-packages]
 mcon = "*"

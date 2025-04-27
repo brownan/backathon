@@ -17,6 +17,22 @@ app = typer.Typer()
 
 
 @app.command()
+def run(db_path: PathOption):
+    os.environ.setdefault("BACKATHON_DB_PATH", str(db_path))
+
+    from backathon.api import prod_app
+
+    uvicorn.run(
+        prod_app,
+        http="h11",
+        port=8000,
+        log_level="info",
+        log_config=backathon.cmdline.main.LOGGING_CONFIG,
+        reload=False,
+    )
+
+
+@app.command()
 def dev(db_path: PathOption):
     os.environ.setdefault("BACKATHON_DB_PATH", str(db_path))
     nvm_bin = os.environ.get("NVM_BIN", "")

@@ -1,5 +1,7 @@
 @use "bulma/sass/utilities" with (
   $cssvars-prefix: "",
+  $family-sans-serif: '"Ubuntu", sans-serif',
+  $family-monospace: '"Ubuntu Mono", monospace',
 );
 
 @use "bulma/sass/base";
@@ -35,6 +37,118 @@
 @use "bulma/sass/helpers/visibility";
 
 @use "bulma/sass/themes";
+
+
+@font-face {
+    font-family: 'Ubuntu';
+    src: local('Ubuntu Light'), local('Ubuntu-Light'),
+        url('@/fonts/Ubuntu-Light.woff2') format('woff2');
+    font-weight: 300;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Ubuntu';
+    src: local('Ubuntu Bold Italic'), local('Ubuntu-BoldItalic'),
+        url('@/fonts/Ubuntu-BoldItalic.woff2') format('woff2');
+    font-weight: bold;
+    font-style: italic;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Ubuntu';
+    src: local('Ubuntu Italic'), local('Ubuntu-Italic'),
+        url('@/fonts/Ubuntu-Italic.woff2') format('woff2');
+    font-weight: normal;
+    font-style: italic;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Ubuntu';
+    src: local('Ubuntu Bold'), local('Ubuntu-Bold'),
+        url('@/fonts/Ubuntu-Bold.woff2') format('woff2');
+    font-weight: bold;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Ubuntu';
+    src: local('Ubuntu Medium Italic'), local('Ubuntu-MediumItalic'),
+        url('@/fonts/Ubuntu-MediumItalic.woff2') format('woff2');
+    font-weight: 500;
+    font-style: italic;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Ubuntu';
+    src: local('Ubuntu Light Italic'), local('Ubuntu-LightItalic'),
+        url('@/fonts/Ubuntu-LightItalic.woff2') format('woff2');
+    font-weight: 300;
+    font-style: italic;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Ubuntu';
+    src: local('Ubuntu Medium'), local('Ubuntu-Medium'),
+        url('@/fonts/Ubuntu-Medium.woff2') format('woff2');
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Ubuntu';
+    src: local('Ubuntu Regular'), local('Ubuntu-Regular'),
+        url('@/fonts/Ubuntu-Regular.woff2') format('woff2');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+  font-family: "Ubuntu Mono";
+  src: local('Ubuntu Mono'), local('Ubuntu-Mono'),
+  url('@/fonts/UbuntuMono-Regular.woff2') format('woff2');
+
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Ubuntu Mono";
+  src: local('Ubuntu Mono Bold'), local('Ubuntu-Mono-Bold'),
+  url('@/fonts/UbuntuMono-Bold.woff2') format('woff2');
+
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Ubuntu Mono";
+  src: local('Ubuntu Mono Bold Italic'), local('Ubuntu-Mono-Bold-Italic'),
+  url('@/fonts/UbuntuMono-BoldItalic.woff2') format('woff2');
+
+  font-weight: bold;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+    font-family: "Ubuntu Mono";
+    src: local('Ubuntu Mono Italic'), local('Ubuntu-Mono-Italic'),
+         url('@/fonts/UbuntuMono-Italic.woff2') format('woff2');
+
+    font-weight: normal;
+    font-style: italic;
+    font-display: swap;
+}
+
+
 
 li.dropdown-item {
   @extend a, .dropdown-item;
