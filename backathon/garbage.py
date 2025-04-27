@@ -15,6 +15,7 @@ import json
 import logging
 import math
 import random
+import threading
 from typing import Iterator
 from typing import NamedTuple
 from typing import Self
@@ -36,8 +37,16 @@ class BloomFilter(NamedTuple):
     m: int
 
     @classmethod
-    def build_filter(cls, db: Database, snapshot_ids: list[int] | None = None) -> Self:
+    def build_filter(
+        cls,
+        db: Database,
+        snapshot_ids: list[int] | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> Self:
         """Builds the bloom filter"""
+
+        cancel_event = cancel_event or threading.Event()
+
         with db.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM objects")
             num_objects: int = cursor.fetchone()[0] or 0
@@ -90,6 +99,9 @@ class BloomFilter(NamedTuple):
                     h %= m
                     bytepos, bitpos = divmod(h, 8)
                     bloom[bytepos] |= 1 << bitpos
+
+                if cancel_event.is_set():
+                    break
 
         return cls(bloom=bloom, hashes=hashes, m=m)
 

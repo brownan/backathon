@@ -5,6 +5,7 @@ import json
 import logging.config
 import os
 import pathlib
+import threading
 import time
 from functools import cache
 from operator import attrgetter
@@ -358,13 +359,27 @@ async def _compute_exclusive_info(db: Database, snapshot_id: int):
         nonlocal exclusive_objs, exclusive_size
         thread_local_db = db.clone()
         bloom = backathon.garbage.BloomFilter.build_filter(
-            thread_local_db, [s for s in all_snapshot_ids if s != snapshot_id]
+            thread_local_db,
+            [s for s in all_snapshot_ids if s != snapshot_id],
+            cancel_event=cancel_event,
         )
+        if cancel_event.is_set():
+            return
+
         for obj in bloom.iter_unreachable(thread_local_db):
             exclusive_objs += 1
             exclusive_size += obj.uploaded_size if obj.uploaded_size else 0
+            if cancel_event.is_set():
+                return
 
-    await asyncio.to_thread(thread)
+    cancel_event = threading.Event()
+
+    try:
+        await asyncio.to_thread(thread)
+    except asyncio.CancelledError:
+        cancel_event.set()
+        raise
+
     return SnapshotExtendedInfo.model_construct(
         exclusiveObjs=exclusive_objs,
         exclusiveSize=exclusive_size,

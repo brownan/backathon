@@ -26,11 +26,7 @@ def cancel_on_disconnect(app):
 
     @wraps(app)
     async def wrapper(scope, receive, send):
-        if (
-            scope["type"] != "http"
-            or scope["method"] != "GET"
-            or scope["path"] != "/api/snapshots/1/extended"
-        ):
+        if scope["type"] != "http" or scope["method"] != "GET":
             await app(scope, receive, send)
             return
 
