@@ -186,34 +186,6 @@ prod_app = FastAPI(
 )
 
 
-@api.middleware("http")
-async def cancel_on_disconnect(request: fastapi.Request, call_next):
-    if request.method != "GET" or request.url.path != "/api/snapshots/1/extended":
-        return await call_next(request)
-
-    async def watch_for_disconnect(inner_scope: anyio.CancelScope):
-        logger.debug("Watching for disconnects")
-        try:
-            while True:
-                rec = await request.receive()
-                logger.debug("Received %s", rec)
-                if rec["type"] == "http.disconnect":
-                    logger.warning(
-                        "Disconnect message received from asgi server. Cancelling"
-                    )
-                    inner_scope.cancel()
-                    return
-        finally:
-            logger.debug("Disconnect watcher exiting")
-
-    with anyio.CancelScope() as scope:
-        t = asyncio.create_task(watch_for_disconnect(scope))
-        response = await call_next(request)
-        logger.debug("Call returned a response. Cancelling disconnect watcher")
-        t.cancel()
-        return response
-
-
 @cache
 def url_for_func(f) -> str:
     for x in api.routes:
@@ -409,11 +381,7 @@ async def get_snapshot_exclusive_info(
     if snapshot is None:
         raise HTTPException(status_code=404)
 
-    try:
-        return await _compute_exclusive_info(repo.db, snapshot.id)
-    except BaseException:
-        logger.exception("Exclusive info exiting with exception")
-        raise
+    return await _compute_exclusive_info(repo.db, snapshot.id)
 
 
 @api.get("/objects/{objid}")

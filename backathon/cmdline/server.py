@@ -1,9 +1,11 @@
+import asyncio
 import logging
 import os
 import pathlib
 import subprocess
 import sys
 import time
+from functools import wraps
 
 import typer
 import uvicorn.config
@@ -16,6 +18,43 @@ logger = logging.getLogger("backathon.server")
 app = typer.Typer()
 
 
+def cancel_on_disconnect(app):
+    """ASGI middleware to watch the receive event stream for http.disconnect,
+    and when disconnected, cancel the downstream app.
+
+    """
+
+    @wraps(app)
+    async def wrapper(scope, receive, send):
+        if (
+            scope["type"] != "http"
+            or scope["method"] != "GET"
+            or scope["path"] != "/api/snapshots/1/extended"
+        ):
+            await app(scope, receive, send)
+            return
+
+        parent_task = asyncio.current_task()
+        assert parent_task is not None
+
+        async def watch_for_disconnect():
+            while True:
+                rec = await receive()
+                if rec["type"] == "http.disconnect":
+                    parent_task.cancel()
+                    return
+
+        t = asyncio.create_task(watch_for_disconnect())
+        try:
+            await app(scope, receive, send)
+        except asyncio.CancelledError:
+            return None
+        finally:
+            t.cancel()
+
+    return wrapper
+
+
 @app.command()
 def run(db_path: PathOption):
     os.environ.setdefault("BACKATHON_DB_PATH", str(db_path))
@@ -23,7 +62,7 @@ def run(db_path: PathOption):
     from backathon.api import prod_app
 
     uvicorn.run(
-        prod_app,
+        cancel_on_disconnect(prod_app),
         http="h11",
         port=8000,
         log_level="info",
