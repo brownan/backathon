@@ -1,7 +1,10 @@
+$font: "Ubuntu", sans-serif;
+$font-mono: "Ubuntu Mono", monospace;
+
 @use "bulma/sass/utilities" with (
   $cssvars-prefix: "",
-  $family-sans-serif: '"Ubuntu", sans-serif',
-  $family-monospace: '"Ubuntu Mono", monospace',
+  $family-sans-serif: $font,
+  $family-monospace: $font-mono,
 );
 
 @use "bulma/sass/base";
@@ -35,6 +38,7 @@
 @use "bulma/sass/helpers/flexbox";
 @use "bulma/sass/helpers/spacing";
 @use "bulma/sass/helpers/visibility";
+@use "bulma/sass/helpers/typography";
 
 @use "bulma/sass/themes";
 

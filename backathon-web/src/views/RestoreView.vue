@@ -32,7 +32,7 @@
         <div class="column">
             <div class="panel">
                 <div class="panel-heading">Snapshot Info</div>
-                <div class="panel-block">
+                <div class="panel-block is-flex">
                     <table class="table is-narrow">
                         <tbody>
                             <tr>
@@ -116,6 +116,16 @@
                             </tr>
                         </tbody>
                     </table>
+                    <div class="is-flex-grow-1"></div>
+                    <div class="is-align-self-flex-start">
+                        <button
+                            type="button"
+                            class="button is-danger"
+                            @click="showDeleteSnapshotModal"
+                        >
+                            Delete
+                        </button>
+                    </div>
                 </div>
             </div>
             <h2 class="subtitle is-2">Files</h2>
@@ -148,11 +158,13 @@
 
 <script setup lang="ts">
 import { useQuery } from "@/api.ts";
-import { computed, toRefs } from "vue";
+import { computed, reactive, toRef, toRefs } from "vue";
 import RestoreTree from "@/components/RestoreTree.vue";
 import { useRoute, useRouter } from "vue-router";
 import SpinnerIcon from "@/components/SpinnerIcon.vue";
 import { filesize } from "filesize";
+import { useModal } from "vue-final-modal";
+import DeleteSnapshot from "@/components/DeleteSnapshot.vue";
 
 const snapshotResult = useQuery({
     method: "get",
@@ -243,5 +255,13 @@ const snapshotExtendedInfo = useQuery(() => {
             },
         };
     }
+});
+
+const { open: showDeleteSnapshotModal } = useModal({
+    component: DeleteSnapshot,
+    attrs: reactive({
+        snapshotInfo: toRef(snapshotInfo, "data"),
+        snapshotExtendedInfo: toRef(snapshotExtendedInfo, "data"),
+    }),
 });
 </script>
