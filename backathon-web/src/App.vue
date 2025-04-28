@@ -61,6 +61,13 @@
                 >
                     Restore
                 </RouterLink>
+                <RouterLink
+                    :to="{ name: 'maintenance' }"
+                    class="navbar-item"
+                    active-class="is-active"
+                >
+                    Maintenance
+                </RouterLink>
             </div>
         </div>
     </nav>

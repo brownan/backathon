@@ -1,5 +1,5 @@
 <template>
-    <h3 class="title is-3">Configure</h3>
+    <h1 class="title is-2">Configure</h1>
     <div class="tabs">
         <ul>
             <RouterLinkListItem :to="{ name: 'configure-backup' }">

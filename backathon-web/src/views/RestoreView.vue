@@ -1,5 +1,5 @@
 <template>
-    <h1 class="title is-1">Restore Files</h1>
+    <h1 class="title is-2">Restore Files</h1>
     <div class="columns">
         <div class="column is-one-third">
             <h2 class="subtitle is-2">Snapshots</h2>

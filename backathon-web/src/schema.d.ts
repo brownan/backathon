@@ -93,6 +93,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/garbage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Garbage Info */
+        get: operations["garbage_info_garbage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/": {
         parameters: {
             query?: never;
@@ -408,6 +425,14 @@ export interface components {
             st_mtime: number | null;
             /** St Size */
             st_size: number | null;
+        };
+        /** GarbageCollectionInfo */
+        GarbageCollectionInfo: {
+            repoInfo: components["schemas"]["RepoInfo"];
+            /** Unreachablecount */
+            unreachableCount: number;
+            /** Unreachablesize */
+            unreachableSize: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -738,6 +763,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garbage_info_garbage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GarbageCollectionInfo"];
                 };
             };
         };

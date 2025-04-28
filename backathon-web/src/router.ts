@@ -4,6 +4,7 @@ import StatusView from "@/views/StatusView.vue";
 import ConfigureView from "@/views/ConfigureView.vue";
 import BackupView from "@/views/BackupView.vue";
 import RestoreView from "@/views/RestoreView.vue";
+import MaintenanceView from "@/views/MaintenanceView.vue";
 import ConfigureBackup from "@/components/ConfigureBackup.vue";
 import ConfigureDestination from "@/components/ConfigureDestination.vue";
 import ConfigureSchedule from "@/components/ConfigureSchedule.vue";
@@ -53,6 +54,11 @@ const router = createRouter({
             path: "/restore/:id(\\d+)?",
             name: "restore",
             component: RestoreView,
+        },
+        {
+            path: "/maintenance",
+            name: "maintenance",
+            component: MaintenanceView,
         },
     ],
 });
