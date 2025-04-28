@@ -3,7 +3,7 @@ import json
 import logging
 import time
 
-import anyio
+import anyio.streams.memory
 import fastapi
 import sse_starlette
 
@@ -24,7 +24,9 @@ def send_config_change_event(url: str):
 
 @api.get("/events")
 async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
-    send_stream, recv_stream = anyio.create_memory_object_stream(0)
+    send_stream, recv_stream = anyio.create_memory_object_stream[
+        sse_starlette.ServerSentEvent
+    ](0)
 
     logger.info("Starting SSE event stream task")
 
@@ -42,7 +44,12 @@ async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
         try:
             # Push an initial status into the object stream so the client gets an
             # immediate status
-            await send_stream.send(json.dumps(repo.jobs.make_status_message()))
+            await send_stream.send(
+                sse_starlette.ServerSentEvent(
+                    json.dumps(repo.jobs.make_status_message()),
+                    event="statusUpdate",
+                )
+            )
 
             last_updated = 0
             while True:

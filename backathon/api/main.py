@@ -24,6 +24,7 @@ from starlette.routing import Mount
 from starlette.routing import Route
 
 import backathon.api.events
+import backathon.api.repoinfo
 import backathon.backup
 import backathon.encryption
 import backathon.garbage
@@ -68,6 +69,7 @@ async def lifespan(app: FastAPI):
 
 api = FastAPI()
 api.include_router(backathon.api.events.api)
+api.include_router(backathon.api.repoinfo.api)
 
 dev_app = FastAPI(
     lifespan=lifespan,
@@ -478,27 +480,9 @@ async def backup_start(repo: RepoDependency):
     except Exception as e:
         return {"status": "Failed to start backup", "error": str(e)}
     task.add_done_callback(
-        lambda _: send_config_change_event(url_for_func(repository_info))
+        lambda _: send_config_change_event(
+            url_for_func(backathon.api.repoinfo.repository_info)
+        )
     )
     task.add_done_callback(lambda _: send_config_change_event(url_for_func(scan_info)))
     return {"status": "Backup Started"}
-
-
-class RepoInfo(pydantic.BaseModel):
-    numObjects: int
-    uploadedSize: int
-    numSnapshots: int
-
-
-@api.get("/repository/info")
-async def repository_info(repo: RepoDependency) -> RepoInfo:
-    """Gets information about the repository"""
-    info = RepoInfo.model_construct()
-    with repo.db.cursor() as cursor:
-        cursor.execute("SELECT COUNT(*), SUM(uploaded_size) FROM objects")
-        info.numObjects, info.uploadedSize = cursor.fetchone()
-
-        cursor.execute("SELECT COUNT(*) FROM (SELECT DISTINCT timestamp FROM snapshots)")
-        info.numSnapshots = cursor.fetchone()[0]
-
-    return info
