@@ -8,22 +8,18 @@ import fastapi
 import sse_starlette
 
 from backathon.api.params import RepoDependency
+from backathon.asyncutils import Bus
 
 logger = logging.getLogger("backathon.api.events")
-
-_config_change_listeners: list[asyncio.Queue[str]] = []
 
 api = fastapi.APIRouter()
 
 
+_config_change_bus = Bus[str]()
+
+
 def send_config_change_event(url: str):
-    logger.debug(
-        "Sending config change event for %s to %s listeners",
-        url,
-        len(_config_change_listeners),
-    )
-    for q in _config_change_listeners:
-        q.put_nowait(url)
+    _config_change_bus.send(url)
 
 
 @api.get("/events")
@@ -33,26 +29,13 @@ async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
     logger.info("Starting SSE event stream task")
 
     async def config_change_watcher():
-        my_queue = asyncio.Queue()
-        _config_change_listeners.append(my_queue)
-        logger.debug("Starting config change watcher")
-        event_id = 0
-        try:
-            while True:
-                url = await my_queue.get()
-                await send_stream.send(
-                    sse_starlette.ServerSentEvent(
-                        json.dumps({"url": url}),
-                        event="configChange",
-                        id=str(event_id),
-                    )
+        async for url in _config_change_bus.listen():
+            await send_stream.send(
+                sse_starlette.ServerSentEvent(
+                    json.dumps({"url": url}),
+                    event="configChange",
                 )
-                event_id += 1
-        except asyncio.CancelledError:
-            logger.debug("event status watcher canceled and closing")
-            raise
-        finally:
-            _config_change_listeners.remove(my_queue)
+            )
 
     async def job_status_watcher():
         logger.debug("Starting job status watcher")

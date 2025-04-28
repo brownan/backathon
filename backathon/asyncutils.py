@@ -8,7 +8,9 @@ from contextvars import Context
 from functools import wraps
 from typing import Any
 from typing import AsyncGenerator
+from typing import AsyncIterator
 from typing import Awaitable
+from typing import Generic
 from typing import Iterable
 from typing import ParamSpec
 from typing import TypeVar
@@ -146,3 +148,22 @@ def non_reentrant(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
         return await fut
 
     return new_func
+
+
+class Bus(Generic[_T]):
+    def __init__(self):
+        self.listeners: list[asyncio.Queue[_T]] = []
+
+    def send(self, obj: _T):
+        for listener in self.listeners:
+            listener.put_nowait(obj)
+
+    async def listen(self) -> AsyncIterator[_T]:
+        q: asyncio.Queue[_T] = asyncio.Queue()
+        try:
+            self.listeners.append(q)
+            while True:
+                value = await q.get()
+                yield value
+        finally:
+            self.listeners.remove(q)
