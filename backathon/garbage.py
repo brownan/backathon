@@ -59,12 +59,9 @@ class BloomFilter(NamedTuple):
                 (num_objects * math.log(p)) / math.log(1 / math.pow(2, math.log(2)))
             )
         )
-        k = 4  # = int(round(math.log(2) * m / num_objects))
+        k = int(round(math.log(2) * m / num_objects))
 
         arr_size = int(math.ceil(m / 8))
-        logger.debug(
-            f"{num_objects} objects in database, allocating {filesize.decimal(arr_size)} for bloom filter. ({m} bits)"
-        )
         bloom = bytearray(arr_size)
 
         # The "hash" functions will just be a random number that will be

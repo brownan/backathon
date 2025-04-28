@@ -60,18 +60,22 @@
                             <tr>
                                 <th>Total size of all files</th>
                                 <td>
-                                    <SpinnerIcon v-if="snapshotInfo.isFetching" />
-                                    <template v-else-if="snapshotInfo.data">
-                                        {{ filesize(snapshotInfo.data.fileSize) }}
+                                    <SpinnerIcon v-if="snapshotExtendedInfo.isFetching" />
+                                    <template v-else-if="snapshotExtendedInfo.data">
+                                        {{ filesize(snapshotExtendedInfo.data.fileSize) }}
                                     </template>
                                 </td>
                             </tr>
                             <tr>
                                 <th>Uploaded Size</th>
                                 <td>
-                                    <SpinnerIcon v-if="snapshotInfo.isFetching" />
-                                    <template v-else-if="snapshotInfo.data">
-                                        {{ filesize(snapshotInfo.data.uploadedSize) }}
+                                    <SpinnerIcon v-if="snapshotExtendedInfo.isFetching" />
+                                    <template v-else-if="snapshotExtendedInfo.data">
+                                        {{
+                                            filesize(
+                                                snapshotExtendedInfo.data.uploadedSize,
+                                            )
+                                        }}
                                     </template>
                                 </td>
                             </tr>
@@ -92,20 +96,11 @@
                             <tr>
                                 <th>Shared Size</th>
                                 <td>
-                                    <SpinnerIcon
-                                        v-if="
-                                            snapshotExtendedInfo.isFetching ||
-                                            snapshotInfo.isFetching
-                                        "
-                                    />
-                                    <template
-                                        v-else-if="
-                                            snapshotExtendedInfo.data && snapshotInfo.data
-                                        "
-                                    >
+                                    <SpinnerIcon v-if="snapshotExtendedInfo.isFetching" />
+                                    <template v-else-if="snapshotExtendedInfo.data">
                                         {{
                                             filesize(
-                                                snapshotInfo.data.uploadedSize -
+                                                snapshotExtendedInfo.data.uploadedSize -
                                                     snapshotExtendedInfo.data
                                                         .exclusiveSize,
                                             )

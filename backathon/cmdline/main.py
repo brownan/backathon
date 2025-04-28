@@ -63,9 +63,9 @@ def openapi():
     """Dump the openapi json object"""
     import json
 
-    import backathon.api
+    import backathon.api.main
 
-    schema = backathon.api.api.openapi()
+    schema = backathon.api.main.api.openapi()
     print(json.dumps(schema, indent=2))
 
 

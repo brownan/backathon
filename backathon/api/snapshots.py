@@ -39,9 +39,6 @@ class SnapshotInfo(pydantic.BaseModel):
     path: PrintablePath
     root: ObjIDType
     timestamp: datetime.datetime
-    numObjects: int
-    uploadedSize: int
-    fileSize: int
 
 
 @api.get("/snapshots")
@@ -60,72 +57,91 @@ async def get_snapshot_info(
         timestamp=snapshot.timestamp,
     )
 
-    # Now for some fun recursive queries to get some juicy info
-    with repo.db.cursor() as cursor:
-        # Aggregate info on all objects related to this snapshot
-        cursor.execute(
-            """
-        WITH RECURSIVE reachable(id) AS (
-            VALUES (?)
-            UNION ALL
-            SELECT child FROM object_relations
-            INNER JOIN reachable ON reachable.id=parent
-        ) SELECT COUNT(*), SUM(uploaded_size), SUM(file_size) FROM objects WHERE objid IN reachable
-        """,
-            (snapshot.root,),
-        )
-        info.numObjects, info.uploadedSize, info.fileSize = cursor.fetchone()
-
     return info
 
 
+class SnapshotExtendedInfo(pydantic.BaseModel):
+    numObjects: int
+    uploadedSize: int
+    fileSize: int
+    exclusiveObjs: int
+    exclusiveSize: int
+    sharedSize: int
+
+
 @non_reentrant
-async def _compute_exclusive_info(db: Database, snapshot_id: int):
-    exclusive_objs = 0
-    exclusive_size = 0
+async def _compute_exclusive_info(db: Database, snapshot_id: int) -> SnapshotExtendedInfo:
+    info = SnapshotExtendedInfo.model_construct()
 
-    with db.cursor() as cursor:
-        cursor.execute("SELECT id FROM snapshots")
-        all_snapshot_ids = [row[0] for row in cursor]
-
-    # Do this in a thread with a new DB connection because it's quite
-    # expensive and we wouldn't want to block the main event loop
+    # Do work items in a separate thread with a new DB connection because it's
+    # quite expensive and we wouldn't want to block the main event loop
     # for this long. That's also why this is a separate API call from
     # the regular snapshot info. So that one can return easy data quickly.
-    def thread():
-        nonlocal exclusive_objs, exclusive_size
+
+    all_object_count = 0
+    all_object_size = 0
+
+    def thread1():
+        nonlocal all_object_size, all_object_count
+        thread_local_db = db.clone()
+        with thread_local_db.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*), SUM(uploaded_size) FROM objects")
+            all_object_count, all_object_size = cursor.fetchone()
+
+    def thread2():
+        nonlocal info
+        thread_local_db = db.clone()
+        with thread_local_db.cursor() as cursor:
+            # Aggregate info on all objects related to this snapshot
+            cursor.execute(
+                """
+            WITH RECURSIVE reachable(id) AS (
+                SELECT root FROM snapshots WHERE id=?
+                UNION
+                SELECT child FROM object_relations
+                INNER JOIN reachable ON reachable.id=parent
+            ) SELECT COUNT(*), SUM(uploaded_size), SUM(file_size) FROM objects WHERE objid IN reachable
+            """,
+                (snapshot_id,),
+            )
+            info.numObjects, info.uploadedSize, info.fileSize = cursor.fetchone()
+
+    unreachable_objs = 0
+    unreachable_size = 0
+
+    def thread3():
+        nonlocal unreachable_objs, unreachable_size
         thread_local_db = db.clone()
         bloom = backathon.garbage.BloomFilter.build_filter(
             thread_local_db,
-            [s for s in all_snapshot_ids if s != snapshot_id],
+            [snapshot_id],
             cancel_event=cancel_event,
         )
         if cancel_event.is_set():
             return
 
         for obj in bloom.iter_unreachable(thread_local_db):
-            exclusive_objs += 1
-            exclusive_size += obj.uploaded_size if obj.uploaded_size else 0
+            unreachable_objs += 1
+            unreachable_size += obj.uploaded_size if obj.uploaded_size else 0
             if cancel_event.is_set():
                 return
 
     cancel_event = threading.Event()
 
-    try:
-        await asyncio.to_thread(thread)
-    except asyncio.CancelledError:
-        cancel_event.set()
-        raise
+    async with asyncio.TaskGroup() as tg:
+        try:
+            await asyncio.gather(
+                tg.create_task(asyncio.to_thread(thread1)),
+                tg.create_task(asyncio.to_thread(thread2)),
+                tg.create_task(asyncio.to_thread(thread3)),
+            )
+        finally:
+            cancel_event.set()
 
-    return SnapshotExtendedInfo.model_construct(
-        exclusiveObjs=exclusive_objs,
-        exclusiveSize=exclusive_size,
-    )
-
-
-class SnapshotExtendedInfo(pydantic.BaseModel):
-    exclusiveObjs: int
-    exclusiveSize: int
+    info.exclusiveObjs = all_object_count - unreachable_objs
+    info.exclusiveSize = min(info.uploadedSize, all_object_size - unreachable_size)
+    info.sharedSize = min(0, info.uploadedSize - info.exclusiveSize)
+    return info
 
 
 @api.get("/snapshots/{id}/extended")
