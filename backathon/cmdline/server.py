@@ -55,7 +55,7 @@ def cancel_on_disconnect(app):
 def run(db_path: PathOption):
     os.environ.setdefault("BACKATHON_DB_PATH", str(db_path))
 
-    from backathon.api import prod_app
+    from backathon.api.base import prod_app
 
     uvicorn.run(
         cancel_on_disconnect(prod_app),
@@ -90,7 +90,7 @@ def dev(db_path: PathOption):
         sys.exit(1)
     try:
         uvicorn.run(
-            "backathon.api:dev_app",
+            "backathon.api.base:dev_app",
             http="h11",
             port=8000,
             log_level="info",

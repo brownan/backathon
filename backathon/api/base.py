@@ -656,6 +656,9 @@ async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
             logger.debug("SSE event listener cancelled and closing")
             raise
 
+    async def toast_listener():
+        pass
+
     async def data_sender_task():
         async with asyncio.TaskGroup() as tg:
             tg.create_task(job_status_watcher())
