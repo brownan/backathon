@@ -1,5 +1,8 @@
 <template>
-    <StyledModal title="Delete Snapshot">
+    <StyledModal
+        v-model="model"
+        title="Delete Snapshot"
+    >
         <div class="block">
             Really delete snapshot of
             <CodeBlock>
@@ -39,6 +42,12 @@
             <button
                 type="button"
                 class="button is-danger"
+                :disabled="!props.snapshotInfo"
+                @click="
+                    props.snapshotInfo
+                        ? deleteSnapshot(props.snapshotInfo.id)
+                        : () => null
+                "
             >
                 Confirm Delete
             </button>
@@ -50,24 +59,28 @@
 
 <script setup lang="ts">
 import StyledModal from "@/components/StyledModal.vue";
-import { ConditionalSpinner } from "@/utils/conditionalspinner.ts";
+import ConditionalSpinner from "@/components/ConditionalSpinner.ts";
+import CodeBlock from "@/components/CodeBlock.ts";
 import { filesize } from "@/utils/formatting.ts";
+import { client } from "@/api";
 
 import type { components } from "@/schema";
-import { h } from "vue";
 
 const props = defineProps<{
     snapshotInfo: components["schemas"]["SnapshotInfo"] | undefined;
     snapshotExtendedInfo: components["schemas"]["SnapshotExtendedInfo"] | undefined;
 }>();
 
-function CodeBlock(props, { slots }) {
-    return h(
-        "div",
-        {
-            class: "box is-family-code",
+function deleteSnapshot(id: number) {
+    client.DELETE("/snapshots/{id}", {
+        params: {
+            path: {
+                id: id,
+            },
         },
-        [slots.default()],
-    );
+    });
+    model.value = false;
 }
+
+const model = defineModel({ type: Boolean });
 </script>

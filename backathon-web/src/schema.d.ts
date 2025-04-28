@@ -153,7 +153,8 @@ export interface paths {
         get: operations["get_snapshot_info_snapshots__id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete Snapshot */
+        delete: operations["delete_snapshot_snapshots__id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -853,6 +854,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SnapshotInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_snapshot_snapshots__id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

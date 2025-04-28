@@ -177,7 +177,10 @@ const routes = useRoute();
 const router = useRouter();
 
 const activeSnapshot = computed(() => {
-    if (!snapshots.value) {
+    if (!routes.params.id) {
+        return null;
+    }
+    if (!snapshots.value || snapshots.value.length === 0) {
         return null;
     }
     let targetId;
@@ -191,11 +194,17 @@ const activeSnapshot = computed(() => {
             return snapshot;
         }
     }
+    selectSnapshot(null);
     return null;
 });
 
-function selectSnapshot(id: number) {
-    router.replace({ name: "restore", params: { id } });
+function selectSnapshot(id: number | null) {
+    // check if this snapshot id actually exists
+    if (id === null || !snapshots.value.some((s) => s.id === id)) {
+        router.replace({ name: "restore", params: {} });
+    } else {
+        router.replace({ name: "restore", params: { id } });
+    }
 }
 
 const { data: rootObj } = toRefs(

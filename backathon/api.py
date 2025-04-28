@@ -303,14 +303,22 @@ class SnapshotInfo(pydantic.BaseModel):
     fileSize: int
 
 
-@api.get("/snapshots/{id}")
-async def get_snapshot_info(repo: RepoDependency, id: int) -> SnapshotInfo:
+async def _get_snapshot(repo: RepoDependency, id: int) -> Snapshot:
     snapshot = next(
         repo.db.query(Snapshot, "SELECT * FROM snapshots WHERE id = ?", (id,)), None
     )
     if snapshot is None:
         raise HTTPException(status_code=404)
+    return snapshot
 
+
+SnapshotParam = Annotated[Snapshot, Depends(_get_snapshot)]
+
+
+@api.get("/snapshots/{id}")
+async def get_snapshot_info(
+    repo: RepoDependency, snapshot: SnapshotParam
+) -> SnapshotInfo:
     info = SnapshotInfo.model_construct(
         id=snapshot.id,
         path=pathlib.Path(snapshot.path),
@@ -388,15 +396,16 @@ async def _compute_exclusive_info(db: Database, snapshot_id: int):
 
 @api.get("/snapshots/{id}/extended")
 async def get_snapshot_exclusive_info(
-    repo: RepoDependency, id: int
+    repo: RepoDependency, snapshot: SnapshotParam
 ) -> SnapshotExtendedInfo:
-    snapshot = next(
-        repo.db.query(Snapshot, "SELECT * FROM snapshots WHERE id = ?", (id,)), None
-    )
-    if snapshot is None:
-        raise HTTPException(status_code=404)
-
     return await _compute_exclusive_info(repo.db, snapshot.id)
+
+
+@api.delete("/snapshots/{id}")
+async def delete_snapshot(repo: RepoDependency, snapshot: SnapshotParam):
+    with repo.db.cursor() as cursor:
+        cursor.execute("DELETE FROM snapshots WHERE id=?", (snapshot.id,))
+    send_config_change_event(url_for_func(get_snapshots))
 
 
 @api.get("/objects/{objid}")
