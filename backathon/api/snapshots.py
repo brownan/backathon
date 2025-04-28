@@ -1,5 +1,7 @@
 import asyncio
 import datetime
+import json
+import logging
 import pathlib
 import threading
 from typing import Annotated
@@ -18,6 +20,8 @@ from backathon.asyncutils import non_reentrant
 from backathon.models import ObjIDType
 from backathon.models import Snapshot
 from backathon.types import PrintablePath
+
+logger = logging.getLogger("backathon.api.snapshots")
 
 api = fastapi.APIRouter()
 
@@ -43,7 +47,9 @@ class SnapshotInfo(pydantic.BaseModel):
 
 @api.get("/snapshots")
 async def get_snapshots(repo: RepoDependency) -> list[Snapshot]:
-    return list(repo.db.query(Snapshot, "SELECT * FROM snapshots ORDER BY timestamp"))
+    return list(
+        repo.db.query(Snapshot, "SELECT * FROM snapshots ORDER BY timestamp DESC")
+    )
 
 
 @api.get("/snapshots/{id}")
@@ -64,6 +70,11 @@ class SnapshotExtendedInfo(pydantic.BaseModel):
     numObjects: int
     uploadedSize: int
     fileSize: int
+
+    otherObjects: int
+    otherUploadedSize: int
+    otherFileSize: int
+
     exclusiveObjs: int
     exclusiveSize: int
     sharedSize: int
@@ -73,22 +84,18 @@ class SnapshotExtendedInfo(pydantic.BaseModel):
 async def _compute_exclusive_info(db: Database, snapshot_id: int) -> SnapshotExtendedInfo:
     info = SnapshotExtendedInfo.model_construct()
 
-    # Do work items in a separate thread with a new DB connection because it's
-    # quite expensive and we wouldn't want to block the main event loop
-    # for this long. That's also why this is a separate API call from
-    # the regular snapshot info. So that one can return easy data quickly.
+    # Get the list of all snapshots in the database so we can do calculations
+    # involving those snapshots' roots
+    with db.cursor() as cursor:
+        cursor.execute("SELECT id FROM snapshots")
+        all_snapshot_ids = set(row[0] for row in cursor)
+        other_snapshot_ids = list(all_snapshot_ids.difference([snapshot_id]))
 
-    all_object_count = 0
-    all_object_size = 0
+    # Work is performed in a separate threads so that it doesn't block the main
+    # loop and also can be parallelized a bit.
 
     def thread1():
-        nonlocal all_object_size, all_object_count
-        thread_local_db = db.clone()
-        with thread_local_db.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*), SUM(uploaded_size) FROM objects")
-            all_object_count, all_object_size = cursor.fetchone()
-
-    def thread2():
+        # Computes the size of all objects reachable from this snapshot
         nonlocal info
         thread_local_db = db.clone()
         with thread_local_db.cursor() as cursor:
@@ -97,7 +104,7 @@ async def _compute_exclusive_info(db: Database, snapshot_id: int) -> SnapshotExt
                 """
             WITH RECURSIVE reachable(id) AS (
                 SELECT root FROM snapshots WHERE id=?
-                UNION
+                UNION ALL
                 SELECT child FROM object_relations
                 INNER JOIN reachable ON reachable.id=parent
             ) SELECT COUNT(*), SUM(uploaded_size), SUM(file_size) FROM objects WHERE objid IN reachable
@@ -106,23 +113,49 @@ async def _compute_exclusive_info(db: Database, snapshot_id: int) -> SnapshotExt
             )
             info.numObjects, info.uploadedSize, info.fileSize = cursor.fetchone()
 
-    unreachable_objs = 0
-    unreachable_size = 0
+    def thread2():
+        # Computes the size of objects reachable from all snapshots BUT the
+        # given snapshot
+        nonlocal info
+        thread_local_db = db.clone()
+        with thread_local_db.cursor() as cursor:
+            cursor.execute(
+                """
+            WITH RECURSIVE reachable(id) AS (
+                SELECT root FROM snapshots WHERE id IN (SELECT value FROM json_each(?))
+                UNION ALL
+                SELECT child FROM object_relations
+                INNER JOIN reachable ON reachable.id=parent
+            ) SELECT COUNT(*), SUM(uploaded_size), SUM(file_size) FROM objects WHERE objid IN reachable
+            """,
+                (json.dumps(other_snapshot_ids),),
+            )
+            (
+                info.otherObjects,
+                info.otherUploadedSize,
+                info.otherFileSize,
+            ) = cursor.fetchone()
+
+    exclusive_objs = 0
+    exclusive_size = 0
 
     def thread3():
-        nonlocal unreachable_objs, unreachable_size
+        # Computes the exclusive size of the snapshot. This is essentially
+        # a set difference between the given snapshot's objects and all other
+        # snapshots' objects.
+        nonlocal exclusive_objs, exclusive_size
         thread_local_db = db.clone()
         bloom = backathon.garbage.BloomFilter.build_filter(
             thread_local_db,
-            [snapshot_id],
+            other_snapshot_ids,
             cancel_event=cancel_event,
         )
         if cancel_event.is_set():
             return
 
-        for obj in bloom.iter_unreachable(thread_local_db):
-            unreachable_objs += 1
-            unreachable_size += obj.uploaded_size if obj.uploaded_size else 0
+        for obj in bloom.iter_unreachable(thread_local_db, snapshot_ids=[snapshot_id]):
+            exclusive_objs += 1
+            exclusive_size += obj.uploaded_size if obj.uploaded_size else 0
             if cancel_event.is_set():
                 return
 
@@ -138,9 +171,10 @@ async def _compute_exclusive_info(db: Database, snapshot_id: int) -> SnapshotExt
         finally:
             cancel_event.set()
 
-    info.exclusiveObjs = all_object_count - unreachable_objs
-    info.exclusiveSize = min(info.uploadedSize, all_object_size - unreachable_size)
-    info.sharedSize = min(0, info.uploadedSize - info.exclusiveSize)
+    logger.debug("Unreachable size: %s", exclusive_size)
+    info.exclusiveObjs = exclusive_objs
+    info.exclusiveSize = exclusive_size
+    info.sharedSize = info.uploadedSize - info.exclusiveSize
     return info
 
 

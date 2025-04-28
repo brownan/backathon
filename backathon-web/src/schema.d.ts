@@ -521,10 +521,18 @@ export interface components {
             uploadedSize: number;
             /** Filesize */
             fileSize: number;
+            /** Otherobjects */
+            otherObjects: number;
+            /** Otheruploadedsize */
+            otherUploadedSize: number;
+            /** Otherfilesize */
+            otherFileSize: number;
             /** Exclusiveobjs */
             exclusiveObjs: number;
             /** Exclusivesize */
             exclusiveSize: number;
+            /** Sharedsize */
+            sharedSize: number;
         };
         /** SnapshotInfo */
         SnapshotInfo: {

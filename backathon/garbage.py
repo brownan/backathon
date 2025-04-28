@@ -102,7 +102,9 @@ class BloomFilter(NamedTuple):
 
         return cls(bloom=bloom, hashes=hashes, m=m)
 
-    def iter_unreachable(self, db: Database) -> Iterator[models.Object]:
+    def iter_unreachable(
+        self, db: Database, snapshot_ids: list[int] | None = None
+    ) -> Iterator[models.Object]:
         """Iterates over unreachable objects"""
         hashes = self.hashes
 
@@ -112,9 +114,23 @@ class BloomFilter(NamedTuple):
             bytepos, bitpos = divmod(h, 8)
             return bloom[bytepos] & (1 << bitpos)
 
+        if snapshot_ids is None:
+            query = "SELECT * FROM objects"
+            args = ()
+        else:
+            query = """
+                WITH RECURSIVE reachable(id) AS (
+                    SELECT root FROM snapshots WHERE id IN (SELECT value FROM json_each(?))
+                    UNION ALL
+                    SELECT child FROM object_relations
+                    INNER JOIN reachable ON reachable.id=parent
+                ) SELECT * FROM objects WHERE objid IN reachable
+            """
+            args = (json.dumps(snapshot_ids),)
+
         # Now we can iterate over all objects. If an object does not appear
         # in the bloom filter, we can guarantee it's not reachable.
-        for obj in db.query(models.Object, "SELECT * FROM objects"):
+        for obj in db.query(models.Object, query, args):
             objid = int.from_bytes(obj.objid, "little")
 
             if not all(hash_match(h, objid) for h in hashes):

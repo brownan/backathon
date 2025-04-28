@@ -99,11 +99,7 @@
                                     <SpinnerIcon v-if="snapshotExtendedInfo.isFetching" />
                                     <template v-else-if="snapshotExtendedInfo.data">
                                         {{
-                                            filesize(
-                                                snapshotExtendedInfo.data.uploadedSize -
-                                                    snapshotExtendedInfo.data
-                                                        .exclusiveSize,
-                                            )
+                                            filesize(snapshotExtendedInfo.data.sharedSize)
                                         }}
                                         (approx.)
                                     </template>
