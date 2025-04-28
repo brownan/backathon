@@ -1,36 +1,29 @@
 import asyncio
 import contextlib
 import datetime
-import json
 import logging.config
 import os
 import pathlib
 import threading
-import time
 from functools import cache
 from operator import attrgetter
 from typing import Annotated
-from typing import Collection
-from typing import Container
 
-import anyio
 import blacknoise
 import fastapi
 import natsort
 import pydantic
-import sse_starlette
 import starlette.types
 from fastapi import Depends
 from fastapi import FastAPI
 from fastapi import HTTPException
-from fastapi import Path
-from fastapi import Request
 from fastapi.responses import StreamingResponse
 from pydantic import Base64Bytes
 from pydantic import BaseModel
 from starlette.routing import Mount
 from starlette.routing import Route
 
+import backathon.api.events
 import backathon.backup
 import backathon.encryption
 import backathon.garbage
@@ -39,6 +32,13 @@ import backathon.repository
 import backathon.scan
 from backathon import Backathon
 from backathon import Database
+from backathon.api.events import send_config_change_event
+from backathon.api.params import DatabaseDependency
+from backathon.api.params import ObjIdParam
+from backathon.api.params import RepoDependency
+from backathon.api.types import Browse
+from backathon.api.types import FSEntryType
+from backathon.api.types import PathInfo
 from backathon.asyncutils import non_reentrant
 from backathon.models import FSEntry
 from backathon.models import Object
@@ -50,7 +50,6 @@ from backathon.models import make_path_printable
 from backathon.restore import stream_dir
 from backathon.restore import stream_file
 from backathon.types import PathType
-from backathon.types import PrintableBytes
 from backathon.types import PrintablePath
 
 logger = logging.getLogger("backathon.api")
@@ -67,91 +66,8 @@ async def lifespan(app: FastAPI):
         yield {"db": db, "repo": repo}
 
 
-async def database(req: Request) -> Database:
-    return req.state.db
-
-
-DatabaseDependency = Annotated[Database, Depends(database)]
-
-
-async def repo(req: Request) -> Backathon:
-    return req.state.repo
-
-
-RepoDependency = Annotated[Backathon, Depends(repo)]
-
-ObjIdParam = Annotated[str, Path(pattern=r"[0-9a-fA-F]{2}+")]
-
-
-class PathInfo(pydantic.BaseModel):
-    path: PrintablePath
-    key: PathType
-
-    # Roots are checked
-    root: bool
-
-    # Excluded items are shown with an X
-    excluded: bool
-
-    # If this node is the parent of some root, then it is shown partially
-    # checked
-    parentOfRoot: bool
-
-    @classmethod
-    def from_path(
-        cls,
-        path: pathlib.Path,
-        roots: Collection[pathlib.Path],
-        excludes: Container[pathlib.Path],
-    ):
-        parent_of_root = any(path == p for root in roots for p in root.parents)
-
-        return cls.model_construct(
-            path=path,
-            key=path,
-            root=path in roots,
-            excluded=path in excludes,
-            parentOfRoot=parent_of_root,
-        )
-
-
-class Browse(pydantic.BaseModel):
-    info: PathInfo
-    children: list[PathInfo]
-
-
-class FSEntryType(pydantic.BaseModel):
-    # Wrapper for the FSEntry model used in the api, because the underlying
-    # FSEntry model has byte fields that may not be serializable
-
-    model_config = pydantic.ConfigDict(title="FSEntry")
-
-    id: int
-    objid: ObjIDType | None
-    name: PrintableBytes
-    path: PrintablePath
-    parent: int | None
-    new: bool
-    st_mode: int | None
-    st_mtime: int | None
-    st_size: int | None
-
-    @classmethod
-    def from_fsentry(cls, entry: FSEntry):
-        return cls.model_construct(
-            id=entry.id,
-            objid=entry.objid,
-            name=entry.name,
-            path=entry.decoded_path,
-            parent=entry.parent,
-            new=entry.new,
-            st_mode=entry.st_mode,
-            st_mtime=int(entry.st_mtime_ns // 1e9) if entry.st_mtime_ns else None,
-            st_size=entry.st_size,
-        )
-
-
 api = FastAPI()
+api.include_router(backathon.api.events.api)
 
 dev_app = FastAPI(
     lifespan=lifespan,
@@ -586,84 +502,3 @@ async def repository_info(repo: RepoDependency) -> RepoInfo:
         info.numSnapshots = cursor.fetchone()[0]
 
     return info
-
-
-_config_change_listeners: list[asyncio.Queue[str]] = []
-
-
-def send_config_change_event(url: str):
-    logger.debug(
-        "Sending config change event for %s to %s listeners",
-        url,
-        len(_config_change_listeners),
-    )
-    for q in _config_change_listeners:
-        q.put_nowait(url)
-
-
-@api.get("/events")
-async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
-    send_stream, recv_stream = anyio.create_memory_object_stream(0)
-
-    logger.info("Starting SSE event stream task")
-
-    async def config_change_watcher():
-        my_queue = asyncio.Queue()
-        _config_change_listeners.append(my_queue)
-        logger.debug("Starting config change watcher")
-        event_id = 0
-        try:
-            while True:
-                url = await my_queue.get()
-                await send_stream.send(
-                    sse_starlette.ServerSentEvent(
-                        json.dumps({"url": url}),
-                        event="configChange",
-                        id=str(event_id),
-                    )
-                )
-                event_id += 1
-        except asyncio.CancelledError:
-            logger.debug("event status watcher canceled and closing")
-            raise
-        finally:
-            _config_change_listeners.remove(my_queue)
-
-    async def job_status_watcher():
-        logger.debug("Starting job status watcher")
-        try:
-            # Push an initial status into the object stream so the client gets an
-            # immediate status
-            await send_stream.send(json.dumps(repo.jobs.make_status_message()))
-
-            last_updated = 0
-            while True:
-                await repo.jobs.wait_for_change()
-
-                now = time.monotonic()
-                if now < last_updated + 0.1:
-                    await asyncio.sleep(last_updated + 0.1 - now)
-
-                status_msg = repo.jobs.make_status_message()
-                await send_stream.send(
-                    sse_starlette.ServerSentEvent(
-                        json.dumps(status_msg), event="statusUpdate"
-                    )
-                )
-                last_updated = now
-
-        except asyncio.CancelledError:
-            logger.debug("SSE event listener cancelled and closing")
-            raise
-
-    async def toast_listener():
-        pass
-
-    async def data_sender_task():
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(job_status_watcher())
-            tg.create_task(config_change_watcher())
-
-    return sse_starlette.EventSourceResponse(
-        recv_stream, data_sender_callable=data_sender_task
-    )
