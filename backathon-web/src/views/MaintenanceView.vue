@@ -91,6 +91,42 @@
                         </div>
                     </div>
                 </div>
+                <div class="panel-block">
+                    <button
+                        type="button"
+                        class="button is-primary"
+                    >
+                        Collect Garbage Now
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="column">
+            <div class="panel">
+                <div class="panel-heading">Check Repository</div>
+                <div class="panel-block">
+                    This will scan the remote repository and ensure expected objects are
+                    present.
+                </div>
+                <div class="panel-block is-flex">
+                    <button
+                        type="button"
+                        class="button is-primary mr-2"
+                    >
+                        Quick Check
+                    </button>
+                    This fetches the list of objects from the repository to ensure all
+                    expected objects are present.
+                </div>
+                <div class="panel-block">
+                    <button
+                        type="button"
+                        class="button is-primary is-dark mr-2"
+                    >
+                        Full Check
+                    </button>
+                    This downloads each object and verifies their contents
+                </div>
             </div>
         </div>
     </div>

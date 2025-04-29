@@ -35,9 +35,11 @@
             <a
                 :href="downloadUrl"
                 class="button is-link"
+                target="_blank"
             >
                 Download
             </a>
+            <a class="button is-primary">Restore to local directory</a>
         </template>
     </StyledModal>
 </template>

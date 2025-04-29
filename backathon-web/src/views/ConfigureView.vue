@@ -11,6 +11,8 @@
             <RouterLinkListItem :to="{ name: 'configure-schedule' }">
                 Schedule
             </RouterLinkListItem>
+            <li><a>Encryption</a></li>
+            <li><a>Prune Policy</a></li>
         </ul>
     </div>
     <div class="block">
