@@ -32,6 +32,34 @@ logger = logging.getLogger("backathon.garbage")
 
 
 class BloomFilter(NamedTuple):
+    """The bloom filter performs a set difference between
+    sets of objects in the database's Object table. It is primarily used to
+    find unreachable objects, but can also be used to find objects referenced
+    by one snapshot but not another.
+
+    The set operation performed is Y - X where:
+    * X is the set of all nodes reachable from the snapshot list passed to
+      build_filter(), or all snapshots if no explicit snapshot list is given.
+
+    * Y is the set of all nodes reachable from the snapshot list passed to
+      iter_unreachable(), or the set of all known objects if a snapshot
+      list is not given.
+
+    build_filter() requires a linear time complexity pass over the objects and
+    marks all objects reachable from the given snapshot roots in the bloom
+    filter.
+
+    iter_unreachable() performs another linear time complexity scan of
+    objects in the table, either all objects or objects reachable from the
+    given snapshot roots, and yields items not found in the bloom filter.
+
+    As per bloom filter semantics, items returned are guaranteed not to be
+    in set X, but not all items in Y - X may be found. The accuracy is
+    set by the size of the filter and number of hash functions used. At the
+    time of writing this is tuned to 5%, or a 95% accuracy. This is a decent
+    compromise between accuracy and memory usage.
+    """
+
     bloom: bytearray
     hashes: list[int]
     m: int
@@ -43,7 +71,12 @@ class BloomFilter(NamedTuple):
         snapshot_ids: list[int] | None = None,
         cancel_event: threading.Event | None = None,
     ) -> Self:
-        """Builds the bloom filter"""
+        """Builds the bloom filter
+
+        cancel_event is a threading.Event object which, when set,
+        will cause this function to return early. It interrupts the iteration
+        over reachable objects, but not execution within sqlite itself.
+        """
 
         cancel_event = cancel_event or threading.Event()
 
