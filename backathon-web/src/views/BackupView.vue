@@ -54,9 +54,7 @@
                                     <SpinnerIfScanning>
                                         <SpinnerIfBackingUp>
                                             {{
-                                                formatter.format(
-                                                    scanInfo.data.outdatedCount,
-                                                )
+                                                formatNumber(scanInfo.data.outdatedCount)
                                             }}
                                         </SpinnerIfBackingUp>
                                     </SpinnerIfScanning>
@@ -67,7 +65,9 @@
                                 <td>
                                     <SpinnerIfScanning>
                                         <SpinnerIfBackingUp>
-                                            {{ filesize(scanInfo.data.outdatedSize) }}
+                                            {{
+                                                formatFilesize(scanInfo.data.outdatedSize)
+                                            }}
                                         </SpinnerIfBackingUp>
                                     </SpinnerIfScanning>
                                 </td>
@@ -76,7 +76,7 @@
                                 <th>Total Paths</th>
                                 <td>
                                     <SpinnerIfScanning>
-                                        {{ formatter.format(scanInfo.data.totalCount) }}
+                                        {{ formatNumber(scanInfo.data.totalCount) }}
                                     </SpinnerIfScanning>
                                 </td>
                             </tr>
@@ -84,7 +84,7 @@
                                 <th>Total Size</th>
                                 <td>
                                     <SpinnerIfScanning>
-                                        {{ filesize(scanInfo.data.totalSize) }}
+                                        {{ formatFilesize(scanInfo.data.totalSize) }}
                                     </SpinnerIfScanning>
                                 </td>
                             </tr>
@@ -130,7 +130,7 @@
                                 <th>Total Size</th>
                                 <td>
                                     <SpinnerIfBackingUp>{{
-                                        filesize(repoInfo.data.uploadedSize)
+                                        formatFilesize(repoInfo.data.uploadedSize)
                                     }}</SpinnerIfBackingUp>
                                 </td>
                             </tr>
@@ -138,7 +138,7 @@
                                 <th>Number of snapshots</th>
                                 <td>
                                     <SpinnerIfBackingUp>
-                                        {{ formatter.format(repoInfo.data.numSnapshots) }}
+                                        {{ formatNumber(repoInfo.data.numSnapshots) }}
                                     </SpinnerIfBackingUp>
                                 </td>
                             </tr>
@@ -146,7 +146,7 @@
                                 <th>Uploaded Object Count</th>
                                 <td>
                                     <SpinnerIfBackingUp>
-                                        {{ formatter.format(repoInfo.data.numObjects) }}
+                                        {{ formatNumber(repoInfo.data.numObjects) }}
                                     </SpinnerIfBackingUp>
                                 </td>
                             </tr>
@@ -169,8 +169,7 @@
 <script setup lang="ts">
 import { client, useQuery } from "@/api";
 import { computed, h, toRefs, type SetupContext } from "vue";
-import { formatter } from "@/utils/formatting.ts";
-import { filesize } from "filesize";
+import { formatNumber, formatFilesize } from "@/utils/formatting.ts";
 import { useJobStatus } from "@/utils/events.ts";
 import SpinnerIcon from "@/components/SpinnerIcon.vue";
 

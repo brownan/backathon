@@ -10,14 +10,14 @@
             <div>
                 Scanning
                 <span class="scan-count">
-                    {{ formatter.format(jobStatus.scan.scanned) }}
+                    {{ formatNumber(jobStatus.scan.scanned) }}
                     <template
                         v-if="
                             jobStatus.scan.total &&
                             jobStatus.scan.total >= jobStatus.scan.scanned
                         "
                     >
-                        / {{ formatter.format(jobStatus.scan.total) }} ({{
+                        / {{ formatNumber(jobStatus.scan.total) }} ({{
                             `${Math.floor(
                                 (jobStatus.scan.scanned / jobStatus.scan.total) * 100,
                             )}%`
@@ -46,10 +46,10 @@
         >
             <div>
                 Backing up
-                {{ formatter.format(jobStatus.backup.count_progress) }}
-                / {{ formatter.format(jobStatus.backup.count_total) }} items,
-                {{ filesize(jobStatus.backup.size_progress) }}
-                / {{ filesize(jobStatus.backup.size_total) }}
+                {{ formatNumber(jobStatus.backup.count_progress) }}
+                / {{ formatNumber(jobStatus.backup.count_total) }} items,
+                {{ formatFilesize(jobStatus.backup.size_progress) }}
+                / {{ formatFilesize(jobStatus.backup.size_total) }}
             </div>
             <progress
                 class="progress is-info"
@@ -94,8 +94,7 @@
 <script setup lang="ts">
 import { useJobStatus } from "@/utils/events.ts";
 import { computed } from "vue";
-import { filesize } from "filesize";
-import { formatter } from "@/utils/formatting.ts";
+import { formatNumber, formatFilesize } from "@/utils/formatting.ts";
 
 const jobStatus = useJobStatus();
 

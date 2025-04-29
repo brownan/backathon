@@ -31,7 +31,7 @@
                 :value="props.snapshotExtendedInfo"
                 v-slot="{ value: { exclusiveSize } }"
             >
-                {{ filesize(exclusiveSize) }}
+                {{ formatFilesize(exclusiveSize) }}
             </ConditionalSpinner>
         </div>
         <div class="block">
@@ -61,7 +61,7 @@
 import StyledModal from "@/components/StyledModal.vue";
 import ConditionalSpinner from "@/components/ConditionalSpinner.ts";
 import CodeBlock from "@/components/CodeBlock.ts";
-import { filesize } from "@/utils/formatting.ts";
+import { formatFilesize } from "@/utils/formatting.ts";
 import { client } from "@/api";
 
 import type { components } from "@/schema";
