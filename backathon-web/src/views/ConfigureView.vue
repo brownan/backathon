@@ -12,7 +12,7 @@
                 Schedule
             </RouterLinkListItem>
             <li><a>Encryption</a></li>
-            <li><a>Prune Policy</a></li>
+            <li><a>Retention</a></li>
         </ul>
     </div>
     <div class="block">

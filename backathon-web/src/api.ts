@@ -41,7 +41,6 @@ export interface QueryRequest<
     method: Method;
     url: Path;
     options: Init;
-    immediate?: boolean;
 }
 
 export type QueryState<

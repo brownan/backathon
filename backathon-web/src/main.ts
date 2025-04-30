@@ -42,6 +42,23 @@ app.use(PrimeVue, {
             input: "checkbox-input",
             box: "checkbox-box",
         },
+        Button: {
+            root: "button",
+            label: ({ instance, props }) => {
+                if (instance.hasIcon && !props.label && !props.badge) {
+                    return {
+                        style: "visibility: hidden; width: 0",
+                    };
+                }
+            },
+        },
+        DatePicker: {
+            panel: "datepicker-panel",
+            pcInputText: {
+                root: "input",
+            },
+            timePicker: "datepicker-timepicker",
+        },
     },
 });
 

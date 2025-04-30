@@ -204,3 +204,45 @@ $checkbox-size: 1.00rem;
   box-shadow: 0 0 #000,0 0 #000,0 1px 2px 0 rgba(18,18,23,0.05);
 
 }
+
+.datepicker-panel {
+  padding: 0.75rem;
+  background: var(--scheme-main);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.datepicker-timepicker {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  gap: 0.5rem;
+}
+
+.datepicker-timepicker > div {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.datepicker-timepicker span {
+  font-size: 1rem;
+}
+
+.datepicker-timepicker button {
+  height: 2.5rem;
+  width: 2.5rem;
+  padding-inline-start: 0;
+  padding-inline-end: 0;
+  gap: 0;
+}
+
+.datepicker-timepicker button svg {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+}
