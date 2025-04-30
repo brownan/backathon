@@ -44,7 +44,8 @@ app.use(PrimeVue, {
         },
         Button: {
             root: "button",
-            label: ({ instance, props }) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            label: ({ instance, props }: { [key: string]: any }) => {
                 if (instance.hasIcon && !props.label && !props.badge) {
                     return {
                         style: "visibility: hidden; width: 0",
@@ -53,6 +54,7 @@ app.use(PrimeVue, {
             },
         },
         DatePicker: {
+            root: ({ props }) => ({ class: { "is-flex": props.fluid } }),
             panel: "datepicker-panel",
             pcInputText: {
                 root: "input",
