@@ -54,7 +54,8 @@ app.use(PrimeVue, {
             },
         },
         DatePicker: {
-            root: ({ props }) => ({ class: { "is-flex": props.fluid } }),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            root: ({ props }: { props: any }) => ({ class: { "is-flex": props.fluid } }),
             panel: "datepicker-panel",
             pcInputText: {
                 root: "input",
@@ -66,14 +67,16 @@ app.use(PrimeVue, {
             dayView: "datepicker-day-view",
             weekHeader: "datepicker-weekday-cell",
             weekHeaderLabel: "datepicker-weekday",
-            dayCell: ({ context }) => [
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            dayCell: ({ context }: { context: any }) => [
                 "datepicker-day-cell",
                 {
                     "datepicker-other-month": context.otherMonth,
                     "datepicker-today": context.today,
                 },
             ],
-            day: ({ context }) => [
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            day: ({ context }: { context: any }) => [
                 "datepicker-day",
                 {
                     "is-disabled": context.disabled,
