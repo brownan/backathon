@@ -162,9 +162,11 @@ li.dropdown-item.is-active {
   @extend .is-active
 }
 
+
+/* Styles for the PrimeVue checkbox component */
 $checkbox-size: 1.00rem;
 
-.checkbox {
+.p-checkbox {
   position: relative;
   display: inline-flex;
   user-select: none;
@@ -172,7 +174,7 @@ $checkbox-size: 1.00rem;
   height: $checkbox-size;
 }
 
-.checkbox-input {
+.p-checkbox-input {
   cursor: pointer;
   appearance: none;
   position: absolute;
@@ -189,7 +191,7 @@ $checkbox-size: 1.00rem;
   border-radius: 4px;
 }
 
-.checkbox-box {
+.p-checkbox-box {
   color: var(--text);
   display: flex;
   justify-content: center;
@@ -205,6 +207,7 @@ $checkbox-size: 1.00rem;
 
 }
 
+/* Styles for the PrimeVue datepicker component */
 .datepicker-panel {
   padding: 0.75rem;
   background: var(--scheme-main);
@@ -245,4 +248,75 @@ $checkbox-size: 1.00rem;
   display: inline-block;
   width: 1rem;
   height: 1rem;
+}
+
+.datepicker-calendar-container {
+  display: flex;
+}
+
+.datepicker-calendar-container .datepicker-calendar {
+  flex: 1 1 auto;
+}
+.datepicker-calendar-container .datepicker-calendar:first-child {
+  padding-inline-start: 0;
+  border-inline-start: 0 none;
+}
+.datepicker-calendar-container .datepicker-calendar:last-child {
+  padding-inline-end: 0;
+}
+.datepicker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 0.5rem 0;
+  background: var(--scheme-main);
+  color: var(--text);
+  border-block-end: 1px solid var(--border);
+}
+.datepicker-day-view {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 1rem;
+  margin: 0.5rem 0 0 0;
+}
+.datepicker-weekday-cell {
+  padding: 0.25rem;
+}
+.datepicker-weekday {
+  font-weight: 500;
+  color: var(--text);
+}
+.datepicker-day-cell {
+  padding: 0.25rem;
+}
+.datepicker-day {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  margin: 0 auto;
+  overflow: hidden;
+  position: relative;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius);
+  transition: background 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.2s, outline-color 0.2s;
+  border: 1px solid transparent;
+  outline-color: transparent;
+  color: var(--text);
+}
+
+.datepicker-today > .datepicker-day {
+  background: var(--scheme-main-bis);
+  color: var(--text-strong);
+}
+
+.datepicker-day.is-disabled {
+  color: var(--text-weak);
+  pointer-events: none;
+  user-select: none;
+}
+.datepicker-day.is-selected {
+  color: var(--text-strong);
+  background: var(--scheme-invert);
 }

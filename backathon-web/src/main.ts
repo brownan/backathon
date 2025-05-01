@@ -38,9 +38,9 @@ app.use(PrimeVue, {
             },
         },
         Checkbox: {
-            root: "checkbox",
-            input: "checkbox-input",
-            box: "checkbox-box",
+            root: "p-checkbox",
+            input: "p-checkbox-input",
+            box: "p-checkbox-box",
         },
         Button: {
             root: "button",
@@ -60,6 +60,26 @@ app.use(PrimeVue, {
                 root: "input",
             },
             timePicker: "datepicker-timepicker",
+            calendarContainer: "datepicker-calendar-container",
+            calendar: "datepicker-calendar",
+            header: "datepicker-header",
+            dayView: "datepicker-day-view",
+            weekHeader: "datepicker-weekday-cell",
+            weekHeaderLabel: "datepicker-weekday",
+            dayCell: ({ context }) => [
+                "datepicker-day-cell",
+                {
+                    "datepicker-other-month": context.otherMonth,
+                    "datepicker-today": context.today,
+                },
+            ],
+            day: ({ context }) => [
+                "datepicker-day",
+                {
+                    "is-disabled": context.disabled,
+                    "is-selected": context.selected,
+                },
+            ],
         },
     },
 });

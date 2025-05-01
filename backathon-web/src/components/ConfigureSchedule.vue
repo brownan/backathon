@@ -1,33 +1,53 @@
 <template>
+    <div class="message">
+        <div class="message-header">Schedule Info</div>
+        <div class="message-body schedule-info-box">foo</div>
+    </div>
     <div class="panel">
         <div class="panel-block">
-            <div class="field">
-                <label class="label">Every hour at</label>
-                <p class="control">
-                    <InputNumber
-                        :max="59"
-                        :min="0"
-                    />
-                </p>
-            </div>
-        </div>
-        <div class="panel-block">
-            <div class="field">
-                <label class="label">Every day at</label>
-                <p class="control">
-                    <DatePicker
-                        :time-only="true"
-                        :fluid="true"
-                    />
-                </p>
+            <div class="content">
+                <div class="field">
+                    <div class="control">
+                        <label class="checkbox">
+                            <input type="checkbox" />
+                            Enable Schedule
+                        </label>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="label">Schedule Type</label>
+                    <div class="control">
+                        <div class="select">
+                            <select>
+                                <option>Hourly</option>
+                                <option>Daily</option>
+                                <option>Weekly</option>
+                                <option>Monthly</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="label">Next Backup At</label>
+                    <div class="control">
+                        <DatePicker
+                            hour-format="12"
+                            show-time
+                            fluid
+                        />
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </template>
 
-<style scoped></style>
+<style>
+.schedule-info-box {
+    min-height: 10rem;
+}
+</style>
 
 <script setup lang="ts">
 import DatePicker from "primevue/datepicker";
-import InputNumber from "primevue/inputnumber";
 </script>
