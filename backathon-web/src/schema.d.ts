@@ -110,6 +110,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Schedule Info */
+        get: operations["get_schedule_info_schedule_get"];
+        put?: never;
+        /** Modify Schedule */
+        post: operations["modify_schedule_schedule_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/": {
         parameters: {
             query?: never;
@@ -521,6 +539,19 @@ export interface components {
             /** Last Path */
             last_path: string | null;
         };
+        /** ScheduleInfo */
+        ScheduleInfo: {
+            /** Enable */
+            enable: boolean;
+            mode: components["schemas"]["ScheduleModes"];
+            /** Nextruntime */
+            nextRunTime: string | null;
+        };
+        /**
+         * ScheduleModes
+         * @enum {string}
+         */
+        ScheduleModes: "hourly" | "daily" | "weekly" | "monthly";
         /**
          * Snapshot
          * @description A snapshot of a filesystem at a particular time
@@ -783,6 +814,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GarbageCollectionInfo"];
+                };
+            };
+        };
+    };
+    get_schedule_info_schedule_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleInfo"];
+                };
+            };
+        };
+    };
+    modify_schedule_schedule_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleInfo"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

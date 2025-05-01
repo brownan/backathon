@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime
+import enum
 import json
 from typing import TYPE_CHECKING
 from typing import Annotated
@@ -27,6 +29,13 @@ JsonWrap = Annotated[
     ),
     pydantic.BeforeValidator(lambda x: json.loads(x)),
 ]
+
+
+class ScheduleModes(enum.Enum):
+    HOURLY = "hourly"
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
 
 
 class Settings(pydantic.BaseModel):
@@ -125,6 +134,33 @@ class Settings(pydantic.BaseModel):
             description="Maximum number of backup workers, for parallelized backups. "
             "If not set, defaults to 8 more than the number of CPU cores",
             gt=1,
+        ),
+    ] = None
+
+    schedule_enable: Annotated[
+        bool,
+        pydantic.Field(
+            title="Enable Schedule",
+            description="When enabled, backups will be run regularly according "
+            "to the configured schedule",
+        ),
+    ] = False
+
+    schedule_mode: Annotated[
+        ScheduleModes,
+        pydantic.Field(
+            title="Schedule Mode", description="How often to run backups automatically"
+        ),
+    ] = ScheduleModes.HOURLY
+
+    schedule_next_run_time: Annotated[
+        datetime.datetime | None,
+        pydantic.Field(
+            title="Next run time",
+            description="The next time the backup is scheduled to run. This "
+            "may be overridden on a one-off basis. When the backup "
+            "next runs, the next run time is re-calculated based "
+            "on the last run time and the configured schedule mode",
         ),
     ] = None
 
