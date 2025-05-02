@@ -2,24 +2,30 @@ import asyncio
 import json
 import logging
 import time
+from functools import cache
 
 import anyio.streams.memory
 import fastapi
 import sse_starlette
+from starlette.routing import Route
 
 from backathon.api.params import RepoDependency
-from backathon.asyncutils import Bus
+from backathon.signals import ConfigChange
+from backathon.signals import JobStatusChange
 
 logger = logging.getLogger("backathon.api.events")
 
 api = fastapi.APIRouter()
 
 
-_config_change_bus = Bus[str]()
+@cache
+def url_from_route_name(name: str) -> str:
+    from backathon.api.main import api
 
-
-def send_config_change_event(url: str):
-    _config_change_bus.send(url)
+    for route in api.routes:
+        if isinstance(route, Route) and route.name == name:
+            return route.path
+    raise ValueError(f"Unknown route {name}")
 
 
 @api.get("/events")
@@ -31,7 +37,8 @@ async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
     logger.info("Starting SSE event stream task")
 
     async def config_change_watcher():
-        async for url in _config_change_bus.listen():
+        async for event in repo.signals.listen(ConfigChange):
+            url = url_from_route_name(event.key)
             await send_stream.send(
                 sse_starlette.ServerSentEvent(
                     json.dumps({"url": url}),
@@ -53,7 +60,7 @@ async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
 
             last_updated = 0
             while True:
-                await repo.jobs.wait_for_change()
+                await repo.signals.wait(JobStatusChange)
 
                 now = time.monotonic()
                 if now < last_updated + 0.1:

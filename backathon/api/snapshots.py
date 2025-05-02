@@ -13,12 +13,11 @@ from fastapi import HTTPException
 
 import backathon.garbage
 from backathon import Database
-from backathon.api.events import send_config_change_event
 from backathon.api.params import RepoDependency
-from backathon.api.utils import url_for_func
 from backathon.asyncutils import non_reentrant
 from backathon.models import ObjIDType
 from backathon.models import Snapshot
+from backathon.signals import ConfigChange
 from backathon.types import PrintablePath
 
 logger = logging.getLogger("backathon.api.snapshots")
@@ -189,4 +188,4 @@ async def get_snapshot_exclusive_info(
 async def delete_snapshot(repo: RepoDependency, snapshot: SnapshotParam):
     with repo.db.cursor() as cursor:
         cursor.execute("DELETE FROM snapshots WHERE id=?", (snapshot.id,))
-    send_config_change_event(url_for_func(get_snapshots))
+    repo.signals.send(ConfigChange(key="get_snapshots"))

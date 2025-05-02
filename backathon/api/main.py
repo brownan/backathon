@@ -30,14 +30,12 @@ import backathon.repository
 import backathon.scan
 from backathon import Backathon
 from backathon import Database
-from backathon.api.events import send_config_change_event
 from backathon.api.params import DatabaseDependency
 from backathon.api.params import ObjIdParam
 from backathon.api.params import RepoDependency
 from backathon.api.types import Browse
 from backathon.api.types import FSEntryType
 from backathon.api.types import PathInfo
-from backathon.api.utils import url_for_func
 from backathon.models import FSEntry
 from backathon.models import Object
 from backathon.models import ObjectType
@@ -45,6 +43,7 @@ from backathon.models import decode_objid
 from backathon.models import make_path_printable
 from backathon.restore import stream_dir
 from backathon.restore import stream_file
+from backathon.signals import ConfigChange
 from backathon.types import PathType
 
 logger = logging.getLogger("backathon.api")
@@ -122,14 +121,14 @@ async def list_roots(repo: RepoDependency) -> list[PathInfo]:
 @api.put("/roots/{key}")
 async def add_root(repo: RepoDependency, key: PathType) -> FSEntryType:
     entry = repo.add_root(key)
-    send_config_change_event(url_for_func(list_roots))
+    repo.signals.send(ConfigChange(key="list_roots"))
     return FSEntryType.from_fsentry(entry)
 
 
 @api.delete("/roots/{key}")
 async def delete_root(repo: RepoDependency, key: PathType):
     repo.del_root(key)
-    send_config_change_event(url_for_func(list_roots))
+    repo.signals.send(ConfigChange(key="list_roots"))
 
 
 @api.get("/browse/")
@@ -294,7 +293,7 @@ async def download_object(
 
 @api.get("/scan")
 async def scan(repo: RepoDependency) -> backathon.scan.ScanProgress | None:
-    return repo.jobs.scan.status.current_message
+    return repo.jobs.scan.status
 
 
 @api.post("/scan")
@@ -304,7 +303,7 @@ async def scan_start(repo: RepoDependency):
         task = repo.scan_async()
     except Exception as e:
         return {"status": "Failed to start scan", "error": str(e)}
-    task.add_done_callback(lambda _: send_config_change_event(url_for_func(scan_info)))
+    task.add_done_callback(lambda _: repo.signals.send(ConfigChange(key="scan_info")))
     return {"status": "Scan Started"}
 
 
@@ -338,7 +337,7 @@ async def scan_info(repo: RepoDependency) -> ScanInfo:
 
 @api.get("/backup")
 async def backup(repo: RepoDependency) -> backathon.backup.BackupProgress | None:
-    return repo.jobs.backup.status.current_message
+    return repo.jobs.backup.status
 
 
 @api.post("/backup")
@@ -349,9 +348,7 @@ async def backup_start(repo: RepoDependency):
     except Exception as e:
         return {"status": "Failed to start backup", "error": str(e)}
     task.add_done_callback(
-        lambda _: send_config_change_event(
-            url_for_func(backathon.api.repoinfo.repository_info)
-        )
+        lambda _: repo.signals.send(ConfigChange(key="repository_info"))
     )
-    task.add_done_callback(lambda _: send_config_change_event(url_for_func(scan_info)))
+    task.add_done_callback(lambda _: repo.signals.send(ConfigChange(key="scan_info")))
     return {"status": "Backup Started"}

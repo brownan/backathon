@@ -34,6 +34,7 @@ from backathon.models import FSEntry
 from backathon.models import ObjIDType
 from backathon.proftools import perf_block
 from backathon.repoobject import RawPayload
+from backathon.signals import SignalBus
 from backathon.storage.base import StorageBase
 
 logger = logging.getLogger("backathon.repository")
@@ -48,6 +49,8 @@ class Backathon:
         self.db = db
 
         self.jobs = JobCollection()
+        self.signals = SignalBus()
+        self.jobs.set_signal_bus(self.signals)
 
     @classmethod
     def initialize(
