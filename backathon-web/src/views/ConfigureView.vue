@@ -11,8 +11,10 @@
             <RouterLinkListItem :to="{ name: 'configure-schedule' }">
                 Schedule
             </RouterLinkListItem>
+            <RouterLinkListItem :to="{ name: 'configure-retention' }">
+                Retention
+            </RouterLinkListItem>
             <li><a>Encryption</a></li>
-            <li><a>Retention</a></li>
         </ul>
     </div>
     <div class="block">
