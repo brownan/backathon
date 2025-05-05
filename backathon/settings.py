@@ -10,6 +10,7 @@ from typing import TypeVar
 
 import pydantic
 
+from backathon.retention import RetentionSettings
 from backathon.types import PathType
 
 if TYPE_CHECKING:
@@ -163,6 +164,14 @@ class Settings(pydantic.BaseModel):
             "on the last run time and the configured schedule mode",
         ),
     ] = None
+
+    retention_settings: Annotated[
+        RetentionSettings,
+        pydantic.Field(
+            title="Retention Settings",
+            default_factory=lambda: RetentionSettings(enabled=False, buckets=[]),
+        ),
+    ]
 
     migration: Annotated[
         int | None,
