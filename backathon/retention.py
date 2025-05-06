@@ -11,8 +11,30 @@ from backathon.models import Snapshot
 
 
 class Bucket(pydantic.BaseModel):
+    """A retention bucket
+
+    Snapshots that fall into at least one bucket will be retained (not deleted)
+
+    Each bucket defines a timeframe, interval, and count.
+
+    The timeframe defines the period of time that is considered for inclusion
+    to this bucket. The timeframe extends from now into the past by the defined
+    length of time.
+
+    The interval is the minimum time delta between snapshots within the bucket.
+    Only one snapshot per interval may be included in the bucket.
+
+    Count is the maximum number of snapshots that may be included in the bucket,
+    or if the unlimited flag is set, unlimited.
+
+    Snapshots are allocated into buckets greedily starting from most recent
+    to oldest.
+    """
+
     timeframe: datetime.timedelta
     interval: datetime.timedelta
+    count: int
+    unlimited: bool = False
 
 
 class RetentionSettings(pydantic.BaseModel):
@@ -53,6 +75,7 @@ def run_retention(repo: "Backathon") -> list[Snapshot]:
             )
 
             last_kept: Snapshot | None = None
+            count = 0
             for snapshot in snapshots:
                 if (
                     last_kept is None
@@ -60,6 +83,11 @@ def run_retention(repo: "Backathon") -> list[Snapshot]:
                 ):
                     saved_snapshots.add(snapshot.id)
                     last_kept = snapshot
+                    # Structuring the condition here ensures we'll always
+                    # keep the most recent snapshot in each bucket.
+                    count += 1
+                    if not bucket.unlimited and count > bucket.count:
+                        break
 
     to_save = list(
         repo.db.query(

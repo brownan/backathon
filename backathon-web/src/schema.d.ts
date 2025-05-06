@@ -128,6 +128,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/retention/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Retention Settings */
+        get: operations["get_retention_settings_retention_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/": {
         parameters: {
             query?: never;
@@ -409,6 +426,46 @@ export interface components {
             /** Children */
             children: components["schemas"]["PathInfo"][];
         };
+        /**
+         * Bucket
+         * @description A retention bucket
+         *
+         *     Snapshots that fall into at least one bucket will be retained (not deleted)
+         *
+         *     Each bucket defines a timeframe, interval, and count.
+         *
+         *     The timeframe defines the period of time that is considered for inclusion
+         *     to this bucket. The timeframe extends from now into the past by the defined
+         *     length of time.
+         *
+         *     The interval is the minimum time delta between snapshots within the bucket.
+         *     Only one snapshot per interval may be included in the bucket.
+         *
+         *     Count is the maximum number of snapshots that may be included in the bucket,
+         *     or if the unlimited flag is set, unlimited.
+         *
+         *     Snapshots are allocated into buckets greedily starting from most recent
+         *     to oldest.
+         */
+        Bucket: {
+            /**
+             * Timeframe
+             * Format: duration
+             */
+            timeframe: string;
+            /**
+             * Interval
+             * Format: duration
+             */
+            interval: string;
+            /** Count */
+            count: number;
+            /**
+             * Unlimited
+             * @default false
+             */
+            unlimited: boolean;
+        };
         /** DirListEntry */
         DirListEntry: {
             /**
@@ -516,6 +573,13 @@ export interface components {
             uploadedSize: number;
             /** Numsnapshots */
             numSnapshots: number;
+        };
+        /** RetentionSettings */
+        RetentionSettings: {
+            /** Enabled */
+            enabled: boolean;
+            /** Buckets */
+            buckets: components["schemas"]["Bucket"][];
         };
         /** ScanInfo */
         ScanInfo: {
@@ -867,6 +931,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_retention_settings_retention_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionSettings"];
                 };
             };
         };
