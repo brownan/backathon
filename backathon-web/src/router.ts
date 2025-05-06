@@ -8,7 +8,7 @@ import MaintenanceView from "@/views/MaintenanceView.vue";
 import ConfigureBackup from "@/views/ConfigureBackup.vue";
 import ConfigureDestination from "@/views/ConfigureDestination.vue";
 import ConfigureSchedule from "@/views/ConfigureSchedule.vue";
-import RetentionView from "@/views/RetentionView.vue";
+import ConfigureRetention from "@/views/ConfigureRetention.vue";
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
@@ -46,7 +46,7 @@ const router = createRouter({
                 },
                 {
                     path: "retention",
-                    component: RetentionView,
+                    component: ConfigureRetention,
                     name: "configure-retention",
                 },
             ],
