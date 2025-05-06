@@ -5,9 +5,9 @@ import ConfigureView from "@/views/ConfigureView.vue";
 import BackupView from "@/views/BackupView.vue";
 import RestoreView from "@/views/RestoreView.vue";
 import MaintenanceView from "@/views/MaintenanceView.vue";
-import ConfigureBackup from "@/components/ConfigureBackup.vue";
-import ConfigureDestination from "@/components/ConfigureDestination.vue";
-import ConfigureSchedule from "@/components/ConfigureSchedule.vue";
+import ConfigureBackup from "@/views/ConfigureBackup.vue";
+import ConfigureDestination from "@/views/ConfigureDestination.vue";
+import ConfigureSchedule from "@/views/ConfigureSchedule.vue";
 import RetentionView from "@/views/RetentionView.vue";
 
 const router = createRouter({
