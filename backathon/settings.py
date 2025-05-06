@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import datetime
-import enum
 import json
 from typing import TYPE_CHECKING
 from typing import Annotated
@@ -11,6 +9,7 @@ from typing import TypeVar
 import pydantic
 
 from backathon.retention import RetentionSettings
+from backathon.schedule import ScheduleSettings
 from backathon.types import PathType
 
 if TYPE_CHECKING:
@@ -30,13 +29,6 @@ JsonWrap = Annotated[
     ),
     pydantic.BeforeValidator(lambda x: json.loads(x)),
 ]
-
-
-class ScheduleModes(enum.Enum):
-    HOURLY = "hourly"
-    DAILY = "daily"
-    WEEKLY = "weekly"
-    MONTHLY = "monthly"
 
 
 class Settings(pydantic.BaseModel):
@@ -138,32 +130,12 @@ class Settings(pydantic.BaseModel):
         ),
     ] = None
 
-    schedule_enable: Annotated[
-        bool,
+    schedule_settings: Annotated[
+        JsonWrap[ScheduleSettings],
         pydantic.Field(
-            title="Enable Schedule",
-            description="When enabled, backups will be run regularly according "
-            "to the configured schedule",
+            title="Schedule Settings", default_factory=lambda: ScheduleSettings()
         ),
-    ] = False
-
-    schedule_mode: Annotated[
-        ScheduleModes,
-        pydantic.Field(
-            title="Schedule Mode", description="How often to run backups automatically"
-        ),
-    ] = ScheduleModes.HOURLY
-
-    schedule_next_run_time: Annotated[
-        datetime.datetime | None,
-        pydantic.Field(
-            title="Next run time",
-            description="The next time the backup is scheduled to run. This "
-            "may be overridden on a one-off basis. When the backup "
-            "next runs, the next run time is re-calculated based "
-            "on the last run time and the configured schedule mode",
-        ),
-    ] = None
+    ]
 
     retention_settings: Annotated[
         JsonWrap[RetentionSettings],

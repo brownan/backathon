@@ -61,7 +61,7 @@ import { ref, watch } from "vue";
 
 const retentionAPI = useQuery({
     method: "get",
-    url: "/retention/settings",
+    url: "/retention",
     options: {},
 });
 
@@ -89,7 +89,7 @@ function addNew() {
 
 function doSave() {
     if (settings.value) {
-        client.POST("/retention/settings", {
+        client.POST("/retention", {
             body: settings.value,
         });
     }

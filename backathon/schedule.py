@@ -1,12 +1,25 @@
 import datetime
+import enum
 from typing import TYPE_CHECKING
 
 import dateutil.relativedelta
-
-from backathon import Backathon
+import pydantic
 
 if TYPE_CHECKING:
-    from backathon.settings import ScheduleModes
+    from backathon import Backathon
+
+
+class ScheduleModes(enum.Enum):
+    HOURLY = "hourly"
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+
+
+class ScheduleSettings(pydantic.BaseModel):
+    enable: bool = True
+    mode: ScheduleModes = ScheduleModes.HOURLY
+    nextRunTime: datetime.datetime | None = None
 
 
 def get_next_run_time(
@@ -33,7 +46,7 @@ def get_next_run_time(
 
 
 class Schedule:
-    def __init__(self, repo: Backathon):
+    def __init__(self, repo: "Backathon"):
         self.repo = repo
         self.db = repo.db
 

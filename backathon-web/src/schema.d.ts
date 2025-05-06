@@ -117,18 +117,18 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Schedule Info */
-        get: operations["get_schedule_info_schedule_get"];
+        /** Get Schedule */
+        get: operations["get_schedule_schedule_get"];
         put?: never;
-        /** Modify Schedule */
-        post: operations["modify_schedule_schedule_post"];
+        /** Set Schedule */
+        post: operations["set_schedule_schedule_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/retention/settings": {
+    "/retention": {
         parameters: {
             query?: never;
             header?: never;
@@ -136,10 +136,10 @@ export interface paths {
             cookie?: never;
         };
         /** Get Retention Settings */
-        get: operations["get_retention_settings_retention_settings_get"];
+        get: operations["get_retention_settings_retention_get"];
         put?: never;
         /** Set Retention Settings */
-        post: operations["set_retention_settings_retention_settings_post"];
+        post: operations["set_retention_settings_retention_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -604,19 +604,23 @@ export interface components {
             /** Last Path */
             last_path: string | null;
         };
-        /** ScheduleInfo */
-        ScheduleInfo: {
-            /** Enable */
-            enable: boolean;
-            mode: components["schemas"]["ScheduleModes"];
-            /** Nextruntime */
-            nextRunTime: string | null;
-        };
         /**
          * ScheduleModes
          * @enum {string}
          */
         ScheduleModes: "hourly" | "daily" | "weekly" | "monthly";
+        /** ScheduleSettings */
+        ScheduleSettings: {
+            /**
+             * Enable
+             * @default true
+             */
+            enable: boolean;
+            /** @default hourly */
+            mode: components["schemas"]["ScheduleModes"];
+            /** Nextruntime */
+            nextRunTime?: string | null;
+        };
         /**
          * Snapshot
          * @description A snapshot of a filesystem at a particular time
@@ -883,7 +887,7 @@ export interface operations {
             };
         };
     };
-    get_schedule_info_schedule_get: {
+    get_schedule_schedule_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -898,12 +902,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ScheduleInfo"];
+                    "application/json": components["schemas"]["ScheduleSettings"];
                 };
             };
         };
     };
-    modify_schedule_schedule_post: {
+    set_schedule_schedule_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -912,7 +916,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ScheduleInfo"];
+                "application/json": components["schemas"]["ScheduleSettings"];
             };
         };
         responses: {
@@ -936,7 +940,7 @@ export interface operations {
             };
         };
     };
-    get_retention_settings_retention_settings_get: {
+    get_retention_settings_retention_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -956,7 +960,7 @@ export interface operations {
             };
         };
     };
-    set_retention_settings_retention_settings_post: {
+    set_retention_settings_retention_post: {
         parameters: {
             query?: never;
             header?: never;

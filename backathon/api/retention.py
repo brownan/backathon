@@ -7,12 +7,12 @@ from backathon.signals import ConfigChange
 api = fastapi.APIRouter()
 
 
-@api.get("/retention/settings")
+@api.get("/retention")
 async def get_retention_settings(repo: RepoDependency) -> RetentionSettings:
     return repo.db.config.retention_settings
 
 
-@api.post("/retention/settings")
+@api.post("/retention")
 async def set_retention_settings(repo: RepoDependency, settings: RetentionSettings):
     repo.db.config.retention_settings = settings
     repo.db.config.save(repo.db)

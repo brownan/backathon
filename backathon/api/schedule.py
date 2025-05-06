@@ -1,29 +1,17 @@
-import datetime
-
 import fastapi
-import pydantic
 
 from backathon.api.params import RepoDependency
-from backathon.settings import ScheduleModes
+from backathon.schedule import ScheduleSettings
 
 api = fastapi.APIRouter()
 
 
-class ScheduleInfo(pydantic.BaseModel):
-    enable: bool
-    mode: ScheduleModes
-    nextRunTime: datetime.datetime | None
-
-
 @api.get("/schedule")
-async def get_schedule_info(repo: RepoDependency) -> ScheduleInfo:
-    return ScheduleInfo.model_construct(
-        enable=repo.db.config.schedule_enable,
-        mode=repo.db.config.schedule_mode,
-        nextRunTime=repo.db.config.schedule_next_run_time,
-    )
+async def get_schedule(repo: RepoDependency) -> ScheduleSettings:
+    return repo.db.config.schedule_settings
 
 
 @api.post("/schedule")
-async def modify_schedule(repo: RepoDependency, info: ScheduleInfo):
-    pass  # TODO
+async def set_schedule(repo: RepoDependency, sched: ScheduleSettings):
+    repo.db.config.schedule_settings = sched
+    repo.db.config.save(repo.db)
