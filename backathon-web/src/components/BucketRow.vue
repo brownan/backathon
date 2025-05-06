@@ -3,6 +3,7 @@
         <button
             type="button"
             class="button mr-4 is-danger is-outlined"
+            @click="$emit('delete')"
         >
             <MdiIcon :path="mdiDeleteForever" />
         </button>
@@ -78,6 +79,8 @@ import { mdiDeleteForever } from "@mdi/js";
 import type { components } from "@/schema.d.ts";
 import { computed, triggerRef } from "vue";
 
+defineEmits(["delete"]);
+
 type DurationType = "hourly" | "daily" | "weekly" | "monthly";
 
 const bucket = defineModel<components["schemas"]["Bucket"]>({ required: true });
@@ -90,7 +93,6 @@ const timeframe = computed({
         // Mutate the model prop
         bucket.value.timeframe = val;
         triggerRef(bucket);
-        //bucket.value = Object.assign({}, bucket.value, { timeframe: val });
     },
 });
 const interval = computed({
@@ -101,7 +103,6 @@ const interval = computed({
         // Mutate the model prop
         bucket.value.interval = val;
         triggerRef(bucket);
-        //bucket.value = Object.assign({}, bucket.value, { interval: val });
     },
 });
 

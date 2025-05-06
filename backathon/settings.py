@@ -166,7 +166,7 @@ class Settings(pydantic.BaseModel):
     ] = None
 
     retention_settings: Annotated[
-        RetentionSettings,
+        JsonWrap[RetentionSettings],
         pydantic.Field(
             title="Retention Settings",
             default_factory=lambda: RetentionSettings(enabled=False, buckets=[]),

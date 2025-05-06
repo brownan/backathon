@@ -138,7 +138,8 @@ export interface paths {
         /** Get Retention Settings */
         get: operations["get_retention_settings_retention_settings_get"];
         put?: never;
-        post?: never;
+        /** Set Retention Settings */
+        post: operations["set_retention_settings_retention_settings_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -951,6 +952,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetentionSettings"];
+                };
+            };
+        };
+    };
+    set_retention_settings_retention_settings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetentionSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
