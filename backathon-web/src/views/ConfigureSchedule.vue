@@ -1,8 +1,4 @@
 <template>
-    <div class="message">
-        <div class="message-header">Schedule Info</div>
-        <div class="message-body schedule-info-box">foo</div>
-    </div>
     <div class="panel">
         <div class="panel-block">
             <div class="content">

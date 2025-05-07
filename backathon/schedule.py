@@ -22,7 +22,7 @@ class ScheduleSettings(pydantic.BaseModel):
     nextRunTime: datetime.datetime | None = None
 
 
-def get_next_run_time(
+def calculate_next_run_time(
     mode: ScheduleModes, last_run_time: datetime.datetime
 ) -> datetime.datetime:
     """Calculates the next runtime of the schedule"""

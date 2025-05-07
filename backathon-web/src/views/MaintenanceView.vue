@@ -1,7 +1,7 @@
 <template>
     <h1 class="title is-2">Repository Maintenance</h1>
-    <div class="columns">
-        <div class="column">
+    <div class="grid is-col-min-20">
+        <div class="cell">
             <div class="panel">
                 <div class="panel-heading">Garbage Collection</div>
                 <div class="panel-block">
@@ -101,7 +101,7 @@
                 </div>
             </div>
         </div>
-        <div class="column">
+        <div class="cell">
             <div class="panel">
                 <div class="panel-heading">Check Repository</div>
                 <div class="panel-block">
@@ -126,6 +126,15 @@
                         Full Check
                     </button>
                     This downloads each object and verifies their contents
+                </div>
+            </div>
+        </div>
+        <div class="cell">
+            <div class="panel">
+                <div class="panel-heading">Delete Snapshots</div>
+                <div class="panel-block">
+                    This view lets you estimate the size of and/or remove one or more
+                    snapshots.
                 </div>
             </div>
         </div>
