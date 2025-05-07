@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import enum
 import logging
 from typing import TYPE_CHECKING
 from typing import Generic
@@ -9,8 +10,8 @@ from typing import TypeVar
 
 import pydantic
 
-from backathon.signals import JobStatusChange
 from backathon.signals import SignalBus
+from backathon.signals import SignalType
 
 if TYPE_CHECKING:
     import backathon.backup
@@ -19,6 +20,23 @@ if TYPE_CHECKING:
 MessageType = TypeVar("MessageType")
 
 logger = logging.getLogger("backathon.job")
+
+
+class JobTypes(enum.StrEnum):
+    SCAN = "scan"
+    BACKUP = "backup"
+
+
+class JobStatusChange(SignalType):
+    job: JobTypes
+
+
+class JobStart(SignalType):
+    job: JobTypes
+
+
+class JobEnd(SignalType):
+    job: JobTypes
 
 
 class Job(Generic[MessageType]):
@@ -31,9 +49,7 @@ class Job(Generic[MessageType]):
     def _update_status(self, message: MessageType | None):
         self.status = message
         assert self.signal_bus is not None
-        self.signal_bus.send(
-            JobStatusChange(job=self.job_name)  # pyright: ignore [reportArgumentType]
-        )
+        self.signal_bus.send(JobStatusChange(job=JobTypes(self.job_name)))
 
     def set_task(self, task: asyncio.Task):
         if self.task is not None:
@@ -43,6 +59,8 @@ class Job(Generic[MessageType]):
             self.task.cancel()
         self.task = task
         self.task.add_done_callback(self._finish)
+        assert self.signal_bus is not None
+        self.signal_bus.send(JobStart(job=JobTypes(self.job_name)))
 
     def progress_callback(self, message: MessageType):
         if not self.task:
@@ -61,6 +79,8 @@ class Job(Generic[MessageType]):
             self.task = None
             logger.debug("Task done. Clearing status")
             self._update_status(None)
+            assert self.signal_bus is not None
+            self.signal_bus.send(JobEnd(job=JobTypes(self.job_name)))
         else:
             # Another task is replacing this one, which generally shouldn't
             # happen. A warning would have been emitted by set_task()

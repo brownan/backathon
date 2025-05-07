@@ -31,6 +31,7 @@ import backathon.repository
 import backathon.scan
 from backathon import Backathon
 from backathon import Database
+from backathon.api.events import depends_on_config_keys
 from backathon.api.params import DatabaseDependency
 from backathon.api.params import ObjIdParam
 from backathon.api.params import RepoDependency
@@ -44,7 +45,6 @@ from backathon.models import decode_objid
 from backathon.models import make_path_printable
 from backathon.restore import stream_dir
 from backathon.restore import stream_file
-from backathon.signals import ConfigChange
 from backathon.types import PathType
 
 logger = logging.getLogger("backathon.api")
@@ -54,11 +54,19 @@ logger = logging.getLogger("backathon.api")
 async def lifespan(app: FastAPI):
     logger.debug("API lifecycle started")
 
-    async with asyncio.TaskGroup():
+    async with asyncio.TaskGroup() as tg:
         db_path = os.environ["BACKATHON_DB_PATH"]
         db = Database(db_path)
         repo = Backathon(db)
-        yield {"db": db, "repo": repo}
+
+        config_signal_task = tg.create_task(
+            backathon.api.events.config_signal_to_api_reload(repo)
+        )
+
+        try:
+            yield {"db": db, "repo": repo}
+        finally:
+            config_signal_task.cancel()
 
 
 api = FastAPI()
@@ -123,14 +131,14 @@ async def list_roots(repo: RepoDependency) -> list[PathInfo]:
 @api.put("/roots/{key}")
 async def add_root(repo: RepoDependency, key: PathType) -> FSEntryType:
     entry = repo.add_root(key)
-    repo.signals.send(ConfigChange(key="list_roots"))
+    repo.signals.send(backathon.api.events.APIReloadSignal(name="list_roots"))
     return FSEntryType.from_fsentry(entry)
 
 
 @api.delete("/roots/{key}")
 async def delete_root(repo: RepoDependency, key: PathType):
     repo.del_root(key)
-    repo.signals.send(ConfigChange(key="list_roots"))
+    repo.signals.send(backathon.api.events.APIReloadSignal(name="list_roots"))
 
 
 @api.get("/browse/")
@@ -174,6 +182,7 @@ async def browse(repo: RepoDependency, key: PathType | None = None) -> Browse:
 
 
 @api.get("/excludes/")
+@depends_on_config_keys("excludes")
 async def get_excludes(
     repo: RepoDependency,
 ) -> list[PathInfo]:
@@ -187,13 +196,13 @@ async def get_excludes(
 @api.put("/excludes/{key}")
 async def put_exclude(repo: RepoDependency, key: PathType):
     repo.db.config.excludes.add(key)
-    repo.db.config.save(repo.db)
+    repo.db.config.save(repo)
 
 
 @api.delete("/excludes/{key}")
 async def delete_exclude(repo: RepoDependency, key: PathType):
     repo.db.config.excludes.remove(key)
-    repo.db.config.save(repo.db)
+    repo.db.config.save(repo)
 
 
 @api.get("/objects/{objid}")
@@ -305,7 +314,11 @@ async def scan_start(repo: RepoDependency):
         task = repo.scan_async()
     except Exception as e:
         return {"status": "Failed to start scan", "error": str(e)}
-    task.add_done_callback(lambda _: repo.signals.send(ConfigChange(key="scan_info")))
+    task.add_done_callback(
+        lambda _: repo.signals.send(
+            backathon.api.events.APIReloadSignal(name="scan_info")
+        )
+    )
     return {"status": "Scan Started"}
 
 
@@ -350,7 +363,13 @@ async def backup_start(repo: RepoDependency):
     except Exception as e:
         return {"status": "Failed to start backup", "error": str(e)}
     task.add_done_callback(
-        lambda _: repo.signals.send(ConfigChange(key="repository_info"))
+        lambda _: repo.signals.send(
+            backathon.api.events.APIReloadSignal(name="repository_info")
+        )
     )
-    task.add_done_callback(lambda _: repo.signals.send(ConfigChange(key="scan_info")))
+    task.add_done_callback(
+        lambda _: repo.signals.send(
+            backathon.api.events.APIReloadSignal(name="scan_info")
+        )
+    )
     return {"status": "Backup Started"}

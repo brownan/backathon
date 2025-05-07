@@ -2,20 +2,33 @@ import asyncio
 import json
 import logging
 import time
+from collections import defaultdict
 from functools import cache
+from typing import Callable
+from typing import ParamSpec
+from typing import TypeVar
 
 import anyio.streams.memory
 import fastapi
 import sse_starlette
+from fastapi.types import DecoratedCallable
 from starlette.routing import Route
 
+from backathon import Backathon
 from backathon.api.params import RepoDependency
-from backathon.signals import ConfigChange
-from backathon.signals import JobStatusChange
+from backathon.job import JobStatusChange
+from backathon.settings import ConfigChange
+from backathon.signals import SignalType
 
 logger = logging.getLogger("backathon.api.events")
 
 api = fastapi.APIRouter()
+
+
+class APIReloadSignal(SignalType):
+    """Signals that an API call should be reloaded"""
+
+    name: str
 
 
 @cache
@@ -28,6 +41,37 @@ def url_from_route_name(name: str) -> str:
     raise ValueError(f"Unknown route {name}")
 
 
+_api_to_config = defaultdict(set)
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+def depends_on_config_keys(
+    *keys: str,
+) -> Callable[[DecoratedCallable], DecoratedCallable]:
+    def decorator(f: DecoratedCallable) -> DecoratedCallable:
+        _api_to_config[f.__name__].update(keys)
+        return f
+
+    return decorator
+
+
+async def config_signal_to_api_reload(repo: "Backathon"):
+    """Monitors ConfigChange signals and translates them to
+    APIReloadSignal signals. This is the explicit translation between
+    config attributes on the Settings class and API calls that retrieve
+    info on those tasks.
+
+    Started as a task by the main api lifecycle handler
+
+
+    """
+    async for signal in repo.signals.listen(ConfigChange):
+        for name in _api_to_config[signal.key]:
+            repo.signals.send(APIReloadSignal(name=name))
+
+
 @api.get("/events")
 async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
     send_stream, recv_stream = anyio.create_memory_object_stream[
@@ -36,9 +80,9 @@ async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
 
     logger.info("Starting SSE event stream task")
 
-    async def config_change_watcher():
-        async for event in repo.signals.listen(ConfigChange):
-            url = url_from_route_name(event.key)
+    async def config_reload_watcher():
+        async for event in repo.signals.listen(APIReloadSignal):
+            url = url_from_route_name(event.name)
             await send_stream.send(
                 sse_starlette.ServerSentEvent(
                     json.dumps({"url": url}),
@@ -81,7 +125,7 @@ async def events(repo: RepoDependency) -> sse_starlette.EventSourceResponse:
     async def data_sender_task():
         async with asyncio.TaskGroup() as tg:
             tg.create_task(job_status_watcher())
-            tg.create_task(config_change_watcher())
+            tg.create_task(config_reload_watcher())
 
     return sse_starlette.EventSourceResponse(
         recv_stream, data_sender_callable=data_sender_task

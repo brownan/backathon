@@ -10,10 +10,17 @@ import pydantic
 
 from backathon.retention import RetentionSettings
 from backathon.schedule import ScheduleSettings
+from backathon.signals import SignalType
 from backathon.types import PathType
 
 if TYPE_CHECKING:
+    from backathon import Backathon
     from backathon import Database
+
+
+class ConfigChange(SignalType):
+    key: str
+
 
 T = TypeVar("T")
 """Wraps a pydantic-compatible type in json for serialization
@@ -167,11 +174,23 @@ class Settings(pydantic.BaseModel):
 
             return cls.model_validate(config_dict)
 
-    def save(self, db: Database):
+    def save(self, repo: "Backathon"):
+        db = repo.db
+        changed_attrs = getattr(self, "_changed_attrs", set())
         with db.atomic():
             for key, value in self.model_dump(mode="json").items():
-                # noinspection PyProtectedMember
-                db._config_set(key, value)
+                if key in changed_attrs:
+                    # noinspection PyProtectedMember
+                    db._config_set(key, value)
+        for key in changed_attrs:
+            repo.signals.send(ConfigChange(key=key))
+        changed_attrs.clear()
+
+    def __setattr__(self, key, value):
+        if key in super().model_fields:
+            changed_attrs = getattr(self, "_changed_attrs", set())
+            changed_attrs.add(key)
+        return super().__setattr__(key, value)
 
 
 class MarkerData(pydantic.BaseModel):

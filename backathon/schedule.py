@@ -1,12 +1,8 @@
 import datetime
 import enum
-from typing import TYPE_CHECKING
 
 import dateutil.relativedelta
 import pydantic
-
-if TYPE_CHECKING:
-    from backathon import Backathon
 
 
 class ScheduleModes(enum.Enum):
@@ -43,12 +39,3 @@ def calculate_next_run_time(
     next_run_time = last_run_time + time_delta
 
     return next_run_time
-
-
-class Schedule:
-    def __init__(self, repo: "Backathon"):
-        self.repo = repo
-        self.db = repo.db
-
-    def set_schedule(self, mode: ScheduleModes):
-        pass  # TODO

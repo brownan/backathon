@@ -1,6 +1,5 @@
 import abc
 from typing import AsyncIterator
-from typing import Literal
 from typing import Type
 from typing import TypeVar
 
@@ -11,14 +10,6 @@ import backathon.asyncutils
 
 class SignalType(pydantic.BaseModel, abc.ABC):
     pass
-
-
-class ConfigChange(SignalType):
-    key: str
-
-
-class JobStatusChange(SignalType):
-    job: Literal["scan", "backup"]
 
 
 S = TypeVar("S", bound=SignalType)
