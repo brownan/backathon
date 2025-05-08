@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING
 from typing import Annotated
 from typing import Self
@@ -16,6 +17,8 @@ from backathon.types import PathType
 if TYPE_CHECKING:
     from backathon import Backathon
     from backathon import Database
+
+logger = logging.getLogger("backathon.settings")
 
 T = TypeVar("T")
 """Wraps a pydantic-compatible type in json for serialization
@@ -172,6 +175,7 @@ class Settings(pydantic.BaseModel):
     def save(self, repo: "Backathon"):
         db = repo.db
         changed_attrs = getattr(self, "_changed_attrs", set())
+        logger.debug("Saving change attributes: %s", changed_attrs)
         with db.atomic():
             for key, value in self.model_dump(mode="json").items():
                 if key in changed_attrs:
@@ -182,8 +186,12 @@ class Settings(pydantic.BaseModel):
         changed_attrs.clear()
 
     def __setattr__(self, key, value):
+        logger.debug("Settings setattr on %s", key)
         if key in super().model_fields:
-            changed_attrs = getattr(self, "_changed_attrs", set())
+            logger.debug("...Adding to changed attr set")
+            changed_attrs = getattr(self, "_changed_attrs", None)
+            if changed_attrs is None:
+                changed_attrs = self._changed_attrs = set()
             changed_attrs.add(key)
         return super().__setattr__(key, value)
 

@@ -34,6 +34,9 @@ def calculate_next_run_time(
 ) -> datetime.datetime:
     """Calculates the next runtime of the schedule"""
 
+    # Perform calculation in localtime
+    last_run_time.astimezone()
+
     time_delta = None
     match mode:
         case ScheduleModes.HOURLY:
@@ -57,7 +60,7 @@ async def scheduler(repo: "Backathon"):
 
     Responsibilities:
     * If next backup time is in the past, kick off a backup immediately
-    * If next backup time is in the future, set a call_later task
+    * If next backup time is in the future, sleep until scheduled
     * When a backup finishes, update the next run time
     * If launching a backup but a job is currently running:
       - if it's already a backup job, then skip the current schedule and
@@ -84,7 +87,7 @@ async def scheduler(repo: "Backathon"):
                 await schedule_process_task
                 raise RuntimeError("Schedule task exited unexpectedly with no error")
 
-            logger.debug("Cancelling scheduler process task")
+            logger.debug("Cancelling scheduler process task due to config change")
             schedule_process_task.cancel()
             try:
                 await schedule_process_task
@@ -95,8 +98,9 @@ async def scheduler(repo: "Backathon"):
 async def _schedule_process(repo: "Backathon"):
     schedule = repo.db.config.schedule_settings
     if schedule.nextRunTime is not None:
+        logger.debug("Scheduled next run time is %s", schedule.nextRunTime)
         now = datetime.datetime.now(tz=datetime.timezone.utc)
-        time_remaining = (now - schedule.nextRunTime).total_seconds()
+        time_remaining = (schedule.nextRunTime - now).total_seconds()
         if time_remaining > 0:
             logger.debug(
                 "Schedule configured to run at %s. Sleeping for %s seconds",
