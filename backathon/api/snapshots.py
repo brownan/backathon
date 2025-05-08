@@ -111,6 +111,8 @@ async def _compute_exclusive_info(db: Database, snapshot_id: int) -> SnapshotExt
                 (snapshot_id,),
             )
             info.numObjects, info.uploadedSize, info.fileSize = cursor.fetchone()
+            info.uploadedSize = info.uploadedSize or 0
+            info.fileSize = info.fileSize or 0
 
     def thread2():
         # Computes the size of objects reachable from all snapshots BUT the
@@ -134,6 +136,8 @@ async def _compute_exclusive_info(db: Database, snapshot_id: int) -> SnapshotExt
                 info.otherUploadedSize,
                 info.otherFileSize,
             ) = cursor.fetchone()
+            info.otherUploadedSize = info.otherUploadedSize or 0
+            info.otherFileSize = info.otherFileSize or 0
 
     exclusive_objs = 0
     exclusive_size = 0
