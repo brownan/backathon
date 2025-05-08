@@ -112,6 +112,49 @@ class BoundedTaskGroup:
         return task
 
 
+class HelperTaskGroup:
+    """Wrapper for a regular task group, but all tasks are cancelled when
+    the context exits without error.
+
+    Contrast this with the regular asyncio.TaskGroup behavior which waits
+    for all tasks to exit when the context exits without error.
+
+    Useful for launching "helper" tasks while a main task does something, but
+    the helper tasks shouldn't outlive the main task nor should they block
+    the main task from exiting.
+
+    """
+
+    def __init__(self):
+        self._tg = asyncio.TaskGroup()
+        self._tasks = set[asyncio.Task]()
+
+    async def __aenter__(self):
+        await self._tg.__aenter__()
+        return self
+
+    def create_task(
+        self,
+        coro: Coroutine[Any, Any, _T],
+        *,
+        name: str | None = None,
+        context: Context | None = None,
+    ) -> asyncio.Task[_T]:
+        task = self._tg.create_task(coro, name=name, context=context)
+        self._tasks.add(task)
+        task.add_done_callback(lambda _: self._tasks.discard(task))
+        return task
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        # If an exception was raised, let the task group handle the task
+        # cancellation itself.
+        if exc_type is None:
+            for task in self._tasks:
+                if not task.done():
+                    task.cancel()
+        await self._tg.__aexit__(exc_type, exc_val, exc_tb)
+
+
 R = TypeVar("R")
 P = ParamSpec("P")
 

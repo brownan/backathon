@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import abc
 from typing import AsyncIterator
 from typing import Type
 from typing import TypeVar
+from typing import overload
 
 import pydantic
 
@@ -10,6 +13,10 @@ import backathon.asyncutils
 
 class SignalType(pydantic.BaseModel, abc.ABC):
     pass
+
+
+class ConfigChange(SignalType):
+    key: str
 
 
 S = TypeVar("S", bound=SignalType)
@@ -28,7 +35,20 @@ class SignalBus:
                 yield item
         raise AssertionError()
 
-    async def wait(self, signal_type: Type[S]) -> S:
-        async for item in self.listen(signal_type):
-            return item
+    @overload
+    async def wait(self, signal: S) -> S:
+        ...
+
+    @overload
+    async def wait(self, signal: Type[S]) -> S:
+        ...
+
+    async def wait(self, signal: Type[S] | S) -> S:
+        if isinstance(signal, SignalType):
+            async for item in self.listen(type(signal)):
+                if item == signal:
+                    return item
+        else:
+            async for item in self.listen(signal):
+                return item
         raise AssertionError()

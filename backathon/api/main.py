@@ -1,4 +1,3 @@
-import asyncio
 import contextlib
 import logging.config
 import os
@@ -29,8 +28,10 @@ import backathon.garbage
 import backathon.models
 import backathon.repository
 import backathon.scan
+import backathon.schedule
 from backathon import Backathon
 from backathon import Database
+from backathon import asyncutils
 from backathon.api.events import depends_on_config_keys
 from backathon.api.params import DatabaseDependency
 from backathon.api.params import ObjIdParam
@@ -54,19 +55,15 @@ logger = logging.getLogger("backathon.api")
 async def lifespan(app: FastAPI):
     logger.debug("API lifecycle started")
 
-    async with asyncio.TaskGroup() as tg:
+    async with asyncutils.HelperTaskGroup() as tg:
         db_path = os.environ["BACKATHON_DB_PATH"]
         db = Database(db_path)
         repo = Backathon(db)
 
-        config_signal_task = tg.create_task(
-            backathon.api.events.config_signal_to_api_reload(repo)
-        )
+        tg.create_task(backathon.api.events.config_signal_to_api_reload(repo))
+        tg.create_task(backathon.schedule.scheduler(repo))
 
-        try:
-            yield {"db": db, "repo": repo}
-        finally:
-            config_signal_task.cancel()
+        yield {"db": db, "repo": repo}
 
 
 api = FastAPI()

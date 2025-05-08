@@ -17,7 +17,7 @@ from starlette.routing import Route
 from backathon import Backathon
 from backathon.api.params import RepoDependency
 from backathon.job import JobStatusChange
-from backathon.settings import ConfigChange
+from backathon.signals import ConfigChange
 from backathon.signals import SignalType
 
 logger = logging.getLogger("backathon.api.events")

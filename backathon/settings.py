@@ -10,17 +10,12 @@ import pydantic
 
 from backathon.retention import RetentionSettings
 from backathon.schedule import ScheduleSettings
-from backathon.signals import SignalType
+from backathon.signals import ConfigChange
 from backathon.types import PathType
 
 if TYPE_CHECKING:
     from backathon import Backathon
     from backathon import Database
-
-
-class ConfigChange(SignalType):
-    key: str
-
 
 T = TypeVar("T")
 """Wraps a pydantic-compatible type in json for serialization
