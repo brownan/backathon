@@ -52,6 +52,8 @@ class Backathon:
         self.signals = SignalBus()
         self.jobs.set_signal_bus(self.signals)
 
+        self.db.signal_bus = self.signals
+
     @classmethod
     def initialize(
         cls,
@@ -98,7 +100,7 @@ class Backathon:
             raise
 
         repo = cls(db)
-        db.config.save(repo, all=True)
+        db.signal_bus = repo.signals
         return repo
 
     @classmethod

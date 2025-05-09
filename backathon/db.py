@@ -16,12 +16,13 @@ from typing import Type
 from typing import TypeVar
 from typing import cast
 
-import pydantic
 from pydantic import BaseModel
 
 from backathon import models
 from backathon.exceptions import FSEntryNotFound
 from backathon.settings import Settings
+from backathon.signals import ConfigChange
+from backathon.signals import SignalBus
 
 logger = logging.getLogger("backathon.db")
 sql_logger = logging.getLogger("backathon.db.sql")
@@ -116,9 +117,13 @@ class Database:
         self,
         path: str | PathLike[str],
         *,
+        signal_bus: SignalBus | None = None,
         create: bool = False,
         initial_settings: Settings | None = None,
     ):
+        self.signal_bus = signal_bus
+        self._savepoint_num: int = 1
+
         self.path = pathlib.Path(path)
         if not create and not self.path.is_file():
             raise FileNotFoundError(f"Config database not found: {self.path}")
@@ -127,19 +132,37 @@ class Database:
         self.conn = self._open_db()
         self._setup_db()
         try:
-            self.config = Settings.load(self, initial_settings=initial_settings)
+            if create:
+                assert initial_settings
+                self.config = initial_settings
+                self._config_set("settings", initial_settings.model_dump_json())
+            else:
+                existing_config = self._config_get("settings")
+                if existing_config is None:
+                    raise ValueError("No settings found")
+                self.config = Settings.model_validate_json(existing_config)
         except Exception:
             if create:
                 self.path.unlink()
             raise
-        self._savepoint_num: int = 1
+
+    def save_config(self):
+        serialized = self.config.model_dump_json()
+        self._config_set("settings", serialized)
+        if self.signal_bus is not None:
+            for attr in self.config.changed_attrs:
+                self.signal_bus.send(ConfigChange(key=attr))
+        self.config.clear_changed_attrs()
 
     def clone(self) -> Database:
         """Returns a new database instance with a separate, isolated
         connection
 
         """
-        return Database(self.path, create=False)
+        # Since this is typically used to open a new connection in a separate
+        # thread, create this with no signal bus, since the signal bus
+        # isn't thread safe.
+        return Database(self.path, signal_bus=None, create=False)
 
     def _open_db(self) -> sqlite3.Connection:
         logger.debug("Opening database %s", self.path)
@@ -168,14 +191,7 @@ class Database:
             """
         )
 
-        adapter = pydantic.TypeAdapter(Settings.model_fields["migration"].annotation)
-        migration_value = self._config_get("migration")
-        if migration_value is None:
-            current_migration_level = None
-        else:
-            current_migration_level = cast(
-                int | None, adapter.validate_json(migration_value)
-            )
+        current_migration_level: int | None = self._config_get("migration")
 
         migration_iter = enumerate(MIGRATIONS)
         if current_migration_level is None:
@@ -191,7 +207,7 @@ class Database:
                 for statement in migration:
                     logger.debug("Executing %s", statement.strip())
                     cursor.execute(statement)
-                self._config_set("migration", adapter.dump_json(migration_num))
+                self._config_set("migration", migration_num)
 
         cursor.close()
 

@@ -643,14 +643,16 @@ export interface components {
          * Settings
          * @description Backathon settings
          *
-         *     This class is used a bit differently than a normal pydantic model.
-         *     Instead of serializing the entire instance using .model_dump_json(),
-         *     we dump each individual field to json with .model_dump(mode='json')
-         *     and then store each field in a separate row in the sqlite settings table.
+         *     This class is used a bit differently than a normal pydantic model when
+         *     saving and loading to/from the database.
          *
-         *     This lets fields like int and boolean to be stored natively in sqlite,
-         *     while more complex types like list, set, and json objects will use the
-         *     JsonWrap type above to serialize to string for storage in sqlite as text.
+         *     Instead of serializing the entire instance using .model_dump_json(),
+         *     we dump each individual field to json with a type adapter for the field's
+         *     type, and then store each field in a separate row in the sqlite settings
+         *     table.
+         *
+         *     This lets us edit individual fields in the database instead of reading/
+         *     writing one giant json blob.
          */
         Settings: {
             /**
@@ -711,11 +713,6 @@ export interface components {
             schedule_settings?: components["schemas"]["ScheduleSettings"];
             /** Retention Settings */
             retention_settings?: components["schemas"]["RetentionSettings"];
-            /**
-             * Migration
-             * @description Internal field to track database migrations. Don't change unless you know what you're doing
-             */
-            migration?: number | null;
         };
         /**
          * Snapshot
