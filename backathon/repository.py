@@ -97,7 +97,9 @@ class Backathon:
             storage.delete_object(marker_file_path)
             raise
 
-        return cls(db)
+        repo = cls(db)
+        db.config.save(repo)
+        return repo
 
     @classmethod
     async def recover(

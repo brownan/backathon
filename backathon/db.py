@@ -131,9 +131,6 @@ class Database:
             if create:
                 self.path.unlink()
             raise
-        else:
-            if create:
-                self.config.save(self)
         self._savepoint_num: int = 1
 
     def clone(self) -> Database:
