@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING
 from typing import Annotated
 from typing import Self
-from typing import TypeVar
 
 import pydantic
 
@@ -20,33 +18,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("backathon.settings")
 
-T = TypeVar("T")
-"""Wraps a pydantic-compatible type in json for serialization
-
-This is used below to serialize list, set, and json fields to a json string
-for storage in an sqlite field. SQLite can store types like int and boolean
-directly, but more complex types need to be serialized explicitly.
-"""
-JsonWrap = Annotated[
-    T,
-    pydantic.WrapSerializer(
-        lambda x, h: json.dumps(h(x)), return_type=str, when_used="json"
-    ),
-    pydantic.BeforeValidator(lambda x: json.loads(x)),
-]
-
 
 class Settings(pydantic.BaseModel):
     """Backathon settings
 
-    This class is used a bit differently than a normal pydantic model.
-    Instead of serializing the entire instance using .model_dump_json(),
-    we dump each individual field to json with .model_dump(mode='json')
-    and then store each field in a separate row in the sqlite settings table.
+    This class is used a bit differently than a normal pydantic model when
+    saving and loading to/from the database.
 
-    This lets fields like int and boolean to be stored natively in sqlite,
-    while more complex types like list, set, and json objects will use the
-    JsonWrap type above to serialize to string for storage in sqlite as text.
+    Instead of serializing the entire instance using .model_dump_json(),
+    we dump each individual field to json with a type adapter for the field's
+    type, and then store each field in a separate row in the sqlite settings
+    table.
+
+    This lets us edit individual fields in the database instead of reading/
+    writing one giant json blob.
     """
 
     encrypter: Annotated[
@@ -55,7 +40,7 @@ class Settings(pydantic.BaseModel):
     ]
 
     encrypter_config: Annotated[
-        JsonWrap[pydantic.JsonValue],
+        pydantic.JsonValue,
         pydantic.Field(
             title="Encrypter Config", description="Encrypter configuration, in JSON"
         ),
@@ -69,7 +54,7 @@ class Settings(pydantic.BaseModel):
         ),
     ]
     storage_config: Annotated[
-        JsonWrap[pydantic.JsonValue],
+        pydantic.JsonValue,
         pydantic.Field(
             title="Storage Config", description="Storage configuration, in JSON"
         ),
@@ -83,7 +68,7 @@ class Settings(pydantic.BaseModel):
         ),
     ] = True
 
-    excludes: JsonWrap[set[PathType]] = pydantic.Field(
+    excludes: set[PathType] = pydantic.Field(
         default_factory=set,
         title="Excludes",
         description="Local directories to exclude from backup",
@@ -136,14 +121,14 @@ class Settings(pydantic.BaseModel):
     ] = None
 
     schedule_settings: Annotated[
-        JsonWrap[ScheduleSettings],
+        ScheduleSettings,
         pydantic.Field(
             title="Schedule Settings", default_factory=lambda: ScheduleSettings()
         ),
     ]
 
     retention_settings: Annotated[
-        JsonWrap[RetentionSettings],
+        RetentionSettings,
         pydantic.Field(
             title="Retention Settings",
             default_factory=lambda: RetentionSettings(enabled=False, buckets=[]),
@@ -162,25 +147,33 @@ class Settings(pydantic.BaseModel):
     def load(cls, db: Database, initial_settings: Self | None = None) -> Self:
         with db.cursor() as cursor:
             cursor.execute("SELECT key, value FROM config")
-            db_config = {key: value for key, value in cursor.fetchall()}
+            db_config = {
+                key: pydantic.TypeAdapter(cls.model_fields[key].annotation).validate_json(
+                    value
+                )
+                for key, value in cursor.fetchall()
+                if key in cls.model_fields
+            }
 
-            config_dict = (
-                initial_settings.model_dump(mode="json") if initial_settings else {}
-            )
+            config_dict = initial_settings.model_dump() if initial_settings else {}
 
             config_dict.update(db_config)
 
             return cls.model_validate(config_dict)
 
-    def save(self, repo: "Backathon"):
+    def save(self, repo: "Backathon", all: bool = False):
         db = repo.db
         changed_attrs = getattr(self, "_changed_attrs", set())
-        logger.debug("Saving change attributes: %s", changed_attrs)
+        if not all:
+            logger.debug("Saving change attributes: %s", changed_attrs)
         with db.atomic():
-            for key, value in self.model_dump(mode="json").items():
-                if key in changed_attrs:
+            for key, value in self:
+                if all or key in changed_attrs:
+                    adapter = pydantic.TypeAdapter(self.model_fields[key].annotation)
+                    ser_value = adapter.dump_json(value).decode("utf-8")
+
                     # noinspection PyProtectedMember
-                    db._config_set(key, value)
+                    db._config_set(key, ser_value)
         for key in changed_attrs:
             repo.signals.send(ConfigChange(key=key))
         changed_attrs.clear()

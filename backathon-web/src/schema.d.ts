@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/garbage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Garbage Info */
+        get: operations["garbage_info_garbage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/repository/info": {
         parameters: {
             query?: never;
@@ -33,6 +50,59 @@ export interface paths {
          * @description Gets information about the repository
          */
         get: operations["repository_info_repository_info_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/retention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Retention Settings */
+        get: operations["get_retention_settings_retention_get"];
+        put?: never;
+        /** Set Retention Settings */
+        post: operations["set_retention_settings_retention_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Schedule */
+        get: operations["get_schedule_schedule_get"];
+        put?: never;
+        /** Set Schedule */
+        post: operations["set_schedule_schedule_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Settings */
+        get: operations["get_settings_settings_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -87,59 +157,6 @@ export interface paths {
         get: operations["get_snapshot_exclusive_info_snapshots__id__extended_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/garbage": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Garbage Info */
-        get: operations["garbage_info_garbage_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/schedule": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Schedule */
-        get: operations["get_schedule_schedule_get"];
-        put?: never;
-        /** Set Schedule */
-        post: operations["set_schedule_schedule_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/retention": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Retention Settings */
-        get: operations["get_retention_settings_retention_get"];
-        put?: never;
-        /** Set Retention Settings */
-        post: operations["set_retention_settings_retention_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -515,6 +532,7 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        JsonValue: unknown;
         /**
          * Object
          * @description Represents a row in the object table
@@ -620,6 +638,84 @@ export interface components {
             mode: components["schemas"]["ScheduleModes"];
             /** Nextruntime */
             nextRunTime?: string | null;
+        };
+        /**
+         * Settings
+         * @description Backathon settings
+         *
+         *     This class is used a bit differently than a normal pydantic model.
+         *     Instead of serializing the entire instance using .model_dump_json(),
+         *     we dump each individual field to json with .model_dump(mode='json')
+         *     and then store each field in a separate row in the sqlite settings table.
+         *
+         *     This lets fields like int and boolean to be stored natively in sqlite,
+         *     while more complex types like list, set, and json objects will use the
+         *     JsonWrap type above to serialize to string for storage in sqlite as text.
+         */
+        Settings: {
+            /**
+             * Encryption Backend
+             * @description The encryption backend
+             */
+            encrypter: string;
+            /**
+             * Encrypter Config
+             * @description Encrypter configuration, in JSON
+             */
+            encrypter_config: components["schemas"]["JsonValue"];
+            /**
+             * Storage Backend
+             * @description Storage backend to use for backed-up data
+             */
+            storage: string;
+            /**
+             * Storage Config
+             * @description Storage configuration, in JSON
+             */
+            storage_config: components["schemas"]["JsonValue"];
+            /**
+             * Enable Compression
+             * @description Whether to enable compression of backed-up data
+             * @default true
+             */
+            enable_compression: boolean;
+            /**
+             * Excludes
+             * @description Local directories to exclude from backup
+             */
+            excludes?: string[];
+            /**
+             * Inline Threshold
+             * @description Maximum size for files to automatically inline into INODE objects instead of uploading as separate BLOBS
+             * @default 1048576
+             */
+            inline_threshold: number;
+            /**
+             * Chunk Threshold
+             * @description Maximum size for files to be uploaded into a single BLOB object. Files above this size will be split into multiple BLOBS
+             * @default 31457280
+             */
+            chunk_threshold: number;
+            /**
+             * Chunk Size
+             * @description Size of file chunks for files larger than the chunk_threshold parameter
+             * @default 65536
+             */
+            chunk_size: number;
+            /**
+             * Max Backup Workers
+             * @description Maximum number of backup workers, for parallelized backups. If not set, defaults to 8 more than the number of CPU cores
+             */
+            max_backup_workers?: number | null;
+            /** Schedule Settings */
+            schedule_settings?: components["schemas"]["ScheduleSettings"];
+            /** Retention Settings */
+            retention_settings?: components["schemas"]["RetentionSettings"];
+            /**
+             * Migration
+             * @description Internal field to track database migrations. Don't change unless you know what you're doing
+             */
+            migration?: number | null;
         };
         /**
          * Snapshot
@@ -734,6 +830,26 @@ export interface operations {
             };
         };
     };
+    garbage_info_garbage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GarbageCollectionInfo"];
+                };
+            };
+        };
+    };
     repository_info_repository_info_get: {
         parameters: {
             query?: never;
@@ -750,6 +866,132 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RepoInfo"];
+                };
+            };
+        };
+    };
+    get_retention_settings_retention_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionSettings"];
+                };
+            };
+        };
+    };
+    set_retention_settings_retention_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetentionSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_schedule_schedule_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleSettings"];
+                };
+            };
+        };
+    };
+    set_schedule_schedule_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_settings_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Settings"];
                 };
             };
         };
@@ -854,132 +1096,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SnapshotExtendedInfo"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    garbage_info_garbage_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GarbageCollectionInfo"];
-                };
-            };
-        };
-    };
-    get_schedule_schedule_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScheduleSettings"];
-                };
-            };
-        };
-    };
-    set_schedule_schedule_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ScheduleSettings"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_retention_settings_retention_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RetentionSettings"];
-                };
-            };
-        };
-    };
-    set_retention_settings_retention_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RetentionSettings"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

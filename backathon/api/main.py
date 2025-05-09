@@ -21,6 +21,7 @@ import backathon.api.garbage
 import backathon.api.repoinfo
 import backathon.api.retention
 import backathon.api.schedule
+import backathon.api.settings
 import backathon.api.snapshots
 import backathon.backup
 import backathon.encryption
@@ -68,11 +69,12 @@ async def lifespan(app: FastAPI):
 
 api = FastAPI()
 api.include_router(backathon.api.events.api)
-api.include_router(backathon.api.repoinfo.api)
-api.include_router(backathon.api.snapshots.api)
 api.include_router(backathon.api.garbage.api)
-api.include_router(backathon.api.schedule.api)
+api.include_router(backathon.api.repoinfo.api)
 api.include_router(backathon.api.retention.api)
+api.include_router(backathon.api.schedule.api)
+api.include_router(backathon.api.settings.api)
+api.include_router(backathon.api.snapshots.api)
 
 dev_app = FastAPI(
     lifespan=lifespan,

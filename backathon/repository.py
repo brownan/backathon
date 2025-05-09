@@ -98,7 +98,7 @@ class Backathon:
             raise
 
         repo = cls(db)
-        db.config.save(repo)
+        db.config.save(repo, all=True)
         return repo
 
     @classmethod

@@ -97,7 +97,7 @@ async def scheduler(repo: "Backathon"):
 
 async def _schedule_process(repo: "Backathon"):
     schedule = repo.db.config.schedule_settings
-    if schedule.nextRunTime is not None:
+    if schedule.nextRunTime is not None and schedule.enable:
         logger.debug("Scheduled next run time is %s", schedule.nextRunTime)
         now = datetime.datetime.now(tz=datetime.timezone.utc)
         time_remaining = (schedule.nextRunTime - now).total_seconds()
@@ -118,6 +118,8 @@ async def _schedule_process(repo: "Backathon"):
         logger.debug("Backup finished. Next run time is %s", schedule.nextRunTime)
         repo.db.config.schedule_settings = schedule
         repo.db.config.save(repo)
+    else:
+        logger.info("Schedule not enabled")
 
     # Parent task will cancel this one and re-launch if/when the schedule
     # changes

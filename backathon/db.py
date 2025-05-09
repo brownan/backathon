@@ -16,6 +16,7 @@ from typing import Type
 from typing import TypeVar
 from typing import cast
 
+import pydantic
 from pydantic import BaseModel
 
 from backathon import models
@@ -167,7 +168,15 @@ class Database:
             """
         )
 
-        current_migration_level: int | None = self._config_get("migration")
+        adapter = pydantic.TypeAdapter(Settings.model_fields["migration"].annotation)
+        migration_value = self._config_get("migration")
+        if migration_value is None:
+            current_migration_level = None
+        else:
+            current_migration_level = cast(
+                int | None, adapter.validate_json(migration_value)
+            )
+
         migration_iter = enumerate(MIGRATIONS)
         if current_migration_level is None:
             migrations_to_run = migration_iter
@@ -182,7 +191,7 @@ class Database:
                 for statement in migration:
                     logger.debug("Executing %s", statement.strip())
                     cursor.execute(statement)
-                self._config_set("migration", migration_num)
+                self._config_set("migration", adapter.dump_json(migration_num))
 
         cursor.close()
 
