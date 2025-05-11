@@ -6,14 +6,16 @@ import { useEventBus } from "@vueuse/core";
 
 type ScanProgress = components["schemas"]["ScanProgress"];
 type BackupProgress = components["schemas"]["BackupProgress"];
+type Settings = components["schemas"]["Settings"];
 
 interface JobStatusEvent {
     scan: ScanProgress | null;
     backup: BackupProgress | null;
 }
 
-interface ConfigChangeEvent {
-    url: string;
+export interface ConfigChangeEvent<K extends keyof Settings> {
+    key: K;
+    value: Settings[K];
 }
 
 const eventNames = ["statusUpdate", "configChange"];
@@ -61,11 +63,11 @@ function openEventSource() {
     }
 }
 
-export function onConfigChange(callback: (e: ConfigChangeEvent) => void) {
+export function onConfigChange(callback: (e: ConfigChangeEvent<keyof Settings>) => void) {
     openEventSource();
     const off = bus.on(({ type, msg }) => {
         if (type === "configChange") {
-            callback(JSON.parse(msg.data) as ConfigChangeEvent);
+            callback(JSON.parse(msg.data) as ConfigChangeEvent<keyof Settings>);
         }
     });
     console.debug("Config change listener added");

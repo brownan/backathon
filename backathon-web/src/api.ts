@@ -10,7 +10,6 @@ import {
     shallowReadonly,
 } from "vue";
 import type { PathsWithMethod, MediaType } from "openapi-typescript-helpers";
-import { onConfigChange } from "@/utils/events.ts";
 
 export const client = createClient<paths, "application/json">({ baseUrl: "/api" });
 
@@ -49,14 +48,34 @@ export type QueryState<
     Options,
     Media extends MediaType,
 > =
+    // Response success (includes error responses)
     | (FetchResponse<T, Options, Media> & {
           isReady: true;
           isFetching: false;
           retry: () => void;
       })
     | {
+          // Response in progress
           isReady: false;
-          isFetching: boolean;
+          isFetching: true;
+          data: undefined;
+          error: undefined;
+          response: undefined;
+          retry: () => void;
+      }
+    | {
+          // request failed
+          isReady: false;
+          isFetching: false;
+          data: undefined;
+          error: string;
+          response: undefined;
+          retry: () => void;
+      }
+    | {
+          // Response not requested
+          isReady: false;
+          isFetching: false;
           data: undefined;
           error: undefined;
           response: undefined;
@@ -123,6 +142,13 @@ export function useQuery<
                     });
                 })
                 .catch((err) => {
+                    Object.assign(fetchResult, {
+                        isReady: false,
+                        isFetching: false,
+                        data: undefined,
+                        error: err,
+                        response: undefined,
+                    });
                     if (err.name === "AbortError") {
                         console.debug("Request aborted");
                     } else {
@@ -130,6 +156,7 @@ export function useQuery<
                     }
                 })
                 .finally(() => {
+                    fetchResult.isFetching = false;
                     if (controller === myController) {
                         controller = null;
                     }
@@ -145,14 +172,6 @@ export function useQuery<
                 controller = null;
             }
         });
-    });
-
-    onConfigChange((event) => {
-        const req = toValue(getter);
-        if (req && event.url === req.url) {
-            console.debug(`Config change for ${event.url}. Retrying request`);
-            doRequest();
-        }
     });
 
     return shallowReadonly(fetchResult);

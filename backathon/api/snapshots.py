@@ -13,7 +13,6 @@ from fastapi import HTTPException
 
 import backathon.garbage
 from backathon import Database
-from backathon.api.events import APIReloadSignal
 from backathon.api.params import RepoDependency
 from backathon.asyncutils import non_reentrant
 from backathon.models import ObjIDType
@@ -192,4 +191,3 @@ async def get_snapshot_exclusive_info(
 async def delete_snapshot(repo: RepoDependency, snapshot: SnapshotParam):
     with repo.db.cursor() as cursor:
         cursor.execute("DELETE FROM snapshots WHERE id=?", (snapshot.id,))
-    repo.signals.send(APIReloadSignal(name="get_snapshots"))

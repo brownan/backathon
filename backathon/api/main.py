@@ -33,7 +33,6 @@ import backathon.schedule
 from backathon import Backathon
 from backathon import Database
 from backathon import asyncutils
-from backathon.api.events import depends_on_config_keys
 from backathon.api.params import DatabaseDependency
 from backathon.api.params import ObjIdParam
 from backathon.api.params import RepoDependency
@@ -61,7 +60,6 @@ async def lifespan(app: FastAPI):
         db = Database(db_path)
         repo = Backathon(db)
 
-        tg.create_task(backathon.api.events.config_signal_to_api_reload(repo))
         tg.create_task(backathon.schedule.scheduler(repo))
 
         yield {"db": db, "repo": repo}
@@ -130,14 +128,12 @@ async def list_roots(repo: RepoDependency) -> list[PathInfo]:
 @api.put("/roots/{key}")
 async def add_root(repo: RepoDependency, key: PathType) -> FSEntryType:
     entry = repo.add_root(key)
-    repo.signals.send(backathon.api.events.APIReloadSignal(name="list_roots"))
     return FSEntryType.from_fsentry(entry)
 
 
 @api.delete("/roots/{key}")
 async def delete_root(repo: RepoDependency, key: PathType):
     repo.del_root(key)
-    repo.signals.send(backathon.api.events.APIReloadSignal(name="list_roots"))
 
 
 @api.get("/browse/")
@@ -181,7 +177,6 @@ async def browse(repo: RepoDependency, key: PathType | None = None) -> Browse:
 
 
 @api.get("/excludes/")
-@depends_on_config_keys("excludes")
 async def get_excludes(
     repo: RepoDependency,
 ) -> list[PathInfo]:
@@ -194,14 +189,14 @@ async def get_excludes(
 
 @api.put("/excludes/{key}")
 async def put_exclude(repo: RepoDependency, key: PathType):
-    repo.db.config.excludes.add(key)
-    repo.db.config.save(repo)
+    repo.db.config.excludes = repo.db.config.excludes.union([key])
+    repo.db.save_config()
 
 
 @api.delete("/excludes/{key}")
 async def delete_exclude(repo: RepoDependency, key: PathType):
-    repo.db.config.excludes.remove(key)
-    repo.db.config.save(repo)
+    repo.db.config.excludes = repo.db.config.excludes.difference([key])
+    repo.db.save_config()
 
 
 @api.get("/objects/{objid}")
@@ -310,14 +305,9 @@ async def scan(repo: RepoDependency) -> backathon.scan.ScanProgress | None:
 async def scan_start(repo: RepoDependency):
     logger.debug("Starting scan")
     try:
-        task = repo.scan_async()
+        repo.scan_async()
     except Exception as e:
         return {"status": "Failed to start scan", "error": str(e)}
-    task.add_done_callback(
-        lambda _: repo.signals.send(
-            backathon.api.events.APIReloadSignal(name="scan_info")
-        )
-    )
     return {"status": "Scan Started"}
 
 
@@ -358,17 +348,7 @@ async def backup(repo: RepoDependency) -> backathon.backup.BackupProgress | None
 async def backup_start(repo: RepoDependency):
     logger.debug("Starting backup")
     try:
-        task = repo.backup_async()
+        repo.backup_async()
     except Exception as e:
         return {"status": "Failed to start backup", "error": str(e)}
-    task.add_done_callback(
-        lambda _: repo.signals.send(
-            backathon.api.events.APIReloadSignal(name="repository_info")
-        )
-    )
-    task.add_done_callback(
-        lambda _: repo.signals.send(
-            backathon.api.events.APIReloadSignal(name="scan_info")
-        )
-    )
     return {"status": "Backup Started"}
