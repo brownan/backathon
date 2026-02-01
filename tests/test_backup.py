@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import json
@@ -371,9 +372,9 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         """Tests backing up two files in two directories"""
         self.create_file("dir/file1", "file contents")
         self.create_file("dir/file2", "file contents 2")
-        self.back.scan()
+        asyncio.run(self.back.scan_async())
         self.assert_fsentry_count(self.back, 4)
-        self.back.backup()
+        asyncio.run(self.back.backup_async())
         entries = list(self.back.db.query(models.FSEntry, "SELECT * FROM fsentry"))
         self.assertTrue(all(entry.objid is not None for entry in entries))
         self.assert_object_count(self.back, 4)

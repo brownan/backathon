@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import hashlib
 import io
 import json
@@ -158,15 +159,12 @@ class Backathon:
     def close(self):
         self.db.close()
 
-    def scan_async(
+    async def scan_async(
         self,
         skip_existing: bool = False,
         rescan_dirs: bool = False,
-    ) -> asyncio.Task:
-        """Launches a scan in a separate thread. Returns a Future
-        which completes when the scan is finished.
-
-        """
+    ) -> None:
+        """Launches a scan in a separate thread. Returns when the scan is finished"""
         if self.jobs.any_is_running():
             raise RuntimeError("Another job is running")
 
@@ -190,7 +188,7 @@ class Backathon:
 
         task = asyncio.ensure_future(asyncio.to_thread(scan_thread))
         self.jobs.scan.set_task(task)
-        return task
+        await task
 
     def add_root(self, root_path: pathlib.Path) -> FSEntry:
         """Adds a new root path to the backup set
@@ -248,13 +246,10 @@ class Backathon:
 
         return make_obj_getter(encrypter, self.get_storage())
 
-    def backup_async(
+    async def backup_async(
         self,
-    ) -> asyncio.Task:
-        """Launches a backup task in the current event loop and returns the
-        Task object
-
-        """
+    ) -> None:
+        """Launches a backup task"""
         if self.jobs.any_is_running():
             raise RuntimeError("Another job is running")
 
@@ -271,7 +266,7 @@ class Backathon:
         task = asyncio.create_task(backup.backup())
         self.jobs.backup.set_task(task)
 
-        return task
+        await task
 
     def get_encrypter(self) -> EncrypterBase:
         encrypter_cls = self.db.config.encrypter
@@ -375,9 +370,12 @@ def make_obj_putter(
     return put_object
 
 
+SnapshotPutter = Callable[[str, ObjIDType, datetime.datetime], None]
+
+
 def make_snapshot_putter(
     db: Database, encrypter: EncrypterBase, storage: StorageBase
-) -> Callable[[models.Snapshot], None]:
+) -> SnapshotPutter:
     """Returns a snapshot putter function
 
     The snapshot putter is called to upload a final snapshot definition to the remote
@@ -389,20 +387,28 @@ def make_snapshot_putter(
     * Updating the local database with the snapshot metadata
     """
 
-    def put_snapshot(snapshot: models.Snapshot):
+    def put_snapshot(path: str, root: ObjIDType, timestamp: datetime.datetime):
         snapshot_path = pathlib.Path("snapshots", secrets.token_urlsafe())
-        buf = io.BytesIO()
-        buf.write(snapshot.model_dump_json(indent=4).encode("utf-8"))
-
-        payload = encrypter.encrypt(buf.getbuffer())
-        storage.put_object(snapshot_path, payload)
 
         # Update database
         with db.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO snapshots (path, root, timestamp) VALUES (?,?,?)",
-                (snapshot.path, snapshot.root, snapshot.timestamp),
+                "INSERT INTO snapshots (path, root, timestamp) VALUES (?,?,?) RETURNING id",
+                (path, root, timestamp),
             )
+            snapshot_id = cursor.fetchone()[0]
+            snapshot = models.Snapshot(
+                id=snapshot_id,
+                path=path,
+                root=root,
+                timestamp=timestamp,
+            )
+
+            buf = io.BytesIO()
+            buf.write(snapshot.model_dump_json(indent=4).encode("utf-8"))
+
+            payload = encrypter.encrypt(buf.getbuffer())
+            storage.put_object(snapshot_path, payload)
 
     return put_snapshot
 

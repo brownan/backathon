@@ -22,12 +22,12 @@ useQuery takes a single parameter, which is one of:
 * A reference to a QueryRequest or undefined
 * A getter function that returns a QueryRequest or undefined
 
-and returns a responsive QueryState2 object. QueryState2 is the openapi-fetch's
+and returns a responsive QueryState object. QueryState is the openapi-fetch's
 FetchResponse object, but with some additional properties added to track the state of
 the request.
 
 If the QueryRequest parameter ref or getter returns undefined, no
-request is made and the QueryState2 object's isReady and isFetching are false. This
+request is made and the QueryState object's isReady and isFetching are false. This
 is useful when execution of this query should be conditional, for example if it's waiting
 on the result of some other query to finish.
  */

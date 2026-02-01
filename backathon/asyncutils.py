@@ -62,13 +62,13 @@ class BoundedTaskGroup:
     reference:
 
     * If any task in the group raises an exception (other than CancelledError), then
-      all other tasks are immediately cancelled, the task group context exits, tasks
+      all other tasks are immediately canceled, the task group context exits, tasks
       are waited for, and all task exceptions are re-raised as an ExceptionGroup.
       - Exception: SystemExit and KeyboardInterrupt are re-raised as-is instead of wrapped
         in an ExceptionGroup
 
     * If the task group context itself raises an unhandled exception, all remaining tasks
-      are cancelled and waited for. The original exception, along with any exceptions from
+      are canceled and waited for. The original exception, along with any exceptions from
       tasks, are all wrapped in an ExceptionGroup and re-raised.
       - Same exception as above applies
 
@@ -76,9 +76,9 @@ class BoundedTaskGroup:
       the CancelledError when it awaits the sub-task, at which point the next bullet point
       will apply.
 
-    * If the task group's parent task is canceled, then all remaining tasks are canceled
-      and waited for. If any task raises an exception, those are re-raised as an
-      ExceptionGroup. Otherwise, the CancelledError is propagated.
+    * If a CancelledError exception propagates out of the task group context, then all
+      remaining tasks are canceled and waited for. If any task raises an exception, those
+      are re-raised as an ExceptionGroup. Otherwise, the CancelledError is propagated.
     """
 
     def __init__(self, max_tasks: int | None = None):
@@ -113,7 +113,7 @@ class BoundedTaskGroup:
 
 
 class HelperTaskGroup:
-    """Wrapper for a regular task group, but all tasks are cancelled when
+    """Wrapper for a regular task group, but all tasks are canceled when
     the context exits without error.
 
     Contrast this with the regular asyncio.TaskGroup behavior which waits

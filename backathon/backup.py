@@ -13,6 +13,7 @@ from logging import getLogger
 from operator import attrgetter
 from operator import itemgetter
 from typing import IO
+from typing import TYPE_CHECKING
 from typing import Awaitable
 from typing import Callable
 from typing import Coroutine
@@ -34,6 +35,9 @@ from backathon.models import ObjectStats
 from backathon.models import ObjectType
 from backathon.models import ObjIDType
 from backathon.proftools import perf_block
+
+if TYPE_CHECKING:
+    from backathon.repository import SnapshotPutter
 
 logger = getLogger("backathon.backup")
 
@@ -107,7 +111,7 @@ class Backup:
         self,
         db: Database,
         put_object: Callable[[ObjectRequest], Awaitable[models.Object]],
-        put_snapshot: Callable[[models.Snapshot], None],
+        put_snapshot: "SnapshotPutter",
         progress: None | Callable[[BackupProgress], None] = None,
     ):
         self.db = db
@@ -206,11 +210,7 @@ class Backup:
                     entry.objid.hex(),
                     entry.printable_path,
                 )
-                self.put_snapshot(
-                    models.Snapshot.model_construct(
-                        path=entry.printable_path, root=entry.objid, timestamp=now
-                    )
-                )
+                self.put_snapshot(entry.printable_path, entry.objid, now)
             cursor.execute("PRAGMA optimize")
         with self.db.cursor() as cursor:
             cursor.execute("PRAGMA wal_checkpoint=PASSIVE")
