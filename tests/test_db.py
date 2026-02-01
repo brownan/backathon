@@ -2,19 +2,16 @@
 
 import sqlite3
 
-from backathon.db import Database
 from tests.base import BackathonTest
 
 
 class TestDatabase(BackathonTest):
     """Tests related to the Database class"""
 
-    def _make_db(self) -> Database:
-        return Database(self.db_path, create=True)
-
     def test_fkey_constraints(self):
         """Tests that foreign key constraints are enforced, but deferred"""
-        db = self._make_db()
+        repo = self.init_basic_repo()
+        db = repo.db
         with db.cursor() as cursor:
             cursor.execute("BEGIN")
             cursor.execute("INSERT INTO objects (objid, type) VALUES ('A', 'a')")

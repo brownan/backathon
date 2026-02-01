@@ -23,8 +23,8 @@ class TestGarbage(BackathonTest):
         self.db = self.back.db
 
     def find_garbage(self) -> Iterator[models.Object]:
-        bloom = backathon.garbage._build_filter(self.db)
-        return backathon.garbage._iter_garbage(self.db, bloom)
+        bloom = backathon.garbage.BloomFilter.build_filter(self.db)
+        return bloom.iter_unreachable(self.db)
 
     def _insert_objects(self, *objs: tuple[str, Iterable[str]]):
         with self.db.atomic():
