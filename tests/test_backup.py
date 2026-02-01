@@ -337,7 +337,8 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
 
     def disable_inlining(self):
         """Disables inlining for the test"""
-        self.back.db.config_set("inline-threshold", 0)
+        self.back.db.config.inline_threshold = 0
+        self.back.db.save_config()
 
     def test_objects_committed(self):
         """Check that objects saved to the database are written to the filesystem repo
@@ -345,8 +346,8 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
 
         """
         self.create_file("dir/file1", "file contents")
-        self.back.scan()
-        self.back.backup()
+        asyncio.run(self.back.scan_async())
+        asyncio.run(self.back.backup_async())
 
         all_objs = list(
             self.back.db.query(
@@ -398,8 +399,8 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         """Tests backing up files with inlining disabled"""
         self.disable_inlining()
         self.create_file("file1", "file contents")
-        self.back.scan()
-        self.back.backup()
+        asyncio.run(self.back.scan_async())
+        asyncio.run(self.back.backup_async())
         self.assert_object_count(self.back, 3)
         self.assert_backupsets(
             {self.backupdir: ExpectedDir(file1=ExpectedFile("file contents"))}
@@ -412,8 +413,8 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         self.disable_inlining()
         self.create_file("file1", "file contents")
         self.create_file("file2", "file contents")
-        self.back.scan()
-        self.back.backup()
+        asyncio.run(self.back.scan_async())
+        asyncio.run(self.back.backup_async())
         self.assert_backupsets(
             {
                 self.backupdir: ExpectedDir(
@@ -436,8 +437,8 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         """Tests that two hardlinked files count as identical for deduplication"""
         file = self.create_file("file1", "file contents")
         os.link(file, file.parent / "file2")
-        self.back.scan()
-        self.back.backup()
+        asyncio.run(self.back.scan_async())
+        asyncio.run(self.back.backup_async())
         self.assert_backupsets(
             {
                 self.backupdir: ExpectedDir(
@@ -460,11 +461,11 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
 
         """
         file = self.create_file("dir/file1", "file contents")
-        self.back.scan()
+        asyncio.run(self.back.scan_async())
         self.assert_fsentry_count(self.back, 3)
 
         file.unlink()
-        self.back.backup()
+        asyncio.run(self.back.backup_async())
 
         self.assert_fsentry_count(self.back, 2)
         self.assert_object_count(self.back, 2)
@@ -479,13 +480,13 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
 
         """
         file = self.create_file("dir/file1", "file contents")
-        self.back.scan()
+        asyncio.run(self.back.scan_async())
         self.assert_fsentry_count(self.back, 3)
         self.assertTrue(stat.S_ISREG(self.back.db.get_fsentry(file).st_mode or 0))
 
         file.unlink()
         file.mkdir()
-        self.back.backup()
+        asyncio.run(self.back.backup_async())
 
         # The fsentry for that path should now be a directory
         self.assertTrue(stat.S_ISDIR(self.back.db.get_fsentry(file).st_mode or 0))
@@ -506,7 +507,7 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         # race condition. So we patch os.lstat to delete the file right after
         # the lstat call.
         file = self.create_file("dir/file1", "file contents")
-        self.back.scan()
+        asyncio.run(self.back.scan_async())
         self.assert_fsentry_count(self.back, 3)
 
         real_lstat = os.lstat
@@ -517,14 +518,14 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
                 file.unlink()
             return stat_result
 
-        self.stack.enter_context(
+        self.enterContext(
             mock.patch(
                 "os.lstat",
                 lstat,
             )
         )
 
-        self.back.backup()
+        asyncio.run(self.back.backup_async())
 
         # Did the file properly get deleted? If not, the patch code above may be
         # broken or something changed in the backup code to not trigger the unlink.
@@ -540,7 +541,7 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         """A permission denied error when reading a file shouldn't cause the
         backup to fail, and other files should still get backed up"""
         self.create_file("dir/file1", "file contents")
-        self.back.scan()
+        asyncio.run(self.back.scan_async())
         self.assert_fsentry_count(self.back, 3)
 
         def raise_permissiondeined(path):
@@ -548,7 +549,7 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
 
         with mock.patch("backathon.backup._open_file", raise_permissiondeined):
             with self.assertLogs("backathon.backup", level=logging.WARNING) as cm:
-                self.back.backup()
+                asyncio.run(self.back.backup_async())
 
         self.assertIn("Error when reading: Permission Denied", cm.output[0])
 
@@ -560,8 +561,8 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         """Tests that a file with invalid utf-8 in the name can be backed up"""
         name = os.fsdecode(b"\xff\xffhello\xff\xff")
         self.create_file(name, "file contents")
-        self.back.scan()
-        self.back.backup()
+        asyncio.run(self.back.scan_async())
+        asyncio.run(self.back.backup_async())
 
         self.assert_backupsets(
             {self.backupdir: ExpectedDir({name: ExpectedFile("file contents")})}
@@ -574,8 +575,8 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         pathobj = self.backuppath("file2")
         pathobj.symlink_to("file1")
 
-        self.back.scan()
-        self.back.backup()
+        asyncio.run(self.back.scan_async())
+        asyncio.run(self.back.backup_async())
 
         self.assert_backupsets(
             {
@@ -598,8 +599,8 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         pathobj = self.backuppath("badsymlink")
         pathobj.symlink_to(target)
 
-        self.back.scan()
-        self.back.backup()
+        asyncio.run(self.back.scan_async())
+        asyncio.run(self.back.backup_async())
 
         self.assert_backupsets(
             {self.backupdir: ExpectedDir({"badsymlink": ExpectedSymlink(target)})}
@@ -608,15 +609,15 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
     def test_second_snapshot_file_update(self):
         """Tests taking a second snapshot of a file"""
         file = self.create_file("file", "contents 1")
-        self.back.scan()
-        self.back.backup()
+        asyncio.run(self.back.scan_async())
+        asyncio.run(self.back.backup_async())
         self.assert_backupsets(
             {self.backupdir: ExpectedDir({"file": ExpectedFile("contents 1")})}
         )
 
         file.write_text("contents 2")
-        self.back.scan()
-        self.back.backup()
+        asyncio.run(self.back.scan_async())
+        asyncio.run(self.back.backup_async())
 
         self.assert_backupsets(
             {self.backupdir: ExpectedDir({"file": ExpectedFile("contents 1")})},
@@ -625,12 +626,13 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
 
     def test_compression(self):
         """Tests that uploaded objects are compressed if compression is enabled"""
-        self.back.db.config_set("enable-compression", True)
+        self.back.db.config.enable_compression = True
+        self.back.db.save_config()
         # Make the file big. below a certain threshold, compression will be skipped
         expected_str = "Hello, world!" * 2048
         file = self.create_file("file1", expected_str)
-        self.back.scan()
-        self.back.backup()
+        asyncio.run(self.back.scan_async())
+        asyncio.run(self.back.backup_async())
         entry = self.back.db.get_fsentry(file)
 
         assert entry.objid is not None
@@ -657,9 +659,10 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
 
     def test_backup_marker(self):
         """Tests that the backathon marker file is saved to the remote repo"""
-        self.back.db.config_set("enable-compression", True)
-        self.back.scan()
-        self.back.backup()
+        self.back.db.config.enable_compression = True
+        self.back.db.save_config()
+        asyncio.run(self.back.scan_async())
+        asyncio.run(self.back.backup_async())
         file = self.repopath("backathon.json")
         self.assertTrue(file.exists())
 
@@ -676,5 +679,5 @@ class TestBackup(AssertObjHelperMixin, BackathonTest):
         )
 
         # No encryption is used here, but the key should exist
-        self.assertEqual(data["encrypter"], "NullEncrypter")
-        self.assertIsNone(data["encrypter-params"])
+        self.assertEqual(data["encrypter"], "backathon.encryption.null.NullEncrypter")
+        self.assertIsNone(data["encrypter_params"])

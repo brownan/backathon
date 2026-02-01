@@ -2,7 +2,6 @@ import os
 import pathlib
 import tempfile
 import unittest.mock
-from contextlib import ExitStack
 from unittest import TestCase
 
 import nacl.pwhash.argon2id
@@ -18,16 +17,13 @@ from backathon.storage.local import LocalStorageConfig
 
 class BackathonTest(TestCase):
     def setUp(self):
-        self.stack = ExitStack()
-        self.addCleanup(self.stack.close)
-
         # Set encryption params to something quicker for testing
-        self.stack.enter_context(
+        self.enterContext(
             unittest.mock.patch.object(
                 NaclEncrypter, "DEFAULT_OPSLIMIT", nacl.pwhash.argon2id.OPSLIMIT_MIN
             )
         )
-        self.stack.enter_context(
+        self.enterContext(
             unittest.mock.patch.object(
                 NaclEncrypter, "DEFAULT_MEMLIMIT", nacl.pwhash.argon2id.MEMLIMIT_MIN
             )
@@ -35,27 +31,27 @@ class BackathonTest(TestCase):
 
         # Directory to be backed up
         self.backupdir = pathlib.Path(
-            self.stack.enter_context(
+            self.enterContext(
                 tempfile.TemporaryDirectory(),
             )
         )
         # Directory to store the data files
         self.repodir = pathlib.Path(
-            self.stack.enter_context(
+            self.enterContext(
                 tempfile.TemporaryDirectory(),
             )
         )
 
         # Reserve a name in the filesystem that tests can use to create a sqlite
         # database. The context manager makes sure it's removed at the end of the test.
-        self.db_path = self.stack.enter_context(tempfile.NamedTemporaryFile()).name
+        self.db_path = self.enterContext(tempfile.NamedTemporaryFile()).name
 
         # For some reason, sqlite doesn't remove the shm and wal files when a test
         # finishes. So we remove them manually.
-        self.stack.callback(
+        self.addCleanup(
             lambda: pathlib.Path(self.db_path + "-shm").unlink(missing_ok=True)
         )
-        self.stack.callback(
+        self.addCleanup(
             lambda: pathlib.Path(self.db_path + "-wal").unlink(missing_ok=True)
         )
 
@@ -85,6 +81,7 @@ class BackathonTest(TestCase):
         # changing
         # The specific value here needs to be larger than any test files
         back.db.config.inline_threshold = 2**20
+        back.db.save_config()
         back.add_root(self.backupdir)
         return back
 
