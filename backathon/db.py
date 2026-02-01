@@ -12,9 +12,11 @@ from os import PathLike
 from typing import Any
 from typing import Generator
 from typing import Iterator
+from typing import Literal
 from typing import Type
 from typing import TypeVar
 from typing import cast
+from typing import overload
 
 from pydantic import BaseModel
 
@@ -113,6 +115,27 @@ class CursorWrapper:
 
 
 class Database:
+    @overload
+    def __init__(
+        self,
+        path: str | PathLike[str],
+        *,
+        signal_bus: SignalBus | None = None,
+        create: Literal[False] = False,
+    ):
+        ...
+
+    @overload
+    def __init__(
+        self,
+        path: str | PathLike[str],
+        *,
+        signal_bus: SignalBus | None = None,
+        create: Literal[True],
+        initial_settings: Settings,
+    ):
+        ...
+
     def __init__(
         self,
         path: str | PathLike[str],
