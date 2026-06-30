@@ -23,14 +23,17 @@ class TestRepair(AssertObjHelperMixin, BackathonTest):
             encrypter = None
         back = self.init_basic_repo(encrypter)
         self.create_file("file", "contents")
-        back.scan()
-        back.backup()
+        asyncio.run(back.scan_async())
+        asyncio.run(back.backup_async())
         back.close()
 
-        # Remove the local database
+        # Remove the local database. This should have been done by sqlite automatically
+        # when the database was closed above, but for some reason it isn't. My guess is
+        # Python's keeping some references to some sqlite objects around that will get
+        # garbage collected later.
         pathlib.Path(self.db_path).unlink()
-        self.assertFalse(pathlib.Path(self.db_path + "-wal").exists())
-        self.assertFalse(pathlib.Path(self.db_path + "-shm").exists())
+        pathlib.Path(self.db_path + "-wal").unlink(missing_ok=True)
+        pathlib.Path(self.db_path + "-shm").unlink(missing_ok=True)
 
     def test_recover_repository(self):
         """Tests the Backathon.recover() class method

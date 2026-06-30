@@ -44,7 +44,9 @@ class BackathonTest(TestCase):
 
         # Reserve a name in the filesystem that tests can use to create a sqlite
         # database. The context manager makes sure it's removed at the end of the test.
-        self.db_path = self.enterContext(tempfile.NamedTemporaryFile()).name
+        self.db_path = self.enterContext(
+            tempfile.NamedTemporaryFile(suffix=".sqlite")
+        ).name
 
         # For some reason, sqlite doesn't remove the shm and wal files when a test
         # finishes. So we remove them manually.
