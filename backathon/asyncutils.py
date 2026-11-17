@@ -194,19 +194,29 @@ def non_reentrant(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
 
 
 class Bus(Generic[_T]):
+    """Simple event bus"""
+
     def __init__(self):
         self.listeners: list[asyncio.Queue[_T]] = []
 
     def send(self, obj: _T):
+        """Put an event onto the bus"""
         for listener in self.listeners:
             listener.put_nowait(obj)
 
     async def listen(self) -> AsyncIterator[_T]:
+        """Returns an async iterator over events"""
         q: asyncio.Queue[_T] = asyncio.Queue()
+        self.listeners.append(q)
         try:
-            self.listeners.append(q)
             while True:
                 value = await q.get()
                 yield value
         finally:
             self.listeners.remove(q)
+
+    async def wait(self) -> _T:
+        """Waits for the next event and returns it"""
+        async for item in self.listen():
+            return item
+        raise AssertionError()

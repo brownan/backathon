@@ -13,7 +13,7 @@ dependencies = [
     "rich",
     "b2sdk",
     "pydantic",
-    "click~=8.1.0",
+    "click==8.3.3",
     "lz4",
 ]
 
@@ -25,12 +25,14 @@ target-version = ["py311"]
 line-length = 90
 
 [tool.ruff]
+
+[tool.ruff.lint]
 select = ["E", "F", "W", "B", "TID25", "I", "DTZ"]
 ignore = ["E501", "B007", "B024", "B027", "B904", "B905"]
 unfixable = ["F841"]
 
-[tool.ruff.flake8-tidy-imports]
+[tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 force-single-line = true

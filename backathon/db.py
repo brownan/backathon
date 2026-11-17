@@ -76,7 +76,22 @@ MIGRATIONS: list[list[str]] = [
         """CREATE TABLE garbage (
             objid BLOB PRIMARY KEY ON CONFLICT IGNORE
         )""",
-    ]
+    ],
+    [
+        """CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY,
+            job_type TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT,
+            kwargs TEXT,
+            status TEXT NOT NULL,
+            error_msg TEXT,
+            traceback TEXT,
+            progress TEXT
+        )""",
+        """CREATE INDEX jobs_start_time ON jobs(start_time)""",
+        """CREATE INDEX jobs_status ON jobs(status)""",
+    ],
 ]
 
 
@@ -112,6 +127,10 @@ class CursorWrapper:
 
     def __getattr__(self, item):
         return getattr(self.cursor, item)
+
+
+class ObjectDoesNotExist(Exception):
+    pass
 
 
 class Database:
@@ -267,6 +286,12 @@ class Database:
         with self.cursor(retdict=True) as cursor:
             cursor.execute(query, args)
             yield from map(model_cls.model_validate, batch_fetch_from_cursor(cursor))
+
+    def get(self, model_cls: Type[M], query: str, args: tuple[Any, ...] = ()) -> M:
+        try:
+            return next(self.query(model_cls, query, args))
+        except StopIteration:
+            raise ObjectDoesNotExist()
 
     def _config_get(self, key: str, default: Any = None) -> Any:
         cursor = self.conn.cursor()
